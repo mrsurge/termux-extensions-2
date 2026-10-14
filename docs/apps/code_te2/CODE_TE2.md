@@ -82,7 +82,8 @@ Rust/Axum framework process
   ├─ Owns Rust pipe services for filesystem, Git, search, settings/state, and shell orchestration
   ├─ Proxies app Socket.IO public path /api/app/code_te2/socket.io -> worker /socket.io/
   ├─ Proxies WBA Socket.IO public path /api/app/code_te2/services/wba/socket.io -> Node /wba_ws/socket.io
-  └─ Proxies TE2 console/FastMCP to the Python runtime sidecar
+  ├─ Owns native Streamable HTTP MCP at /te2_mcp_http (default native-mcp build)
+  └─ Proxies TE2 console and retained legacy MCP SSE to the Python runtime sidecar
 
 App worker process (app/apps/code_te2/main.py)
   ├─ HTTP routes: /api/app/code_te2/*
@@ -4804,7 +4805,18 @@ Built-in backend module identity comes from package path rather than public app 
   parser. Release construction rejects incomplete wheel payloads. Neither
   release path silently degrades to pure Python or Cargo.
 
-- TE2 pins `fastmcp==3.4.7`. FastMCP 4 selects MCP 2 and removes the
+- New framework builds serve all 24 MCP tools natively through rmcp 3.5.1 at
+  `/te2_mcp_http`; root and trailing slash share sessions. Native status reports
+  `framework_owned_native`, and build-info lists `native-mcp`. Existing native
+  services/worker pipes own actions; private capability-protected loopback APIs
+  reach the existing Python console relay, scaffold and log-analysis owners.
+  No generic FastMCP forwarding or second manager is used. Legacy `/te2_mcp`
+  remains Python-backed pending its separate release-time disable decision.
+  Matching worker/domain and framework/bridge activation is required; builds
+  do not change a running framework. See dependency_trim PLAN/TRACKER and
+  `framework/mcp_probe/README.md` for transport and acceptance gates.
+
+- TE2 still pins `fastmcp==3.4.7` for retained Python MCP paths. FastMCP 4 selects MCP 2 and removes the
   `mcp.server.fastmcp` API used by the current conversation-scoped
   `agent-pty-blocks` stdio server; do not relax the pin until that server has a
   tested MCP 2 migration.

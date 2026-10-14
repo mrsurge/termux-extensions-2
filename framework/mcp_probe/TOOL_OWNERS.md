@@ -3,9 +3,10 @@
 ## Current port status (source only)
 
 All 24 tools now have handler paths in native_mcp.rs (native-mcp plus the normal
-Ferrous feature), with exact captured discovery metadata. Public endpoints remain
-Python-backed: this is not activation or live acceptance. User explicitly rejected
-partial/hybrid MCP forwarding; the next mount must expose the complete catalog.
+Ferrous feature), with exact captured discovery metadata. New default framework
+builds serve the native endpoint; user-controlled activation now reports native
+mode in the live runtime. User explicitly rejected partial/hybrid MCP forwarding;
+the native mount exposes the complete catalog.
 
 Native app/debug/persisted-console services remain direct. Live console accesses
 the real Python relay over a private capability-protected loopback owner API, not
@@ -27,11 +28,14 @@ All 24 discovered names are captured in fixtures/python_tools.json. No productio
 tool is implemented by the synthetic probe. Keep schemas, defaults, result
 envelopes, error semantics and annotations stable during the actual port.
 
-First dormant framework adapter implemented in
-framework/rust/crates/te2-server/src/native_mcp.rs, behind non-default native-mcp.
+First framework adapter was implemented dormant in
+framework/rust/crates/te2-server/src/native_mcp.rs. native-mcp is now enabled by
+default, serving the complete `/te2_mcp_http` catalog in newly built frameworks.
+Existing running frameworks remain unchanged until approved activation. Legacy
+SSE is retained separately; status on the native endpoint reports framework_owned_native.
 It provides te2_apps_reload, te2_app_start and te2_app_open using the same AppState
-and lifecycle service entrypoints as HTTP/pipe callers; it is not mounted into
-any public router. Four fixture tests prove schema/metadata equality, validation,
+and lifecycle service entrypoints as HTTP/pipe callers. At the original dormant
+checkpoint it was not mounted publicly. Four fixture tests prove schema/metadata equality, validation,
 result envelope, exact owner invocation and no retry. Existing lifecycle tests
 and default-feature check pass. These are source tests, not real launch/client
 acceptance or full FastMCP error-content formatting parity.

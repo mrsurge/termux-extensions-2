@@ -1,5 +1,4 @@
-//! Dormant native framework tools. No public routes or console/worker state copies.
-#![allow(dead_code)] // Activated only after the later explicit route cutover.
+//! Native framework MCP tools using existing runtime owners, never copied state.
 use crate::{AppState, apps_lifecycle};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
@@ -14,6 +13,75 @@ use serde_json::{Value, json};
 use std::{future::Future, path::PathBuf, pin::Pin};
 
 type OwnerFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
+
+pub(crate) fn router(
+    state: AppState,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> axum::Router<AppState> {
+    let mut hosts = vec![
+        "localhost".to_owned(),
+        "127.0.0.1".to_owned(),
+        "::1".to_owned(),
+    ];
+    hosts.extend(
+        state
+            .config
+            .bind_hosts
+            .iter()
+            .filter(|ip| !ip.is_unspecified())
+            .map(ToString::to_string),
+    );
+    if state
+        .config
+        .host
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| !ip.is_unspecified())
+    {
+        hosts.push(state.config.host.clone());
+    }
+    let tools = NativeAppTools::new(FrameworkAppOwner(state)).expect("verified native MCP catalog");
+    http_router_with_hosts(tools, cancellation, hosts).with_state(())
+}
+
+#[cfg(test)]
+fn http_router<O: AppToolOwner>(
+    tools: NativeAppTools<O>,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> axum::Router {
+    http_router_with_hosts(
+        tools,
+        cancellation,
+        vec!["localhost".into(), "127.0.0.1".into(), "::1".into()],
+    )
+}
+
+fn http_router_with_hosts<O: AppToolOwner>(
+    tools: NativeAppTools<O>,
+    cancellation: tokio_util::sync::CancellationToken,
+    hosts: Vec<String>,
+) -> axum::Router {
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    };
+    let config = StreamableHttpServerConfig::default()
+        .with_allowed_hosts(hosts)
+        .with_json_response(true)
+        .with_max_request_body_bytes(crate::native_mcp_http_compat::MAX_REQUEST_BYTES)
+        .with_cancellation_token(cancellation);
+    let service = StreamableHttpService::new(
+        move || Ok(tools.clone()),
+        LocalSessionManager::default().into(),
+        config,
+    );
+    // Exact root and trailing slash share one session manager. No proxy fallback
+    // and no wildcard aliases to accidental private owner routes.
+    axum::Router::new()
+        .route_service("/te2_mcp_http", service.clone())
+        .route_service("/te2_mcp_http/", service)
+        .layer(axum::middleware::from_fn(
+            crate::native_mcp_http_compat::compatibility,
+        ))
+}
 
 pub(crate) trait AppToolOwner: Clone + Send + Sync + 'static {
     fn reload(&self) -> OwnerFuture<'_>;
@@ -493,10 +561,8 @@ impl<O: AppToolOwner> NativeAppTools<O> {
         }
         if name == "te2_mcp_status" {
             let _: Empty = serde_json::from_value(arguments).map_err(invalid)?;
-            // Retain the existing mode label until the public endpoint cutover
-            // chooses its truthful native serving label explicitly.
             return Ok(CallToolResult::structured(
-                json!({"server":"te2-mcp","console_log_path":self.console_path,"framework_shells_enabled":true,"mode":"framework_owned_sse"}),
+                json!({"server":"te2-mcp","console_log_path":self.console_path,"framework_shells_enabled":cfg!(feature = "ferrous-framework-native"),"mode":"framework_owned_native"}),
             ));
         }
         #[cfg(feature = "ferrous-framework-native")]
@@ -696,6 +762,11 @@ impl<O: AppToolOwner> NativeAppTools<O> {
 impl<O: AppToolOwner> ServerHandler for NativeAppTools<O> {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(rmcp::model::Implementation::new(
+                "te2-mcp",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions("TE2 framework-owned native Streamable HTTP MCP tools.".to_owned())
     }
     async fn list_tools(
         &self,
@@ -723,6 +794,22 @@ impl<O: AppToolOwner> ServerHandler for NativeAppTools<O> {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+    async fn rpc_response(response: reqwest::Response) -> Value {
+        let sse = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.starts_with("text/event-stream"));
+        let text = response.text().await.unwrap();
+        if !sse {
+            return serde_json::from_str(&text).unwrap();
+        }
+        text.lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
+            .find(|value| value.get("id").is_some())
+            .expect("JSON-RPC SSE response")
+    }
     #[derive(Clone, Default)]
     struct FakeOwner {
         calls: Arc<Mutex<Vec<(String, String)>>>,
@@ -937,7 +1024,7 @@ mod tests {
             .unwrap();
         assert_eq!(data["server"], "te2-mcp");
         assert_eq!(data["console_log_path"], json!(tools.console_path));
-        assert_eq!(data["mode"], "framework_owned_sse");
+        assert_eq!(data["mode"], "framework_owned_native");
         assert!(
             tools
                 .dispatch("te2_mcp_status", json!({"extra":true}))
@@ -1001,13 +1088,104 @@ mod tests {
             ("te2_sidebar_add_app_shortcut", json!({"app_id":"fixture"})),
         ];
         assert_eq!(tools.tools.len(), cases.len());
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let app = http_router(tools.clone(), cancellation.clone()).with_state(());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/te2_mcp_http", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .retry(reqwest::retry::never())
+            .build()
+            .unwrap();
+        let init = client.post(&url).header("accept", "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                "protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"isolated-test","version":"1"}}}))
+            .send().await.unwrap();
+        assert_eq!(init.status(), 200);
+        let session = init.headers()["mcp-session-id"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let initialized = rpc_response(init).await;
+        assert_eq!(initialized["result"]["serverInfo"]["name"], "te2-mcp");
+        let request = |method: reqwest::Method, endpoint: &str| {
+            client
+                .request(method, endpoint)
+                .header("accept", "application/json, text/event-stream")
+                .header("mcp-protocol-version", "2025-11-25")
+                .header("mcp-session-id", &session)
+        };
+        let notification = request(reqwest::Method::POST, &url)
+            .json(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(notification.status(), 202);
+        let catalog = request(reqwest::Method::POST, &format!("{url}/"))
+            .json(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}))
+            .send()
+            .await
+            .unwrap();
+        let catalog = rpc_response(catalog).await;
+        assert_eq!(
+            catalog["result"]["tools"],
+            serde_json::to_value(&tools.tools).unwrap()
+        );
         for (name, args) in cases {
             assert!(tools.get_tool(name).is_some());
-            let result = tools.dispatch(name, args).await.unwrap();
-            assert_ne!(result.is_error, Some(true), "{name}");
-            assert!(result.structured_content.is_some(), "{name}");
+            let response = request(reqwest::Method::POST, &url)
+                .json(&json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":name,"arguments":args}}))
+                .send().await.unwrap();
+            assert_eq!(response.status(), 200, "{name}");
+            let result = rpc_response(response).await;
+            assert!(result.get("error").is_none(), "{name}: {result}");
+            assert_ne!(result["result"]["isError"], true, "{name}: {result}");
+            assert!(
+                result["result"].get("structuredContent").is_some(),
+                "{name}: {result}"
+            );
         }
         assert_eq!(owner.calls.lock().unwrap().len(), 20);
+        let malformed = request(reqwest::Method::POST, &url)
+            .header("content-type", "application/json")
+            .body("{")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(malformed.status(), 400);
+        let malformed: Value = malformed.json().await.unwrap();
+        assert_eq!(malformed["error"]["code"], -32700);
+        let media = request(reqwest::Method::POST, &url)
+            .header("content-type", "text/plain")
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(media.status(), 415);
+        let rejected_host = request(reqwest::Method::POST, &url)
+            .header("host", "untrusted.invalid")
+            .json(&json!({"jsonrpc":"2.0","id":5,"method":"tools/list"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rejected_host.status(), 403);
+        let deleted = request(reqwest::Method::DELETE, &url).send().await.unwrap();
+        assert_eq!(deleted.status(), 200);
+        let stale = request(reqwest::Method::POST, &url)
+            .json(&json!({"jsonrpc":"2.0","id":4,"method":"tools/list"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), 404);
+        assert_eq!(
+            owner.calls.lock().unwrap().len(),
+            20,
+            "protocol errors never dispatch/retry owners"
+        );
+        cancellation.cancel();
+        server.abort(); // Own isolated listener only, never the shared framework.
+        let _ = server.await;
     }
 
     #[tokio::test]

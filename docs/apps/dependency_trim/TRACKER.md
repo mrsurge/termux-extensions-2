@@ -131,10 +131,29 @@ tracked; current Sidebar transport stays intact for 0.2.354.
       tests pass. ty passes all selected source; basedpyright reports zero errors/
       warnings on new owner/analysis/worker-hook modules. Default and no-default
       native-mcp Cargo checks pass; no-Ferrous build retains existing warnings.
-    - [ ] Activate matching Code TE2 mypyc/worker hook and framework/bridge pair
-      before any live Sidebar mutation acceptance. Source completion is not cutover.
-    - [ ] Mount the complete native endpoint, qualify transport/error results,
-      update truthful mode/build provenance, then approve shared-runtime transition.
+    - [x] User rebuilt/activated matching Code TE2 domain and restarted the worker
+      after the framework transition. Live native MCP status reports
+      framework_owned_native; the exact worker PID 1434355 maps the new
+      a73b462bbbb223f949b6__mypyc CPython 3.14 extension from domain-7d55d051...
+      and logs 140 compiled modules. Selector integrity/fingerprint is current.
+      Activation is confirmed, not live Sidebar mutation acceptance.
+    - [x] Mount complete native Streamable HTTP endpoint in default builds; exact
+      root/slash share sessions, no generic Python tool/proxy fallback. Status mode
+      and build provenance identify native MCP; explicit framework manifest feature
+      and catalog fingerprint input added. Legacy SSE remains unchanged.
+    - [x] All 24 fixture-owner tool calls now cross the real isolated HTTP mount,
+      with exact discovery metadata, initialized session, root/slash equivalence,
+      malformed JSON/media checks, notification 202, DELETE 200 and deleted-session
+      rejection. No live app mutations or shared-runtime transition.
+    - [ ] Verify remote Host admission and broader client compatibility. User
+      completed the framework/bridge and matching domain transition; native status
+      and live native FWS discovery work. No mutation tools were exercised.
+    - [x] Cutover validation: 221 Rust tests passed / 5 ignored, 59 targeted Python
+      tests passed, eight shared-adapter transport probe tests passed. Default
+      Cargo build/check and native-mcp-only check passed (same 17 no-Ferrous
+      warnings). Built debug binary --build-info reports ferrous-framework-native
+      and native-mcp; no listener/runtime launch was performed. fmt/diff checks
+      passed. Remaining free disk approximately 3.1 GiB; no cache pruning.
   - [ ] Exact live console relay access, proxy/client/Android acceptance.
   - [ ] Release-time legacy transport disable option (retain implementation;
     no disable now, no forced changes to saved external SSE configurations).

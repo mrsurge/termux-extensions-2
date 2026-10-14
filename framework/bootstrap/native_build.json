@@ -7,7 +7,7 @@
   "binary": "te2-server",
   "environmentKey": "TE2_SERVER_BIN",
   "pythonAbi": false,
-  "features": ["ferrous-framework-native"],
+  "features": ["ferrous-framework-native", "native-mcp"],
   "cache": {
     "root": "framework/build",
     "targetDirectory": "cargo-target",
@@ -17,6 +17,6 @@
   "fingerprint": {
     "policy": "framework-source-v2",
     "inputs": ["Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "crates/**/*.rs"],
-    "sharedInputs": ["../asset_gzip.rs"]
+    "sharedInputs": ["../asset_gzip.rs", "../mcp_probe/fixtures/python_tools.json"]
   }
 }

@@ -26,7 +26,7 @@ ingress bounds, and a real Python MCP SDK client. They use protocol 2025-11-25;
 this is not full conformance or Android/client acceptance.
 
 Raw rmcp returns 202 for session DELETE and 415 for malformed JSON. The isolated
-http_compat.rs wrapper maps successful DELETE to 200 and JSON syntax/EOF errors
+shared native_mcp_http_compat.rs wrapper maps successful DELETE to 200 and JSON syntax/EOF errors
 to HTTP 400 / JSON-RPC -32700, removing the installed Python SDK teardown warning.
 True media-type errors, valid-JSON envelope validation, failed DELETE, notification
 202 replies, streaming, and dispatcher errors are not broadly rewritten. Valid
@@ -52,17 +52,18 @@ the baseline server against live console storage. Existing Codex/Copilot ALS
 integration uses /te2_mcp_http; legacy /te2_mcp remains unchanged. Disabling the
 legacy option is deferred until release preparation after explicit approval.
 
-Next gates: port all tool semantics/results to their native owners, resolve exact
-console relay access without shadow state, schema parity, mount/proxy/headers,
-real Codex/Copilot acceptance, cancellation/no-retry behavior for mutations,
+Next gates: activate the completed owner ports/mount with matching worker and
+bridge runtime, then verify real Codex/Copilot acceptance, remote hostname access,
+cancellation/no-retry behavior for actual mutations,
 and separate legacy-disable/release decisions.
 See TOOL_OWNERS.md for the complete 24-tool owner map.
 
-## Dormant native framework-tool slices
+## Native framework-tool endpoint
 
-The optional native-mcp adapter now implements the complete 24-tool catalog with
-the normal Ferrous feature (12 applicable tools without it). Default features and
-public MCP routing remain unchanged. Native handlers invoke their real owners:
+The default native-mcp adapter implements the complete 24-tool catalog with
+the normal Ferrous feature (12 applicable tools without it). New framework builds
+mount `/te2_mcp_http` natively, with a shared session manager for root/slash URLs.
+Native handlers invoke their real owners:
 direct framework services, exact worker pipes and narrow private Python service/
 library APIs, never a generic FastMCP tool forwarder or separate FWS manager.
 Private APIs require a fresh paired-bootstrap capability and literal loopback;
@@ -71,8 +72,8 @@ the Rust owner client never redirects, uses environment proxies or retries.
 Persisted console uses read-only off-loop JSONL access; forward records gain the
 existing reverse 8 MiB ceiling. Sidebar changes require a fresh matching Code TE2
 domain/worker hook, not just a framework build. Console/log/scaffold owner APIs
-require the new framework/bridge pair. No public native endpoint or live mutation
-is enabled by these source changes. Verify from the repo root separately:
+require the new framework/bridge pair. Existing shared runtime is not automatically
+restarted. Legacy SSE/console remain Python-owned. Verify from the repo root separately:
 
 ```bash
 python -B framework/mcp_probe/test_console_reference.py
@@ -94,6 +95,9 @@ cargo test --locked --manifest-path framework/rust/Cargo.toml -p te2-server --fe
 cargo check --locked --manifest-path framework/rust/Cargo.toml -p te2-server -j 2
 ```
 
-No public native MCP endpoint or live launch is enabled by those tests. Preserve
-mutations' owner/cancellation/no-retry behavior at later integration. Native tests
-currently use fixture owners; real lifecycle and client acceptance is pending.
+Tests now exercise all 24 tools over the actual isolated HTTP router using fixture
+owners, not live services. The probe shares production HTTP compatibility logic.
+Native HTTP bodies are bounded to 8 MiB (probe service remains 64 KiB); configured
+bind IPs join rmcp's loopback Host allowlist. Status reports framework_owned_native;
+build-info includes native-mcp. Framework shutdown cancels sessions. Real lifecycle,
+remote hostname admission and client acceptance require approved runtime activation.

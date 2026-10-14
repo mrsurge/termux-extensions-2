@@ -207,7 +207,7 @@ formatting parity remains an activation gate. Nine tools are now dormant with th
 Ferrous pipe feature (six without it) at that checkpoint, leaving 15 tool ports.
 Live workers/eval still belong to the existing console relay.
 
-Remaining handler ports are now implemented: the dormant Rust adapter exposes the
+Checkpoint 27cae2e0 completed all remaining handler ports: the Rust adapter exposes the
 complete 24-tool catalog with native Ferrous (12 applicable tools without it).
 User rejected a partial/hybrid MCP cutover: finish every handler before public
 activation, never forward unported MCP calls to FastMCP. Tool handlers are Rust;
@@ -237,7 +237,30 @@ framework build and its newly paired bridge. None has been activated by these
 source tests. Next gate: full 24-tool Streamable HTTP mount/config/result/error
 checks, truthful status mode/build provenance, explicitly approved restart and
 read-only live acceptance before separately scoped mutation tests. Keep the legacy
-SSE decision separate; current public endpoints remain Python-backed.
+SSE decision separate. That checkpoint's public endpoints remained Python-backed.
+
+Approved native endpoint cutover now enables native-mcp by default and in the
+editable framework build manifest. `/te2_mcp_http` and its trailing-slash spelling
+share one rmcp session manager; no public proxy fallback or wildcard owner route
+is installed in native builds. Framework network exposure wraps the MCP router.
+rmcp's Host admission includes loopback and configured concrete bind addresses;
+remote hostname-based access requires an explicit compatibility verification
+before activation (do not disable Host protection as a silent repair).
+The native status mode is `framework_owned_native`, and build-info includes
+native-mcp. Request bodies are bounded to 8 MiB. The shared HTTP compatibility
+adapter retains DELETE 200 and malformed-JSON 400/-32700 without retrying dispatch;
+normal media errors, notification 202 and failed deletes remain rmcp-owned.
+Framework shutdown cancels MCP sessions before graceful HTTP shutdown. The probe
+uses the same compatibility adapter, retaining its smaller 64 KiB service limit.
+The catalog JSON is an explicit framework fingerprint input.
+
+Legacy `/te2_mcp` SSE and the Python console relay remain unchanged, so this is
+not yet FastMCP dependency removal. Build/source completion does not switch the
+current shared runtime automatically. User has now completed framework/bridge
+transition and matching Code TE2 domain activation; native status and the exact
+worker's loaded extension were verified. Next gate is broader catalog/read-only
+live tools and remote-client verification, then separately approved mutation
+acceptance. Detailed activation evidence belongs in TRACKER.md.
 
 ## Ordered implementation slices and validation gates
 

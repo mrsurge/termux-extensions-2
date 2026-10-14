@@ -14,7 +14,7 @@ use crate::{
 };
 
 pub(crate) fn router() -> Router<AppState> {
-    Router::new()
+    let router = Router::new()
         // The framework keeps the FWS dashboard and peer socket on its own public
         // surface, but the concrete runtime is Ferrous-hosted and proxied here.
         .route("/fws", any(proxy_fws_request))
@@ -28,7 +28,7 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/framework_shells", any(proxy_fws_request))
         .route("/api/framework_shells/", any(proxy_fws_request))
         .route("/api/framework_shells/{*rest}", any(proxy_fws_request))
-        // Runtime-owned console/MCP surfaces stay Python-sidecar-backed for now.
+        // Console and retained legacy SSE remain Python-sidecar-owned.
         .route("/te2_console_ws/socket.io", any(proxy_te2_console_request))
         .route("/te2_console_ws/socket.io/", any(proxy_te2_console_request))
         .route(
@@ -37,10 +37,13 @@ pub(crate) fn router() -> Router<AppState> {
         )
         .route("/te2_mcp", any(proxy_te2_mcp_request))
         .route("/te2_mcp/", any(proxy_te2_mcp_request))
-        .route("/te2_mcp/{*rest}", any(proxy_te2_mcp_request))
+        .route("/te2_mcp/{*rest}", any(proxy_te2_mcp_request));
+    #[cfg(not(feature = "native-mcp"))]
+    let router = router
         .route("/te2_mcp_http", any(proxy_te2_mcp_http_request))
         .route("/te2_mcp_http/", any(proxy_te2_mcp_http_request))
-        .route("/te2_mcp_http/{*rest}", any(proxy_te2_mcp_http_request))
+        .route("/te2_mcp_http/{*rest}", any(proxy_te2_mcp_http_request));
+    router
 }
 
 async fn proxy_fws_request(
@@ -155,6 +158,7 @@ async fn proxy_te2_mcp_request(
     .await
 }
 
+#[cfg(not(feature = "native-mcp"))]
 async fn proxy_te2_mcp_http_request(
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     State(state): State<AppState>,

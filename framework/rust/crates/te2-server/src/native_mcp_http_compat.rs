@@ -9,6 +9,8 @@ use axum::{
 };
 use std::error::Error;
 
+pub const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+
 pub async fn compatibility(request: Request, next: Next) -> Response {
     let delete = request.method() == Method::DELETE;
     let json_post = request.method() == Method::POST
@@ -21,7 +23,7 @@ pub async fn compatibility(request: Request, next: Next) -> Response {
     // only by rmcp; examine syntax only after its generic 415 rejection.
     let (request, captured) = if json_post {
         let (parts, body) = request.into_parts();
-        let bytes = match to_bytes(body, 64 * 1024).await {
+        let bytes = match to_bytes(body, MAX_REQUEST_BYTES).await {
             Ok(bytes) => bytes,
             Err(error) => {
                 let oversized = error

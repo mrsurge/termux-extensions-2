@@ -249,7 +249,7 @@ def test_framework_manifest_preserves_legacy_key_and_cached_binary(worker_setup,
     (framework / 'bootstrap').mkdir()
     (framework / 'bootstrap/native_build.json').write_text(config.read_text())
     spec = bootstrap._load_native_build(framework / 'bootstrap/native_build.json')
-    features = ['ferrous-framework-native']
+    features = list(spec.features)
     # Exact previous algorithm, independent of new manifest input enumeration.
     hasher = hashlib.sha256()
     hasher.update(b'te2-server-build-cache-v2\0')

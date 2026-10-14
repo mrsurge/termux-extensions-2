@@ -1,4 +1,5 @@
 //! Isolated synthetic MCP server; no TE2 services, credentials or state access.
+#[path = "../../rust/crates/te2-server/src/native_mcp_http_compat.rs"]
 mod http_compat;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
