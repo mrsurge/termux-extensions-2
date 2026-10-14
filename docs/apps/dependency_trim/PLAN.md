@@ -178,7 +178,66 @@ Production routes remain Python-backed. Fixture tests verify one dispatch, input
 validation before mutation, unchanged ok/data envelope, no retry and exact three
 discovery schemas including _meta. Schema capture now uses wire aliases. Existing
 lifecycle regressions/default build pass; real launches, cancellation of issued
-mutations, client acceptance and remaining 21 tools await later approval.
+mutations and client acceptance await later approval.
+
+Second native port slice: framework workers/status/eval now delegate directly to
+runtime_debug_http's shared credential gate and data dispatcher, then the existing
+runtime_debug_pipe owner. Explicit caller credentials remain mandatory; disabled
+debug mode fails closed, and exact app/shell/instance identity is passed unchanged.
+Status retains its 20-second default; eval accepts 1–30 seconds and at most 32 KiB
+UTF-8 code. No HTTP self-call, credential-file discovery, fallback target or retry
+is introduced. Debug results retain their existing envelope without app-action
+double wrapping. Six tools are available only in the dormant native-mcp adapter
+with ferrous-framework-native; without the pipe feature the original three app
+tools remain. That checkpoint left 18 tool ports; production MCP remained unchanged.
+
+Third native port slice: persisted console workers/tail/search now read the same
+cache-home console/te2_console_log.jsonl without importing or initializing the
+Python console runtime. Blocking filesystem work runs off the async executor.
+Workers remain historical/sorted, tail selects newest matching entries then
+returns chronological order, and search selects earliest matching entries.
+Defaults, optional exact filters, 1–1000 limit clamping, query echo and result
+envelopes are retained. Shared disposable golden fixtures run against both Python
+and Rust, including argument JSON spacing/order and duplicate last-value handling.
+Forward and reverse readers bound records to the existing 8 MiB reverse-reader
+ceiling; the additional forward ceiling skips manually oversized records instead
+of adopting Python's unbounded allocation. This is a deliberate safety difference,
+not a claim of arbitrary corrupt-input/Pydantic compatibility. Wider scalar/error
+formatting parity remains an activation gate. Nine tools are now dormant with the
+Ferrous pipe feature (six without it) at that checkpoint, leaving 15 tool ports.
+Live workers/eval still belong to the existing console relay.
+
+Remaining handler ports are now implemented: the dormant Rust adapter exposes the
+complete 24-tool catalog with native Ferrous (12 applicable tools without it).
+User rejected a partial/hybrid MCP cutover: finish every handler before public
+activation, never forward unported MCP calls to FastMCP. Tool handlers are Rust;
+underlying Python-owned services/libraries are intentionally not rewritten merely
+to rename that boundary. Live console uses its actual registered-worker relay;
+scaffolding calls app.extensions.apps.scaffold; FWS uses the existing native
+manager for record/input authority and neutral log helpers for compatible parsing,
+regex, signatures and stdin metadata. No second manager, shadow live registry or
+generic Python/MCP dispatcher is introduced.
+
+Private owner operations live on the existing loopback runtime bridge, behind a
+fresh bootstrap-owned TE2_RUNTIME_OWNER_KEY shared with its framework pair.
+The Rust client requires literal loopback HTTP, blocks redirects/proxies/retries,
+allowlists operation paths and bounds responses. These /internal/* operations are
+not public framework proxy routes. Neutral fws_log_analysis/fws_log_models use
+portable DTOs without FastMCP/Pydantic; the old MCP module is a compatibility
+import until retirement. Existing FWS helper dependencies still require the
+planned upstream FWS adoption, not an implied dependency removal here.
+
+Sidebar shortcut updates use app.mcp.sidebarShortcut.add on the exact current
+Code TE2 production pipe, not runtime-debug or bridge-local preferences. The Rust
+registry supplies the shortcut; the worker applies existing preference validation
+and PreferencesChanged publication. Legacy activate remains accepted without
+adding an implicit app start. Activation requires a fresh matching Code TE2
+mypyc set (or the explicitly selected interpreted development domain), the new
+framework build and its newly paired bridge. None has been activated by these
+source tests. Next gate: full 24-tool Streamable HTTP mount/config/result/error
+checks, truthful status mode/build provenance, explicitly approved restart and
+read-only live acceptance before separately scoped mutation tests. Keep the legacy
+SSE decision separate; current public endpoints remain Python-backed.
 
 ## Ordered implementation slices and validation gates
 

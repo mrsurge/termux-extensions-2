@@ -14,6 +14,11 @@ from starlette.routing import Route
 from app.te2_runtime_mounts import mount_te2_runtime_services, te2_runtime_lifespan
 from app.memory_profile import install_python_memory_profiler
 from app.libs.asyncio_runtime import run
+from app.libs.native_console_owner import console_owner_routes
+from app.te2_console_runtime import list_console_workers, request_console_eval
+from app.libs.native_scaffold_owner import scaffold_owner_routes
+from app.libs.native_fws_log_owner import fws_log_owner_routes
+from app.extensions.apps.scaffold import list_templates, validate_proxy_shell_wrapper, scaffold_proxy_shell_wrapper
 
 
 async def health(_request: Request) -> JSONResponse:
@@ -25,8 +30,16 @@ async def health(_request: Request) -> JSONResponse:
 
 
 def build_app() -> Starlette:
+    async def evaluate(worker: str, code: str, timeout: float) -> dict[str, object]:
+        return await request_console_eval(worker, code, timeout_seconds=timeout)
+
     app = Starlette(lifespan=te2_runtime_lifespan,
-                    routes=[Route("/api/health", health, methods=["GET"])])
+                    routes=[Route("/api/health", health, methods=["GET"]),
+                            *console_owner_routes(os.environ.get("TE2_RUNTIME_OWNER_KEY", ""),
+                                                  list_console_workers, evaluate),
+                            *scaffold_owner_routes(os.environ.get("TE2_RUNTIME_OWNER_KEY", ""),
+                                                   list_templates, validate_proxy_shell_wrapper, scaffold_proxy_shell_wrapper),
+                            *fws_log_owner_routes(os.environ.get("TE2_RUNTIME_OWNER_KEY", ""))])
     mount_te2_runtime_services(app)
     return app
 

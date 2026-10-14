@@ -9,7 +9,7 @@ rust-version.workspace = true
 default = ["ferrous-framework-native"]
 ferrous-framework-native = ["dep:ferrous_framework"]
 release-vendored-tls = ["git2/vendored-openssl"]
-native-mcp = ["dep:rmcp"]
+native-mcp = ["dep:rmcp", "serde_json/raw_value"]
 
 [dependencies]
 anyhow.workspace = true

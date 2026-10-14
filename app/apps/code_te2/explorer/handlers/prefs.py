@@ -134,6 +134,11 @@ def _normalize_string_pref(key: str, value: object) -> str:
     return normalized
 
 
+def normalize_agent_shortcuts(value: object) -> list[JsonObject]:
+    """Shared worker policy for Explorer and framework-owned administrative intents."""
+    return _normalize_agent_shortcuts(value)
+
+
 def _normalize_agent_shortcuts(value: object) -> list[JsonObject]:
     if not isinstance(value, list):
         raise RuntimeError("prefs:updateUi requires 'value' (array)")

@@ -58,19 +58,36 @@ real Codex/Copilot acceptance, cancellation/no-retry behavior for mutations,
 and separate legacy-disable/release decisions.
 See TOOL_OWNERS.md for the complete 24-tool owner map.
 
-## Dormant native app-tool slice
+## Dormant native framework-tool slices
 
-The framework now has optional native-mcp source for three real lifecycle tools;
-default features and public MCP routing remain unchanged. It shares start/reload/
-open services with HTTP/pipe callers, never a framework HTTP self-call. Validate
-from the repo root as separate commands:
+The optional native-mcp adapter now implements the complete 24-tool catalog with
+the normal Ferrous feature (12 applicable tools without it). Default features and
+public MCP routing remain unchanged. Native handlers invoke their real owners:
+direct framework services, exact worker pipes and narrow private Python service/
+library APIs, never a generic FastMCP tool forwarder or separate FWS manager.
+Private APIs require a fresh paired-bootstrap capability and literal loopback;
+the Rust owner client never redirects, uses environment proxies or retries.
+
+Persisted console uses read-only off-loop JSONL access; forward records gain the
+existing reverse 8 MiB ceiling. Sidebar changes require a fresh matching Code TE2
+domain/worker hook, not just a framework build. Console/log/scaffold owner APIs
+require the new framework/bridge pair. No public native endpoint or live mutation
+is enabled by these source changes. Verify from the repo root separately:
 
 ```bash
-cargo test --locked --manifest-path framework/rust/Cargo.toml -p te2-server --features native-mcp native_mcp::tests -j 2
+python -B framework/mcp_probe/test_console_reference.py
+```
+
+```bash
+cargo test --locked --manifest-path framework/rust/Cargo.toml -p te2-server --features native-mcp native_mcp -j 2
 ```
 
 ```bash
 cargo test --locked --manifest-path framework/rust/Cargo.toml -p te2-server --features native-mcp apps_lifecycle::tests -j 2
+```
+
+```bash
+cargo test --locked --manifest-path framework/rust/Cargo.toml -p te2-server --features native-mcp runtime_debug -j 2
 ```
 
 ```bash

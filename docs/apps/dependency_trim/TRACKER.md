@@ -89,7 +89,52 @@ tracked; current Sidebar transport stays intact for 0.2.354.
     - [x] Four native owner/validation/no-retry/schema+metadata tests; three existing
       lifecycle regressions and default-feature Cargo check pass.
     - [x] Correct schema capture to wire aliases (_meta); ignore probe target cache.
+    - [x] Dormant framework workers/status/eval port: direct shared debug admission
+      and pipe dispatch, explicit credentials, unchanged exact target identity,
+      bounded eval code/timeout, no retry or double result wrapping.
+    - [x] Six native adapter tests and ten runtime-debug/launcher regressions pass,
+      including shared auth/dispatch bounds and existing pipe timeout/cancel guards.
+      Default-feature Cargo check passes. No live evaluations or runtime transition.
+    - [x] Three existing lifecycle regressions and native-mcp-only (no default
+      Ferrous feature) Cargo check pass. The latter retains 17 warnings in existing
+      launcher/app-intent code; no source edits there in this slice.
+    - [x] Re-ran all eight isolated HTTP probe tests after this slice; pass.
+    - [x] Dormant persisted console workers/tail/search port with off-loop file
+      reads, historical discovery, exact filters/defaults/limits and retained
+      tail/search ordering. No live relay import, transcript reset or activation.
+    - [x] Twelve native adapter/projection tests pass; shared eight-case golden
+      fixture verified against retained Python ConsoleStore in a disposable file.
+      Includes malformed/oversized records, UTF-8/chunk boundaries, JSON argument
+      spacing/order, missing files, read errors and ingress/schema validation.
+    - [x] Existing ten runtime-debug and three lifecycle regressions still pass;
+      default and native-mcp-only Cargo checks pass (same 17 no-Ferrous warnings).
+    - [ ] Wider arbitrary scalar/Pydantic/error formatting parity before activation;
+      forward reads intentionally gain the existing 8 MiB reverse-record ceiling.
+    - [x] Correct Python reference-probe isolation: importing any app.te2_mcp child
+      runs __init__ → server → te2_console_client → te2_console_runtime. Initial
+      validation imports were not isolated and could clear the current transcript;
+      no service restart occurred. Probe now sets disposable cache/config/data/runtime
+      roots before that import; future reference runs must be separate processes.
     - [ ] Real native lifecycle/client acceptance and full tool/error formatting parity.
+    - [x] Remaining 15 Rust handlers implemented: WBA/status, live console,
+      native-manager FWS records/input plus compatible log projection, scaffolding,
+      and actual-worker Sidebar preference mutation. Complete 24-tool discovery
+      metadata and fixture-owner dispatch paths covered; no generic MCP forwarding.
+    - [x] Private typed owner APIs: fresh bootstrap capability, literal loopback
+      client, operation allowlist, ingress/response bounds, no proxies/redirects/
+      retries. No public mount or runtime transition in this slice.
+    - [x] Neutral FWS analysis/models no longer import FastMCP/Pydantic; old module
+      is a compatibility import. Strict checks pass for the new owner modules;
+      existing prefs.py retains three unrelated basedpyright warnings.
+    - [x] Full te2-server suite: 221 passed / 5 ignored; 59 targeted Python owner,
+      bridge, pipe, MessagePack and bootstrap tests pass. Eight isolated HTTP probe
+      tests pass. ty passes all selected source; basedpyright reports zero errors/
+      warnings on new owner/analysis/worker-hook modules. Default and no-default
+      native-mcp Cargo checks pass; no-Ferrous build retains existing warnings.
+    - [ ] Activate matching Code TE2 mypyc/worker hook and framework/bridge pair
+      before any live Sidebar mutation acceptance. Source completion is not cutover.
+    - [ ] Mount the complete native endpoint, qualify transport/error results,
+      update truthful mode/build provenance, then approve shared-runtime transition.
   - [ ] Exact live console relay access, proxy/client/Android acceptance.
   - [ ] Release-time legacy transport disable option (retain implementation;
     no disable now, no forced changes to saved external SSE configurations).

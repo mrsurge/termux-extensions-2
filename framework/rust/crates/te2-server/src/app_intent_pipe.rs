@@ -29,6 +29,44 @@ pub(crate) struct Route {
 }
 
 impl Route {
+    #[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
+    async fn admin_shortcut(
+        self: &Arc<Self>,
+        params: Value,
+        wait: Duration,
+    ) -> anyhow::Result<Value> {
+        let _permit = self
+            .admission
+            .try_acquire()
+            .map_err(|_| anyhow::anyhow!("appIntent.busy"))?;
+        let id = crate::new_instance_id()?;
+        let (sender, receiver) = oneshot::channel();
+        {
+            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            anyhow::ensure!(!*self.closed.borrow(), "appIntent.disconnected");
+            anyhow::ensure!(pending.len() < MAX_PENDING, "appIntent.busy");
+            pending.insert(id.clone(), sender);
+        }
+        let _guard = PendingGuard {
+            route: self.clone(),
+            id: id.clone(),
+        };
+        let request: PipeEnvelope = serde_json::from_value(
+            json!({"jsonrpc":"2.0","protocolVersion":1,"kind":"request",
+            "id":id,"correlationId":id,"opId":id,"method":"app.mcp.sidebarShortcut.add","originNid":1,"originName":"framework.rust","params":params}),
+        )?;
+        self.sink.send(request)?;
+        let reply = tokio::time::timeout(wait, receiver)
+            .await
+            .map_err(|_| anyhow::anyhow!("appIntent.timeout: execution outcome may be unknown"))?
+            .map_err(|_| {
+                anyhow::anyhow!("appIntent.disconnected: execution outcome may be unknown")
+            })?;
+        if let Some(error) = reply.error {
+            anyhow::bail!("{}: {}", error.code, error.message);
+        }
+        Ok(reply.result.unwrap_or(Value::Null))
+    }
     pub(crate) fn close(&self) {
         self.closed.send_replace(true);
         self.pending
@@ -224,6 +262,21 @@ fn validate_current(route: &Route, shell: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
+pub(crate) async fn add_mcp_shortcut(
+    state: &crate::AppState,
+    params: Value,
+) -> anyhow::Result<Value> {
+    anyhow::ensure!(
+        serde_json::to_vec(&params)?.len() <= MAX_PARAMS,
+        "appIntent.payloadTooLarge"
+    );
+    let target = resolve(state.instance_id(), "code_te2")?;
+    let current = state.running_app_for_id("code_te2");
+    validate_current(&target, current.as_ref().map(|app| app.shell_id.as_str()))?;
+    target.admin_shortcut(params, WAIT).await
+}
+
 /// None means an existing framework service owns this method.
 pub(crate) async fn dispatch(
     state: &crate::AppState,
@@ -327,6 +380,40 @@ mod tests {
             context: json!({"clientInstanceId":"client"}),
             payload: json!({"path":"/project/file"}),
         }
+    }
+
+    #[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
+    #[tokio::test]
+    async fn administrative_shortcut_uses_exact_pipe_correlation_and_no_retry() {
+        let (target, mut rx) = fixture("code_te2");
+        assert!(validate_current(&target, Some("stale-shell")).is_err());
+        let t = target.clone();
+        let task = tokio::spawn(async move {
+            t.admin_shortcut(json!({"shortcut":{"app_id":"fixture"}}), WAIT)
+                .await
+        });
+        let request = rx.recv().await.unwrap();
+        assert_eq!(
+            request.method.as_deref(),
+            Some("app.mcp.sidebarShortcut.add")
+        );
+        assert_eq!(request.origin_name, "framework.rust");
+        assert_eq!(request.origin_nid, 1);
+        assert_eq!(request.id, request.correlation_id);
+        assert_eq!(request.id, request.op_id);
+        let reply = PipeEnvelope::success_response(
+            &request,
+            &PipeIdentity {
+                nid: 9,
+                name: "app:code_te2".into(),
+            },
+            json!({"ok":true}),
+        );
+        assert!(target.accept(reply));
+        assert_eq!(task.await.unwrap().unwrap(), json!({"ok":true}));
+        assert!(rx.try_recv().is_err());
+        target.close();
+        assert!(target.admin_shortcut(json!({}), WAIT).await.is_err());
     }
     #[tokio::test]
     async fn owned_identity_and_correlated_reply() {

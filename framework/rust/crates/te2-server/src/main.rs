@@ -10,6 +10,16 @@ mod frontend_assets;
 mod launcher;
 #[cfg(feature = "native-mcp")]
 mod native_mcp;
+#[cfg(feature = "native-mcp")]
+mod native_mcp_console;
+#[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
+mod native_mcp_fws;
+#[cfg(feature = "native-mcp")]
+mod native_mcp_live_console;
+#[cfg(feature = "native-mcp")]
+mod native_mcp_scaffold;
+#[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
+mod native_mcp_sidebar;
 mod network_exposure;
 mod proxy_shell;
 mod proxy_transport;

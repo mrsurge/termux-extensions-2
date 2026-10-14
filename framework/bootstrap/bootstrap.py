@@ -353,6 +353,9 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env["TE2_RUNTIME_BRIDGE_HOST"] = runtime_bridge_host
     env["TE2_RUNTIME_BRIDGE_PORT"] = runtime_bridge_port
     env["TE2_RUNTIME_BRIDGE_URL"] = f"http://{runtime_bridge_host}:{runtime_bridge_port}"
+    # Private native-console owner capability, fresh for this framework/sidecar
+    # pair. Never reuse a caller-provided key or expose it in public MCP input.
+    env["TE2_RUNTIME_OWNER_KEY"] = secrets.token_hex(32)
     env["FRAMEWORK_SHELLS_FWS_SOCKETIO_URL"] = env["TE_FRAMEWORK_URL"]
     pythonpath_parts = [part for part in env.get("PYTHONPATH", "").split(os.pathsep) if part]
     prepend_paths = [str(project_root)]
