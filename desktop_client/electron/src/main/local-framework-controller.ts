@@ -43,6 +43,9 @@ type LocalFrameworkControllerOptions = {
 };
 
 type MutableState = {
+  startupStage?: LocalFrameworkState["startupStage"];
+  startupUnit?: string;
+  startupOutput?: string;
   phase: LocalFrameworkPhase;
   ownership: LocalFrameworkOwnership;
   processId: number | null;
@@ -207,6 +210,8 @@ export class LocalFrameworkController {
     return {
       supported: true,
       ...this.#state,
+      cancellableStartup: Boolean(this.#options.waitIndefinitelyForStartup &&
+        this.#state.phase === "starting" && this.#child && childIsRunning(this.#child)),
       localOrigin: origin,
       selected: this.#options.getSelectedOrigin() === origin,
       command: config.resolvedCommand,
@@ -344,13 +349,10 @@ export class LocalFrameworkController {
     this.#state.processId = child.pid || null;
     this.#publish();
     this.#forwardLogs(child);
-    if (this.#options.waitIndefinitelyForStartup) {
-      // A bootstrap failure can close stdin before the child close event.
-      // Cleanup must not turn that ordinary exit into a host-process EPIPE crash.
-      child.stdin?.on("error", (error) => {
-        this.#options.log("stderr", `Local TE2 control input closed: ${error.message}\n`);
-      });
-    }
+    // Bootstrap failure/cancellation can close stdin before the child close event.
+    child.stdin?.on("error", (error) => {
+      this.#options.log("stderr", `Local TE2 control input closed: ${error.message}\n`);
+    });
     const hello = this.#readControlHello(child);
     this.#exitPromise = new Promise((resolve) => {
       child.once("close", (code, signal) => {
@@ -490,7 +492,8 @@ export class LocalFrameworkController {
         if (error) reject(error);
         else resolve();
       };
-      const onClose = () => finish(new Error("Local TE2 exited before control hello"));
+      const onClose = (code: number | null, signal: NodeJS.Signals | null) =>
+        finish(new Error(`Local TE2 exited before control hello (${code ?? signal ?? "unknown"})`));
       const onData = (chunk: string) => {
         buffer += chunk;
         if (Buffer.byteLength(buffer) > CONTROL_MAX_BUFFER_BYTES) {
@@ -503,6 +506,18 @@ export class LocalFrameworkController {
           buffer = buffer.slice(newline + 1);
           try {
             const frame = JSON.parse(line) as Record<string, unknown>;
+            if (this.#child !== child || this.#state.phase !== "starting") {
+              finish(new Error("Local TE2 startup cancelled"));
+              return;
+            }
+            if (frame.version === CONTROL_PROTOCOL_VERSION && frame.type === "event" &&
+                frame.event === "startup" && ["preparing", "building", "build-finished", "starting"].includes(String(frame.phase))) {
+              this.#setState({
+                startupStage: frame.phase as LocalFrameworkState["startupStage"],
+                startupUnit: typeof frame.unit === "string" ? frame.unit.slice(0, 256) : "",
+                ...(typeof frame.output === "string" ? {startupOutput: frame.output.slice(-2048)} : {}),
+              });
+            }
             if (
               frame.version === CONTROL_PROTOCOL_VERSION &&
               frame.type === "hello" &&
@@ -527,12 +542,18 @@ export class LocalFrameworkController {
   }
 
   #forwardLogs(child: ChildProcess): void {
-    child.stdout?.on("data", (chunk: Buffer | string) => {
-      this.#options.log("stdout", String(chunk));
-    });
-    child.stderr?.on("data", (chunk: Buffer | string) => {
-      this.#options.log("stderr", String(chunk));
-    });
+    for (const [stream, source] of [["stdout", child.stdout], ["stderr", child.stderr]] as const) {
+      let partial = "";
+      source?.on("data", (chunk: Buffer | string) => {
+        const text = String(chunk);
+        this.#options.log(stream, text);
+        if (this.#child !== child || this.#state.phase !== "starting") return;
+        const lines = (partial + text).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split(/[\r\n]+/);
+        partial = (lines[lines.length - 1] || "").slice(-2048);
+        const latest = [...lines].reverse().find(line => line.trim());
+        if (latest) this.#setState({startupOutput: latest.slice(-2048)});
+      });
+    }
   }
 
   async #withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
@@ -551,6 +572,11 @@ export class LocalFrameworkController {
 
   #setState(update: Partial<MutableState>): void {
     this.#state = { ...this.#state, ...update };
+    if (this.#state.phase !== "starting") {
+      delete this.#state.startupStage;
+      delete this.#state.startupUnit;
+      delete this.#state.startupOutput;
+    }
     this.#publish();
   }
 

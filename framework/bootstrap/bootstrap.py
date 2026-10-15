@@ -28,6 +28,7 @@ from typing import Any, TextIO, cast
 from app.node_toolchain import merge_login_shell_path
 from app.release_runtime import ReleaseRuntimeError, packaged_server_path
 from app.te2_paths import ensure_runtime_home, resolve_te2_paths
+from app.cli import framework_startup_progress as startup_progress
 
 APP_ID = "te2"
 DEFAULT_HOST = "127.0.0.1"
@@ -169,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _prepare_native_workers(args, env, build=False)
         print(" ".join(_memory_profile_server_command(args, command.argv)))
         return 0
-    with _framework_migration_guard(env):
+    with startup_progress.reporting(_open_stdio_control(args.stdio_control)), _framework_migration_guard(env):
         command = _server_command(args, env, build=True)
         if args.build_only:
             if not command.build_already_done:
@@ -180,6 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         _prepare_native_workers(args, env, build=True)
         child_command = _memory_profile_server_command(args, command.argv)
+        startup_progress.emit("starting")
         return _run_child(child_command, env, stdio_control=args.stdio_control)
 
 
@@ -655,6 +657,7 @@ def _prepare_native_build(
 
     if not build:
         return selected, usable()
+    startup_progress.emit("preparing", unit=spec.app_id)
     with _exclusive_build_cache_lock(root):
         if not usable():
             command = ['cargo', 'build', '--manifest-path', str(spec.manifest)]
@@ -669,9 +672,9 @@ def _prepare_native_build(
             if spec.python_abi:
                 build_env['PYO3_PYTHON'] = sys.executable
             print(f'[te2] Building native {spec.app_id}: {selected}', flush=True)
-            result = subprocess.run(command, env=build_env, check=False)
-            if result.returncode:
-                raise SystemExit(result.returncode)
+            return_code = startup_progress.run_build(command, build_env, unit=spec.app_id)
+            if return_code:
+                raise SystemExit(return_code)
             source = target / profile / name
             if not _cached_binary_is_usable(source):
                 raise SystemExit(f'Native Cargo build produced no usable executable: {source}')

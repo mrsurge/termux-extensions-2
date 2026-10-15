@@ -281,8 +281,15 @@ helpers rather than removed MCP clients. Disposable bridge tests reject every
 FastMCP/Python MCP import and prove console polling, lifecycle and owner admission.
 
 No installed packages are uninstalled, accepted wheels/old release lock rewritten,
-or shared framework restarted. ALS's own FastMCP/SDK metadata and FWS/FastAPI
-dependency adoption remain separate source/release work; regenerate target
+or shared framework restarted. ALS's direct FastMCP/Pydantic metadata is now
+removed after native MCP/bootstrap live acceptance; the SDK is test-only.
+Copilot's extension tree was copied/verified outside ALS and retired by user
+request, leaving Codex as the builtin provider. FWS 0.2.65 is now published and
+pinned in TE2/ALS source, with Linux ABI3/free-threaded and Android ABI3 wheels
+plus a platform-neutral sdist. Fresh ALS requirements resolve without the
+retired dependency stack. TE2 still pins ALS 0.2.132, which requires FWS 0.0.64;
+release the cleaned-up ALS native wheels and update TE2's ALS pin before a fresh
+TE2 installation can resolve. Do not ship that intermediate conflict. Regenerate target
 requirements.lock and wheelhouse after those changes. Removing TE2's line alone
 does not establish a Pydantic/cryptography-free clean dependency closure.
 

@@ -190,9 +190,30 @@ tracked; current Sidebar transport stays intact for 0.2.354.
     benchmark or proof unwanted packages are absent from installed metadata.
 - [x] Safe ALS cleanup slice: unused HTTP shim and separately approved codex-agent
   legacy launcher removed; FastAPI metadata removed. Native adapter import blockers
-  prove no FastAPI/FastMCP/SDK/Pydantic/crypto import. Real stdio SDK usage remains
-  (38 tools/one KB resource); its SDK explicitly requires Pydantic/crypto.
-- [ ] ALS narrow stdio DTO transport replacement and MCP dependency removal.
+  prove no FastAPI/FastMCP/SDK/Pydantic/crypto import. Subsequent native MCP
+  migration replaces the old stdio SDK path (38 tools/one KB resource).
+- [x] ALS narrow stdio DTO transport replacement and direct MCP dependency removal.
+  - [x] Native rmcp/PyO3 MCP and ALS-bootstrap preparation accepted live by user.
+  - [x] User retired Copilot rather than maintaining its vendored SDK: complete
+    extension copied and verified at ~/knowhere/als-copilot-sdk, with old registry/
+    packaging/test references. Builtin registry now contains Codex only; no user
+    settings/conversations were deleted and no active process was restarted.
+  - [x] Direct FastMCP/Pydantic runtime requirements removed; SDK reference stays
+    test-only via .[test]. ALS suite passes 125 tests/114 subtests; changed tests
+    pass basedpyright without warnings. Generated metadata/source inventory and
+    a no-install fresh resolver were checked.
+  - [x] Publish FWS 0.2.65 at source tag 5cc8af3: Linux ABI3/cp314t wheels retain
+    manylinux_2_28 using unchanged native payloads hash-verified against old PyPI
+    wheels; Android ABI3 rebuilt and native-smoked on Pixel. Platform-neutral
+    sdist and all four published SHA-256 values verified. FWS source tracker:
+    worktrees/framework-shells/docs/RELEASE_0_2_65.md. No shared runtime changed.
+  - [x] Update TE2/ALS FWS pins and release-builder default to 0.2.65. Fresh ALS
+    requirements resolution excludes FastAPI/FastMCP/mcp/Pydantic/pydantic-core/
+    cryptography. ALS: 125 tests/114 subtests; TE2 packaging: 35 tests/4 subtests.
+  - [ ] TE2 clean closure remains blocked by published ALS 0.2.132's exact
+    FWS 0.0.64 requirement. Release cleaned ALS native wheels and update TE2's
+    ALS pin before shipping this intermediate source state; preserve accepted
+    old release locks/artifacts. No install, purge or active-runtime upgrade.
 - [ ] Coordinated ALS/FWS optional uvloop and target dependency follow-up
   (after the three implementation slices above).
   - [x] Record ALS Python FWS adapter stdio/embedded loop call sites and coordinated

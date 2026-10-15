@@ -16,7 +16,11 @@ function statusText(state, ownerLabel = "Electron") {
       ? `Using external TE2 at ${state.localOrigin}`
       : `External TE2 detected at ${state.localOrigin}`;
   }
-  if (state.phase === "starting") return `Starting TE2 at ${state.localOrigin}`;
+  if (state.phase === "starting") {
+    if (state.startupStage === "building") return `Building ${state.startupUnit || "TE2"}`;
+    if (state.startupStage === "preparing") return "Preparing local TE2";
+    return `Starting TE2 at ${state.localOrigin}`;
+  }
   if (state.phase === "stopping") return `Stopping the ${ownerLabel}-owned TE2 framework`;
   if (state.phase === "probing") return `Checking ${state.localOrigin}`;
   if (state.phase === "failed") return state.error || "Local framework action failed";
@@ -206,9 +210,11 @@ export const localFrameworkExtension = {
           cancelButton.type = "button";
           cancelButton.className = "secondary-button";
           cancelButton.textContent = "Cancel";
-          cancelButton.disabled = actionPending;
+          // Start may still be awaiting readiness. Cancel must bypass its guard.
+          cancelButton.disabled = false;
           cancelButton.addEventListener("click", () => {
-            void runAction(() => host.stopLocalFramework());
+            cancelButton.disabled = true;
+            void host.stopLocalFramework().catch(error => host.toast(error?.message || String(error)));
           });
           actions.appendChild(cancelButton);
         }

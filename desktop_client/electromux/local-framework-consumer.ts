@@ -96,7 +96,7 @@ function schedule(operation: () => Promise<unknown>) {
 function state() {
   return {...controller.snapshot(), operationPending: pending !== null,
     cancellableStartup: controller.snapshot().phase === 'starting' && controller.ownsRunningProcess(),
-    startupOutput, operationError, selectedOrigin, selectionRevision,
+    startupOutput: controller.snapshot().startupOutput || startupOutput, operationError, selectedOrigin, selectionRevision,
     stateSessionId, stateRevision: ++stateRevision,
     installation: installer.snapshot(), canInstall: canInstall()};
 }

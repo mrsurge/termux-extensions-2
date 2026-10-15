@@ -46,7 +46,7 @@ test('installer card requires a second explicit confirmation and exposes progres
   }
 });
 
-test('mobile pending launch shows progress and allows Cancel while Start is busy', async () => {
+test('pending desktop Start still allows progress Cancel', async () => {
   const source = await readFile(new URL('../desktop_client/android_shell/extensions/local-framework.js', import.meta.url), 'utf8');
   const {localFrameworkExtension} = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const previous = {document: globalThis.document, window: globalThis.window, CustomEvent: globalThis.CustomEvent};
@@ -59,7 +59,7 @@ test('mobile pending launch shows progress and allows Cancel while Start is busy
     addEventListener(name, listener) { this.listeners[name] = listener; }
   }
   const descendants = element => [element, ...element.children.flatMap(descendants)];
-  let listener, stops = 0;
+  let listener, stops = 0, finishStart;
   const pending = {supported: true, phase: 'starting', ownership: 'electron',
     commandDetected: true, command: '/bin/te2', localOrigin: 'http://127.0.0.1:8089',
     operationPending: true, cancellableStartup: true, startupOutput: 'Compiling source'};
@@ -69,12 +69,15 @@ test('mobile pending launch shows progress and allows Cancel while Start is busy
   try {
     const root = new Element();
     const mounted = localFrameworkExtension.mount(root, {
-      getLocalFrameworkState: async () => pending,
+      getLocalFrameworkState: async () => ({...pending, phase: 'exited', operationPending: false, cancellableStartup: false}),
       onLocalFrameworkState: callback => { listener = callback; return () => {}; },
+      startLocalFramework: () => new Promise(resolve => { finishStart = resolve; }),
       stopLocalFramework: async () => { stops++; return {...pending, phase: 'exited', operationPending: false, cancellableStartup: false}; },
       toast: error => { throw new Error(error); },
     });
     await Promise.resolve();
+    descendants(root).find(el => el.textContent === 'Start Local').listeners.click();
+    listener(pending);
     assert.ok(descendants(root).some(el => el.textContent === 'Compiling source'));
     const cancel = descendants(root).find(el => el.textContent === 'Cancel');
     assert.equal(cancel.disabled, false);
@@ -83,7 +86,9 @@ test('mobile pending launch shows progress and allows Cancel while Start is busy
     await Promise.resolve(); await Promise.resolve();
     assert.equal(stops, 1);
     listener({...pending, cancellableStartup: false, startupOutput: undefined});
-    assert.ok(!descendants(root).some(el => el.textContent === 'Cancel'), 'Desktop state does not opt into mobile Cancel');
+    assert.ok(!descendants(root).some(el => el.textContent === 'Cancel'));
+    finishStart({...pending, phase: 'exited', cancellableStartup: false});
+    await Promise.resolve(); await Promise.resolve();
     mounted.dispose();
   } finally {
     for (const [key, value] of Object.entries(previous)) {
