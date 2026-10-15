@@ -27,6 +27,9 @@ const DEFAULT_MAX_RESULTS: usize = 500;
 const PROVIDER_MAX_RESULTS: usize = 10_000;
 const DEFAULT_CONTEXT_CHARS: usize = 75;
 const PROVIDER_MAX_CONTEXT_CHARS: usize = 500;
+// Preview storage must not scale as matching-line length * occurrence count.
+const MAX_MATCH_PREVIEW_BYTES: usize = 4096;
+const CONTENT_EVENT_BYTE_BUDGET: usize = 256 * 1024;
 const SEARCH_DTO_VERSION: u16 = 1;
 const MIN_SEARCH_THREADS: usize = 1;
 const MAX_SEARCH_THREADS: usize = 64;
@@ -366,11 +369,61 @@ impl SearchRunOptions {
         self.content_result.is_some()
     }
 
-    fn emit_content_result(&self, result: SearchContentResult) -> Result<(), SearchProviderError> {
+    fn emit_content_result(
+        &self,
+        mut result: SearchContentResult,
+    ) -> Result<(), SearchProviderError> {
         self.check_cancelled()?;
         if let Some(content_result) = &self.content_result {
-            if !content_result(result) {
-                return Err(SearchProviderError::Cancelled);
+            // Existing consumers append batches to a single file record. Move
+            // hits, never clone a full file's results while splitting it.
+            let files = std::mem::take(&mut result.files);
+            for mut file in files {
+                let matches = std::mem::take(&mut file.matches);
+                let base_bytes = 4096
+                    + 6 * (file.path.len()
+                        + file.relative_path.len()
+                        + result.root.len()
+                        + result.query.len());
+                let mut bytes = base_bytes;
+                for hit in matches {
+                    self.check_cancelled()?;
+                    // Upper bound for JSON string escaping plus DTO/range overhead;
+                    // MessagePack is smaller. No serialization pass needed here.
+                    let hit_bytes =
+                        1024 + 6 * (hit.line_text.len() + hit.snippet.len() + hit.match_text.len());
+                    if base_bytes.saturating_add(hit_bytes) > CONTENT_EVENT_BYTE_BUDGET {
+                        return Err(SearchProviderError::Search(
+                            "search result metadata exceeds event byte budget".to_owned(),
+                        ));
+                    }
+                    if !file.matches.is_empty() && bytes + hit_bytes > CONTENT_EVENT_BYTE_BUDGET {
+                        let mut batch = result.clone();
+                        batch.match_count = file.matches.len();
+                        batch.file_count = 1;
+                        let batch_matches = std::mem::take(&mut file.matches);
+                        let mut batch_file = file.clone();
+                        batch_file.matches = batch_matches;
+                        batch_file.matches_returned = Some(batch_file.matches.len());
+                        batch.files = vec![batch_file];
+                        if !content_result(batch) {
+                            return Err(SearchProviderError::Cancelled);
+                        }
+                        bytes = base_bytes;
+                    }
+                    bytes += hit_bytes;
+                    file.matches.push(hit);
+                }
+                if !file.matches.is_empty() {
+                    let mut batch = result.clone();
+                    batch.match_count = file.matches.len();
+                    batch.file_count = 1;
+                    file.matches_returned = Some(file.matches.len());
+                    batch.files = vec![file];
+                    if !content_result(batch) {
+                        return Err(SearchProviderError::Cancelled);
+                    }
+                }
             }
         }
         self.check_cancelled()
@@ -902,6 +955,7 @@ pub(crate) fn search_content_with_options(
             .build();
         let mut sink = ContentSink {
             matcher: &matcher,
+            cancelled: options.cancelled.clone(),
             max_matches_per_file: effective_match_cap,
             context_chars,
             matches: Vec::new(),
@@ -1178,6 +1232,7 @@ fn search_content_multiline_with_options(
 
 struct ContentSink<'a> {
     matcher: &'a grep_regex::RegexMatcher,
+    cancelled: Option<Arc<AtomicBool>>,
     max_matches_per_file: Option<usize>,
     context_chars: usize,
     matches: Vec<SearchContentMatch>,
@@ -1199,13 +1254,21 @@ impl Sink for ContentSink<'_> {
             ));
         }
         let line_bytes = strip_line_ending(mat.bytes());
-        let line_text = String::from_utf8_lossy(line_bytes).into_owned();
+        let line_text = String::from_utf8_lossy(line_bytes);
         // The searcher reports matching lines, not occurrences. Enumerate every
         // occurrence here so serial/progressive counts and per-hit actions agree.
         // The matcher owns zero-width advancement; never hand-roll that loop.
         self.matcher
             .find_iter(line_bytes, |found| {
-                let match_text = String::from_utf8_lossy(&line_bytes[found]).into_owned();
+                if self
+                    .cancelled
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+                {
+                    return false;
+                }
+                let matched = String::from_utf8_lossy(&line_bytes[found]);
+                let match_text = bounded_match_text(&matched);
                 let mut hit = content_match_dto(
                     mat.line_number().unwrap_or(0),
                     &line_text,
@@ -1222,6 +1285,16 @@ impl Sink for ContentSink<'_> {
                     .is_some_and(|cap| self.matches.len() >= cap)
             })
             .map_err(|error| io::Error::other(error.to_string()))?;
+        if self
+            .cancelled
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "search cancelled",
+            ));
+        }
         if self
             .max_matches_per_file
             .is_some_and(|max_matches| self.matches.len() >= max_matches)
@@ -1264,7 +1337,7 @@ fn attach_edit_targets(content: &str, matches: &mut [SearchContentMatch]) {
     for hit in matches {
         // This also rejects non-character-boundary regex ranges, rather than
         // converting lossy display strings into mutation instructions.
-        if content.get(hit.start_byte..hit.end_byte) == Some(hit.match_text.as_str()) {
+        if content.get(hit.start_byte..hit.end_byte).is_some() {
             hit.edit_target = Some(ContentEditTarget {
                 source_sha256: hash.clone(),
                 start_byte: hit.start_byte,
@@ -1334,27 +1407,30 @@ fn content_match_dto(
     line_text: &str,
     match_start: usize,
     match_end: usize,
-    match_text: String,
+    mut match_text: String,
     context_chars: usize,
 ) -> SearchContentMatch {
-    let line_len = line_text.len();
-    let start = match_start.saturating_sub(context_chars);
-    let end = (match_end + context_chars).min(line_len);
-    let snippet = line_text.get(start..end).unwrap_or(line_text).to_owned();
+    let (start, end) = preview_span(line_text, match_start, match_end, context_chars);
+    let snippet = line_text[start..end].to_owned();
     let snippet_match_start = match_start.saturating_sub(start);
-    let snippet_match_end = snippet_match_start + match_end.saturating_sub(match_start);
+    let snippet_match_end = match_end.min(end).saturating_sub(start);
+    // Keep the display match prefix consistent with a clipped giant match.
+    match_text.truncate(previous_char_boundary(
+        &match_text,
+        snippet_match_end.saturating_sub(snippet_match_start),
+    ));
     SearchContentMatch {
         start_byte: match_start,
         end_byte: match_end,
         edit_target: None,
         line_number,
         column_number: match_start + 1,
-        line_text: line_text.to_owned(),
+        line_text: snippet.clone(),
         snippet,
         match_text,
         line_ranges: vec![SearchTextRange {
-            start: match_start,
-            end: match_end,
+            start: snippet_match_start,
+            end: snippet_match_end,
         }],
         snippet_ranges: vec![SearchTextRange {
             start: snippet_match_start,
@@ -1369,19 +1445,17 @@ fn content_multiline_match_dto(
     match_end: usize,
     context_chars: usize,
 ) -> SearchContentMatch {
-    let (line_start, line_end) = containing_line_span(text, match_start, match_end);
-    let snippet_start = previous_char_boundary(
-        text,
-        line_start.max(match_start.saturating_sub(context_chars)),
-    );
-    let snippet_end =
-        next_char_boundary(text, line_end.min(match_end.saturating_add(context_chars)));
-    let line_text = text.get(line_start..line_end).unwrap_or("").to_owned();
+    let (line_start, _) = containing_line_span(text, match_start, match_end);
+    let (snippet_start, snippet_end) = preview_span(text, match_start, match_end, context_chars);
     let snippet = text
         .get(snippet_start..snippet_end)
         .unwrap_or("")
         .to_owned();
-    let match_text = text.get(match_start..match_end).unwrap_or("").to_owned();
+    let line_text = snippet.clone();
+    let match_text = bounded_match_text(
+        text.get(match_start..match_end.min(snippet_end))
+            .unwrap_or(""),
+    );
     SearchContentMatch {
         start_byte: match_start,
         end_byte: match_end,
@@ -1392,14 +1466,29 @@ fn content_multiline_match_dto(
         snippet,
         match_text,
         line_ranges: vec![SearchTextRange {
-            start: match_start.saturating_sub(line_start),
-            end: match_end.saturating_sub(line_start),
+            start: match_start.saturating_sub(snippet_start),
+            end: match_end.min(snippet_end).saturating_sub(snippet_start),
         }],
         snippet_ranges: vec![SearchTextRange {
             start: match_start.saturating_sub(snippet_start),
-            end: match_end.saturating_sub(snippet_start),
+            end: match_end.min(snippet_end).saturating_sub(snippet_start),
         }],
     }
+}
+
+fn bounded_match_text(text: &str) -> String {
+    text[..previous_char_boundary(text, text.len().min(MAX_MATCH_PREVIEW_BYTES))].to_owned()
+}
+
+fn preview_span(text: &str, start: usize, end: usize, context: usize) -> (usize, usize) {
+    let preview_start = previous_char_boundary(text, start.saturating_sub(context));
+    let preview_end = previous_char_boundary(
+        text,
+        end.saturating_add(context)
+            .min(text.len())
+            .min(preview_start.saturating_add(MAX_MATCH_PREVIEW_BYTES)),
+    );
+    (preview_start, preview_end)
 }
 
 fn containing_line_span(text: &str, match_start: usize, match_end: usize) -> (usize, usize) {
@@ -1428,14 +1517,6 @@ fn previous_char_boundary(text: &str, offset: usize) -> usize {
     let mut index = offset.min(text.len());
     while index > 0 && !text.is_char_boundary(index) {
         index -= 1;
-    }
-    index
-}
-
-fn next_char_boundary(text: &str, offset: usize) -> usize {
-    let mut index = offset.min(text.len());
-    while index < text.len() && !text.is_char_boundary(index) {
-        index += 1;
     }
     index
 }
@@ -1817,6 +1898,123 @@ fn search_provider_error_text(error: SearchProviderError) -> String {
 mod tests {
     use super::*;
     use std::{collections::BTreeSet, path::Path, time::Instant};
+
+    #[test]
+    fn minified_line_keeps_all_hits_without_full_line_copies() {
+        let root = tempfile::tempdir().unwrap();
+        // ~20 MB on one line, with the same 371 occurrences as the offending map.
+        let unit = format!("{}toml", "x".repeat(52_000));
+        write_file(root.path(), "bundle.js.map", &unit.repeat(371));
+        let mut request = content_request(root.path());
+        request.query = "toml".into();
+        let result = search_content(request).unwrap();
+        assert_eq!(result.match_count, 371);
+        let file = &result.files[0];
+        for (index, hit) in file.matches.iter().enumerate() {
+            assert_eq!(hit.column_number, index * unit.len() + 52_001);
+            assert_eq!(hit.start_byte, index * unit.len() + 52_000);
+            assert_eq!(hit.end_byte, hit.start_byte + 4);
+            assert!(hit.line_text.len() <= MAX_MATCH_PREVIEW_BYTES);
+            assert_eq!(hit.line_text, hit.snippet);
+            let range = &hit.snippet_ranges[0];
+            assert_eq!(&hit.snippet[range.start..range.end], "toml");
+        }
+        assert!(serde_json::to_vec(&result).unwrap().len() < 1024 * 1024);
+    }
+
+    #[test]
+    fn progressive_batches_preserve_file_identity_and_every_match() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(
+            root.path(),
+            "bundle.js",
+            &format!("{}toml", "a".repeat(500)).repeat(1000),
+        );
+        let mut request = content_request(root.path());
+        request.query = "toml".into();
+        request.max_files = Some(1); // Exercise serial progressive production too.
+        let batches = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let collected = Arc::clone(&batches);
+        let options = SearchRunOptions {
+            content_result: Some(Arc::new(move |batch| {
+                assert!(serde_json::to_vec(&batch).unwrap().len() <= CONTENT_EVENT_BYTE_BUDGET);
+                collected.lock().unwrap().push(batch);
+                true
+            })),
+            ..Default::default()
+        };
+        let done = search_content_with_options(request, options).unwrap();
+        assert_eq!(done.match_count, 1000);
+        let batches = batches.lock().unwrap();
+        assert!(batches.len() > 1);
+        let mut offsets = Vec::new();
+        for batch in batches.iter() {
+            assert_eq!(batch.files[0].relative_path, "bundle.js");
+            assert_eq!(batch.files[0].file_match_count, Some(1000));
+            offsets.extend(batch.files[0].matches.iter().map(|hit| hit.start_byte));
+        }
+        assert_eq!(
+            offsets,
+            (0..1000).map(|i| i * 504 + 500).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn clipped_utf8_and_multiline_previews_keep_exact_edit_targets() {
+        let text = format!("{}toml{}", "é".repeat(200), "🦀".repeat(200));
+        let mut hit = content_match_dto(1, &text, 400, 404, "toml".into(), 75);
+        attach_edit_targets(&text, std::slice::from_mut(&mut hit));
+        let target = hit.edit_target.unwrap();
+        assert_eq!((target.start_byte, target.end_byte), (400, 404));
+        assert_eq!(
+            target.source_sha256,
+            super::super::text_edit_ops::sha256(&text)
+        );
+        let text = format!("{}\n{}", "🦀".repeat(5000), "é".repeat(5000));
+        let mut hit = content_multiline_match_dto(&text, 0, text.len(), 75);
+        attach_edit_targets(&text, std::slice::from_mut(&mut hit));
+        assert!(hit.line_text.len() <= MAX_MATCH_PREVIEW_BYTES);
+        assert!(hit.match_text.len() <= MAX_MATCH_PREVIEW_BYTES);
+        assert_eq!(hit.edit_target.unwrap().end_byte, text.len());
+        let text = "🦀".repeat(5000);
+        let hit = content_match_dto(1, &text, 0, text.len(), bounded_match_text(&text), 75);
+        assert_eq!(hit.match_text, hit.snippet);
+        assert_eq!(hit.line_ranges[0].end, hit.snippet.len());
+    }
+
+    #[test]
+    fn parallel_search_keeps_all_minified_hits_and_stops_on_rejected_batch() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(
+            root.path(),
+            "bundle.js",
+            &format!("{}toml", "x".repeat(1000)).repeat(1000),
+        );
+        let mut request = content_request(root.path());
+        request.query = "toml".into();
+        request.search_threads = Some(2);
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let received = Arc::clone(&count);
+        let options = SearchRunOptions {
+            content_result: Some(Arc::new(move |batch| {
+                assert!(serde_json::to_vec(&batch).unwrap().len() <= CONTENT_EVENT_BYTE_BUDGET);
+                received.fetch_add(batch.match_count, Ordering::Relaxed);
+                true
+            })),
+            ..Default::default()
+        };
+        let done = search_content_with_options(request.clone(), options).unwrap();
+        assert_eq!(done.match_count, 1000);
+        assert_eq!(count.load(Ordering::Relaxed), 1000);
+        let options = SearchRunOptions {
+            content_result: Some(Arc::new(|_| false)),
+            ..Default::default()
+        };
+        assert!(matches!(
+            search_content_with_options(request, options),
+            Err(SearchProviderError::Cancelled)
+        ));
+    }
 
     fn test_root(name: &str) -> PathBuf {
         let mut root = std::env::var_os("TEMPDIR")

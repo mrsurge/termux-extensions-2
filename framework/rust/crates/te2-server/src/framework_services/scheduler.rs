@@ -1613,6 +1613,10 @@ impl SearchJobContext {
             reason: None,
         };
         if let Err(error) = self.event_sink.send(envelope) {
+            self.event_metrics
+                .required_event_failures
+                .fetch_add(1, Ordering::Relaxed);
+            self.cancelled.store(true, Ordering::Relaxed);
             warn!(%error, job_id = %self.job_id, "failed to emit search job notification");
         }
     }
@@ -1640,6 +1644,54 @@ fn spawn_search_event_emitter(
             context.emit_event(event);
         }
     });
+}
+
+#[cfg(test)]
+mod search_delivery_tests {
+    use super::*;
+
+    struct RejectingSink;
+    impl PipeEventSink for RejectingSink {
+        fn send(&self, _: PipeEnvelope) -> anyhow::Result<()> {
+            anyhow::bail!("invalid pipe envelope: frame exceeds byte limit")
+        }
+    }
+
+    #[test]
+    fn failed_search_delivery_cancels_shared_producer() {
+        let request = serde_json::from_value(json!({
+            "jsonrpc": JSONRPC_VERSION, "protocolVersion": PROTOCOL_VERSION,
+            "kind": "request", "id": "test", "method": "search.content.start",
+            "originNid": 10, "originName": "code_te2"
+        }))
+        .unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let context = SearchJobContext {
+            event_sink: Arc::new(RejectingSink),
+            request,
+            kind: SearchJobKind::Content,
+            job_id: "test".into(),
+            search_id: "test".into(),
+            op_id: "test".into(),
+            root: ".".into(),
+            project_generation: None,
+            correlation_id: None,
+            cancelled: Arc::clone(&cancelled),
+            sequence: Arc::new(AtomicU64::new(1)),
+            last_counts: Arc::new(StdMutex::new(Default::default())),
+            event_metrics: Arc::new(SearchEventMetrics::default()),
+        };
+        context.emit_result(json!({"files": []}));
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert_eq!(
+            context
+                .event_metrics
+                .required_event_failures
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(context.cancellation_reason(), "eventDeliveryFailed");
+    }
 }
 
 fn try_send_search_event(

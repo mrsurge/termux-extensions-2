@@ -848,6 +848,17 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 
 ## 6.6) Search system (progressive Rust pipe provider)
 
+Content results use bounded UTF-8 display previews, not full source lines per
+occurrence. `lineText`, `snippet` and `matchText` are display data capped at
+4096 bytes each; `lineRanges`/`snippetRanges` address those previews. Original
+line/column and guarded `editTarget` source-byte coordinates remain independent.
+The Rust producer borrows matching input and retains the existing per-file
+snapshot/hash policy; previews do not add a read pass. Progressive results split
+into conservative 256 KiB batches appended to the same Python per-file record.
+Pipe notification rejection cancels the shared producer instead of warning and
+continuing. This does not cap total result count or eliminate the input line
+buffer. See `docs/apps/search_memory/PLAN.md` for scope and limits.
+
 Explorer filename search has both its source-tree input and a separately created
 sticky-scope input. Set mobile input attributes, including `autocapitalize="off"`,
 on both: the sticky control can own Android focus even when the source input is
