@@ -10,6 +10,7 @@ interface ExtensionNavigationEditorLike {
 interface ExtensionNavigationRuntimeDeps {
   getCurrentPath(): string | null;
   getEditor(): ExtensionNavigationEditorLike | null;
+  showLocations?(payload: Record<string, unknown>): void;
   rpcCall(
     method: string,
     params: Record<string, unknown>,
@@ -100,6 +101,9 @@ export function createEditorExtensionNavigationRuntime(
         : "";
       if (operation === "showEditor") {
         editor.focus?.();
+      } else if (operation === "showLocations") {
+        if (!deps.showLocations) throw new Error('Extension location display is unavailable');
+        deps.showLocations(payload);
       } else if (operation === "setSelections") {
         const selections = Array.isArray(payload.selections)
           ? payload.selections.map(selectionFrom).filter((item): item is Record<string, number> => item != null)

@@ -64,6 +64,7 @@ interface CodeInspectorRuntimeDeps {
 
 export interface CodeInspectorRuntime {
   start(mode: CodeInspectorMode): void;
+  showLocations(payload: JsonObject): void;
   goToDefinition(): void;
   handleCommand(params: JsonObject): void;
   reapplyHighlights(): void;
@@ -695,6 +696,24 @@ export function createEditorCodeInspectorRuntime(
     void run(mode);
   }
 
+  function showLocations(payload: JsonObject): void {
+    const editor = deps.getEditor();
+    const path = deps.getCurrentPath();
+    const position = isRecord(payload.position) ? payload.position : null;
+    if (disposed || !editor || !path || payload.path !== path || !position) {
+      throw new Error('Extension location target is no longer active');
+    }
+    const target = buildTarget(editor, path, {
+      lineNumber: finitePositive(position.lineNumber), column: finitePositive(position.column),
+    });
+    const locations = asArray(payload.locations);
+    const tree = locationTree(locations, path, editor.getModel?.() ?? null);
+    requestSequence = Math.max(requestSequence + 1, Date.now());
+    publish({ revision: 0, requestId: `extension_locations_${requestSequence}`,
+      requestSequence, status: tree.length ? 'ready' : 'empty', mode: 'references',
+      target, summary: { label: 'Locations', count: locations.length, fileCount: tree.length }, tree, error: null });
+  }
+
   function goToDefinition(): void {
     void runGoToDefinition();
   }
@@ -743,6 +762,7 @@ export function createEditorCodeInspectorRuntime(
 
   return {
     start,
+    showLocations,
     goToDefinition,
     handleCommand,
     reapplyHighlights,

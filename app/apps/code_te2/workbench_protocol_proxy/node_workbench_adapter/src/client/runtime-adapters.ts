@@ -380,6 +380,7 @@ export interface ExtHostDispatchRuntimeDeps {
   initializeExtensionStorage: ExtHostDispatchRuntime["initializeExtensionStorage"];
   setExtensionStorageValue: ExtHostDispatchRuntime["setExtensionStorageValue"];
   handleWebviewRequest: ExtHostDispatchRuntime["handleWebviewRequest"];
+  handleCommandRequest: NonNullable<ExtHostDispatchRuntime["handleCommandRequest"]>;
   debugExtReqSeen: number;
   setDebugExtReqSeen: (value: number) => void;
   debugExtReplySeen: number;
@@ -803,6 +804,7 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
     initializeExtensionStorage: (shared, extensionId) => deps.initializeExtensionStorage(shared, extensionId),
     setExtensionStorageValue: (shared, extensionId, value) => deps.setExtensionStorageValue(shared, extensionId, value),
     handleWebviewRequest: (message) => deps.handleWebviewRequest(message),
+    handleCommandRequest: (message) => deps.handleCommandRequest(message),
     debug: {
       shouldEmitExtRequestEvent: () => currentDebugExtReqSeen < 200,
       markExtRequestEvent: () => {

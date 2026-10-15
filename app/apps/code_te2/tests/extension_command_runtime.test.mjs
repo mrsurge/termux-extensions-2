@@ -11,12 +11,83 @@ import {
 import { ClientOperationGate } from "../workbench_protocol_proxy/node_workbench_adapter/dist/client/client-operation-gate.mjs";
 import { WorkbenchClient } from "../workbench_protocol_proxy/node_workbench_adapter/dist/client/workbench-client.mjs";
 import { checkWorkspaceContains } from "../workbench_protocol_proxy/node_workbench_adapter/dist/workspace/workspace-contains.mjs";
+import { handleExtHostRequest } from '../workbench_protocol_proxy/node_workbench_adapter/dist/protocol/ext-host-dispatch.mjs';
 
 const RPC_IDS = {
   MainThreadCommands: 10,
   MainThreadMessageService: 29,
   ExtHostCommands: 89,
 };
+
+test('real Workbench dispatch adapter retains command registration, execution callbacks and retirement', async () => {
+  const sent = [], navigation = [];
+  const commands = new ExtensionCommandRuntime({
+    rpcIds: RPC_IDS, activateByEvent: async () => {}, syncSelection() {},
+    uriForPath: path => ({ path }), openWorkbenchResource: async () => {},
+    showLocations: async (...args) => { navigation.push(args); },
+    sendExtAwaitTerminalReply: (_id, _method, args) => { sent.push(args); return { req: 1, promise: Promise.resolve({ type: 9, result: 'ok' }) }; },
+    onEvent() {}, log() {},
+  });
+  const client = Object.create(WorkbenchClient.prototype);
+  client.state = {};
+  client._debugExtReqSeen = 200; client._debugExtReplySeen = 50; client._debugMainThreadReplySeen = 80;
+  client._extensionActivity = { handleRequest: () => ({ handled: false }) };
+  client._webviews = { handleMainThreadRequest: () => ({ handled: false }) };
+  client._extensionEditorNavigation = { handleMainThreadRequest: () => ({ handled: false }) };
+  client._extensionCommands = commands;
+  const command = 'rust-analyzer.hoverRefCommandProxy';
+  const dispatch = (method, args) => handleExtHostRequest(client._extHostDispatchRuntime(), {
+    kind: 'ext', type: 1, req: 42, rpcId: RPC_IDS.MainThreadCommands, method, args,
+  });
+  assert.equal(dispatch('$registerCommand', [command]), true);
+  await commands.execute({ surface: 'hover', command, arguments: [0], path: '/workspace/main.rs' });
+  assert.deepEqual(sent, [[command, 0]]);
+  const locations = [{ scheme: 'file', path: '/workspace/main.rs' }, { lineNumber: 85, column: 8 }, []];
+  dispatch('$executeCommand', ['editor.action.showReferences', locations]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(navigation, [locations]);
+  dispatch('$unregisterCommand', [command]);
+  await assert.rejects(commands.execute({ surface: 'hover', command }), /Unknown extension command/);
+});
+
+test('hover executes a live internal command without a manifest menu contribution', async () => {
+  const calls = [];
+  let reply = { type: 9, result: 'ok' };
+  const runtime = new ExtensionCommandRuntime({
+    rpcIds: RPC_IDS, activateByEvent: async () => {},
+    sendExtAwaitTerminalReply: (rpc, method, args) => { calls.push({ rpc, method, args }); return { req: 1, promise: Promise.resolve(reply) }; },
+    uriForPath: path => ({ scheme: 'file', path }), openWorkbenchResource: async () => {},
+    syncSelection() {}, onEvent() {}, log() {},
+  });
+  const command = 'rust-analyzer.hoverRefCommandProxy';
+  const registration = method => runtime.handleMainThreadRequest({ kind: 'ext', rpcId: RPC_IDS.MainThreadCommands, method, args: [command] });
+  const params = { surface: 'hover', path: '/workspace/main.rs', command, arguments: [0] };
+  await assert.rejects(runtime.execute(params), /Unknown extension command/);
+  registration('$registerCommand');
+  await runtime.execute(params);
+  assert.deepEqual(calls[0].args, [command, 0]);
+  await assert.rejects(runtime.execute({ ...params, surface: 'editor' }), /Unknown extension command/);
+  reply = { type: 11, error: { message: 'unsupported navigation' } };
+  await assert.rejects(runtime.execute(params), /unsupported navigation/);
+  registration('$unregisterCommand');
+  await assert.rejects(runtime.execute(params), /Unknown extension command/);
+});
+
+test('showReferences callback invokes the existing location owner, not a generic command evaluator', async () => {
+  const calls = [];
+  const runtime = new ExtensionCommandRuntime({
+    rpcIds: RPC_IDS, activateByEvent: async () => {},
+    sendExtAwaitTerminalReply: () => { throw Error('unexpected extension request'); },
+    uriForPath: path => ({ path }), openWorkbenchResource: async () => {},
+    showLocations: async (...args) => { calls.push(args); }, syncSelection() {}, onEvent() {}, log() {},
+  });
+  const args = [{ scheme: 'file', path: '/workspace/main.rs' }, { lineNumber: 85, column: 8 }, []];
+  const request = command => runtime.handleMainThreadRequest({ kind: 'ext', rpcId: RPC_IDS.MainThreadCommands, method: '$executeCommand', args: [command, args] });
+  const result = request('editor.action.showReferences');
+  await result.pending;
+  assert.deepEqual(calls, [args]);
+  assert.match(request('workbench.unknown').error.message, /Unsupported workbench command/);
+});
 
 test("unprojected positive context keys do not expose editor actions", () => {
   assert.equal(evaluateWhenClause("jsDebugCanPrettyPrint", {}), false);

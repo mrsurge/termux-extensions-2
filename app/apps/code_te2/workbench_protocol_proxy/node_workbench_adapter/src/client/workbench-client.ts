@@ -985,6 +985,8 @@ export class WorkbenchClient {
       uriForPath: (filePath) => this._uriForPath(filePath),
       openWorkbenchResource: (uri, options) =>
         this._extensionEditorNavigation.openFromWorkbenchCommand(uri, options),
+      showLocations: (uri: unknown, position: unknown, locations: unknown) =>
+        this._extensionEditorNavigation.showLocationsFromWorkbench(uri, position, locations),
       syncSelection: (params) => this._syncExtensionCommandSelection(params),
       onEvent: (payload) => this.onEvent(payload),
       log: (...args) => console.log(...args),

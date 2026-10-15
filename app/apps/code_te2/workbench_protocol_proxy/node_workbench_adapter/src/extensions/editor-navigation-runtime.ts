@@ -158,6 +158,30 @@ export class ExtensionEditorNavigationRuntime {
     return this.requestVisibleOpen(uri, normalizedOptions, false);
   }
 
+  async showLocationsFromWorkbench(uri: unknown, position: unknown, locations: unknown): Promise<void> {
+    const path = this.options.fsPathFromUri(uri);
+    if (!path || path !== this.options.activePath() || !isRecord(position) ||
+        !Number.isInteger(position.lineNumber) || Number(position.lineNumber) < 1 ||
+        !Number.isInteger(position.column) || Number(position.column) < 1 ||
+        !Array.isArray(locations) || locations.length > 10000) {
+      return Promise.reject(new Error('Invalid extension navigation locations'));
+    }
+    const normalized = locations.map(value => {
+      if (!isRecord(value) || !isRecord(value.range)) throw new Error('Invalid extension location');
+      const destination = this.options.fsPathFromUri(value.uri);
+      const range = value.range;
+      for (const key of ['startLineNumber', 'startColumn', 'endLineNumber', 'endColumn']) {
+        if (!Number.isInteger(range[key]) || Number(range[key]) < 1) throw new Error('Invalid extension location range');
+      }
+      if (!destination || Number(range.endLineNumber) < Number(range.startLineNumber) ||
+          range.endLineNumber === range.startLineNumber && Number(range.endColumn) < Number(range.startColumn)) {
+        throw new Error('Unsupported extension location');
+      }
+      return { path: destination, range, selectionRange: range };
+    });
+    return this.runEditorOperation(this.options.activeEditorId(), 'showLocations', { position, locations: normalized });
+  }
+
   completeBackendOpen(params: Record<string, unknown>): Record<string, unknown> {
     const requestId = stringValue(params.requestId) ?? stringValue(params.request_id);
     if (!requestId) throw new Error("Missing extension navigation request id");

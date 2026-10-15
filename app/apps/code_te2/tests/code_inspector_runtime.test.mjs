@@ -50,6 +50,25 @@ function createEditorState() {
   };
 }
 
+test('extension-provided locations reuse the Code Inspector without another provider request', async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript('monaco_editor/editor_code_inspector_runtime.ts');
+  const state = createEditorState(), projections = [];
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor, getCurrentPath: () => '/workspace/main.rs',
+    editorWorkbenchCall: () => assert.fail('locations are already supplied'),
+    publishProjection: value => { projections.push(value); return true; },
+    replaceHighlights() {}, logError: () => assert.fail('unexpected failure'),
+  });
+  const range = { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 4 };
+  runtime.showLocations({ path: '/workspace/main.rs', position: { lineNumber: 8, column: 5 }, locations: [{ path: '/workspace/other.rs', range }] });
+  assert.equal(projections[0].status, 'ready');
+  assert.equal(projections[0].summary.count, 1);
+  assert.equal(projections[0].tree[0].children[0].path, '/workspace/other.rs');
+  assert.deepEqual(projections[0].tree[0].children[0].selectionRange, range);
+  assert.throws(() => runtime.showLocations({ path: '/wrong.rs', position: {}, locations: [] }), /no longer active/);
+  runtime.dispose();
+});
+
 test('document symbols preserve hierarchy and selection locations through WBA', async () => {
   const { createEditorCodeInspectorRuntime } = await importTypeScript('monaco_editor/editor_code_inspector_runtime.ts');
   const state = createEditorState(), projections = [], calls = [];

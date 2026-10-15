@@ -422,6 +422,7 @@ interface CreateEditorLanguageBridgeProvidersDeps {
     contents: unknown[];
     codeLanguages: string[];
   };
+  prepareHoverContents?(contents: unknown[], context: LanguageContext): unknown[];
   ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean>;
   flushMirrorDebounce(): void;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<void>;
@@ -2266,7 +2267,7 @@ export function createEditorLanguageBridgeProviders(
                         ) {
                           return null;
                         }
-                        return { range: range || undefined, contents };
+                        return { range: range || undefined, contents: deps.prepareHoverContents?.(contents, ctx) ?? contents };
                       });
                   } catch (_) {
                     return null;

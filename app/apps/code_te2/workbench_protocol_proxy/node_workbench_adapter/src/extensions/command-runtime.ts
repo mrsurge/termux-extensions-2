@@ -21,6 +21,7 @@ interface CommandRuntimeOptions {
   ): { req: number; promise: Promise<unknown> };
   uriForPath(filePath: string): Record<string, unknown>;
   openWorkbenchResource(uri: unknown, options: unknown): Promise<unknown>;
+  showLocations?(uri: unknown, position: unknown, locations: unknown): Promise<unknown>;
   syncSelection(params: ExtensionCommandContext): void;
   onEvent(payload: Record<string, unknown>): void;
   log(...args: unknown[]): void;
@@ -372,6 +373,9 @@ export class ExtensionCommandRuntime {
               ),
             };
           }
+          if (command === "editor.action.showReferences" && this.options.showLocations) {
+            return { handled: true, pending: this.options.showLocations(commandArgs[0], commandArgs[1], commandArgs[2]) };
+          }
           return {
             handled: true,
             error: new Error(`Unsupported workbench command: ${String(command)}`),
@@ -449,7 +453,9 @@ export class ExtensionCommandRuntime {
     const commandId = stringValue(params.command);
     if (!commandId) throw new Error("Missing required param: command");
     const definition = this.commands.get(commandId);
-    if (!definition) throw new Error(`Unknown extension command: ${commandId}`);
+    if (!definition && !(params.surface === "hover" && this.registeredCommands.has(commandId))) {
+      throw new Error(`Unknown extension command: ${commandId}`);
+    }
     const filePath = stringValue(params.path);
     if (params.surface !== "explorer" && params.surface !== "webview") {
       this.options.syncSelection(params);
@@ -481,6 +487,11 @@ export class ExtensionCommandRuntime {
       30000,
     );
     const reply = await pending.promise;
+    if (isRecord(reply) && reply.type === 11) {
+      const error = reply.error;
+      throw new Error(isRecord(error) && typeof error.message === 'string'
+        ? error.message : String(error ?? 'Extension command failed'));
+    }
     this.options.log(`[extension-command] executed ${commandId} req=${pending.req}`);
     return { ok: true, command: commandId, result: replyResult(reply) };
   }

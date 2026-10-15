@@ -1,0 +1,122 @@
+# Monaco core and quick-fix tracker
+
+## Investigation and plan
+
+- [x] User approved read-only audit of build minimality and hover quick fixes.
+- [x] User requested both slices in the plan/tracker, CodeLens-first audit and
+  an experimental GPU-renderer trial alongside the reduced build.
+- [x] Locate editor-distro extraction and the full editor.main import graph.
+- [x] Distinguish optional main-thread language adapters from separate workers.
+- [x] Confirm CodeLens is disabled in WBA settings and hunk controls use view zones.
+- [x] Confirm independent Monaco Quick Fix hover support and missing WBA bridge.
+- [x] Confirm pinned experimentalGpuAcceleration on/off option and adapter probe.
+
+## Slice 1 — feature reduction / experimental renderer
+
+Deferred by user: keep evidence, no further bundle/GPU implementation in the
+quick-fix workstream.
+
+- [x] Measure current bootstrap and in-memory CodeLens/language variants; record
+  raw/gzip numbers and current whole-host size in PLAN.md. No asset writes.
+- [ ] Complete final-host input attribution and auxiliary asset inventory;
+  verify actual reduced-host savings after approved source edits/build.
+  - [x] Write-disabled whole-host baseline matches published host bytes exactly.
+  - [x] Source-linking experiment saves 800,181 JS / 221,618 gzip JS bytes with
+    all existing Monaco contributions retained; CodeLens removal is incremental.
+  - [ ] Reconcile emitted CSS/font URLs/inventory and runtime singleton identity.
+- [ ] Complete contribution/command/import inventory, including CodeLens consumers.
+  - [x] Identify active edit/find/marker commands and language providers; retain
+    inline completions and supported worker-mode features despite their size.
+- [ ] Propose concrete allowlist and optional language-adapter strategy.
+- [ ] Choose explicit experimental GPU activation/rollback mechanism.
+  - [x] Identify canvas/configuration-service/device initialization seams and
+    GPU core import even while disabled; do not assume automatic safe fallback.
+  - [x] User chose the minimal direct trial instead of guards/preferences/query
+    switches: set experimentalGpuAcceleration to on in m_editor_app.ts's main
+    options wrapper. Revert the source change if unsuitable. No historical-view
+    change, GPU removal, source-linking or native publication in this trial.
+  - [x] Main-editor trial typecheck and normal host build pass. Generated host.js
+    is ready for user-managed client publication; no live activation claimed.
+  - [ ] User publishes/reloads client and evaluates actual GPU rendering and
+    visual/interaction behavior before deciding whether to retain or remove it.
+    - Trial activated on live Electron/Cefrium: both report GPU on and a model
+      with 949 lines/31,689 characters, but text rendering fails in the GPU
+      decoration CSS scanner on a cross-origin Google Fonts stylesheet.
+      Electron also logged an earlier unavailable-WebGPU-adapter rejection;
+      this is separate from the stylesheet failure.
+    - User approved isolated Cefrium-page test: removed only the Google Fonts
+      stylesheet link and requested editor rendering. GPU context/device are
+      present afterward; visible-text/performance acceptance awaits user.
+      No permanent stylesheet/source change or client reload; reload restores
+      the removed link. Inspect existing device state, not navigator.gpu alone.
+    - User reported partial/missing rendering after that test and requested
+      reverting the editor source. GPU-on override reverted; typecheck and host
+      build passed. User-managed asset publication/reload remains separate.
+  - [x] Put GPU on removal-candidate list: about 64 KB attributed minified code;
+    size-only non-runtime stub experiment saves 64,644 raw / 16,948 gzip bytes.
+    Full methodology/caveats in PLAN.md; no GPU stubs/code removal shipped.
+- [ ] Obtain implementation/build/publication approval for the concrete scope.
+- [ ] Implement and validate reduced build; preserve Code Server and worker modes.
+- [ ] Compare baseline DOM → reduced DOM → reduced GPU; report actual renderer.
+- [ ] Exact-client desktop/mobile/browser acceptance after approved publication.
+
+## Slice 2 — extension-host quick fixes
+
+- [x] User approved read-only investigation of quick fixes and dead hover links.
+- [x] Preserve existing Markdown trust projection; identify missing Monaco→WBA
+  command registration and manifest-only command-execution admission.
+- [x] Trigger approved Cefrium hover at line 85, column 8; capture the actual
+  rust-analyzer.hoverRefCommandProxy link without clicking/executing it.
+- [x] Implement/validate hover command routing as the first command foundation.
+- [x] Capture and support the actual navigation callback; no guessed generic
+  workbench-command execution or success for unsupported methods.
+  - Installed Rust extension source confirms hoverRefCommandProxy executes its
+    cached command, and its showReferences helper calls editor.action.showReferences.
+  - A private te2.extensionHoverCommand gateway wraps only trusted/allowlisted
+    hover links and retains their decoded arguments and document/version/WBA
+    generation. Old links expire on new projections, resets/disconnect and exit.
+    Existing Monaco commands are not globally replaced.
+  - Runtime-only commands are admitted for the hover surface only if currently
+    registered by ext-host. Existing manifest-based menu handling remains.
+    Extension command error replies now propagate instead of appearing successful.
+  - showReferences validates source/locations and uses the existing exact-client
+    editorOperation/ack lane. Code Inspector renders supplied locations without
+    querying providers again; canonical result selection/open behavior is retained.
+  - 71 targeted tests passed; app typecheck and host/WBA build passed. WBA-wide
+    strict check has 106 existing diagnostics: TypeScript compiler-host comparison
+    against HEAD reports 106 before/after and no newly added diagnostics.
+  - Source diff whitespace check passes. Full generated-host diff check reports
+    minified-line whitespace; no manual edits of generated host output were made.
+- [x] User activated the update and confirmed hover navigation working live after
+  the adapter-hook fix (2026-10-15). This accepts the hover-command foundation,
+  not the unimplemented Quick Fix provider slice.
+  - User live attempt reached the new gateway but failed Unknown extension
+    command: rust-analyzer.hoverRefCommandProxy. Current WBA shell
+    frs_1792081012630_1643656_2_2 started after rebuilt command-runtime output;
+    stale-process assumptions did not explain this attempt.
+  - Source cause: WorkbenchClient supplies handleCommandRequest, but
+    createExtHostDispatchRuntime neither declared nor forwarded it. The dispatcher
+    acknowledged command registrations without invoking the owner. The same lost
+    hook also affected navigation callbacks. Prior direct-owner tests missed it.
+  - Added the required typed callback and forwarding, plus regression through
+    WorkbenchClient._extHostDispatchRuntime and handleExtHostRequest covering
+    register → hover execute → showReferences callback → unregister. Focused
+    follow-up suite: 24 passed; app typecheck and host/WBA build passed.
+  - This follow-up only changes WBA runtime code: current new client assets can
+    remain. A new WBA process is required; no automatic restart was performed.
+  - Final pre-commit targeted regression run passes all 72 tests, including the
+    real dispatch-adapter regression. User live acceptance is recorded above.
+- [ ] Quick Fix provider lifecycle/edit support remains the following substep,
+  not implemented by the hover-command foundation.
+
+- [ ] Audit edit/command owner and first supported safe action subset.
+- [ ] Approve typed provider/provide/resolve/release and edit-execution scope.
+- [ ] Implement WBA and Monaco provider projection, quickfix-only filtering.
+- [ ] Validate cancellation/cache/version/client/disconnect fences and undo.
+- [ ] Validate existing hover remains independent of quick-fix response latency.
+- [ ] Build/publish with approval and accept representative extension fixes live.
+
+Refactors, broad workspace edits, upstream fork changes and release-default GPU
+activation are not implied. Initial planning was read-only; subsequent source,
+build and user activation evidence is recorded above. Existing unrelated working
+tree changes are preserved.

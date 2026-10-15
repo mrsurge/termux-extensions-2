@@ -133,7 +133,8 @@ import { createEditorExtensionNavigationRuntime } from "./editor_extension_navig
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
-import { createEditorExtensionStateRuntime } from "./editor_extension_state_runtime.ts";
+import { createEditorExtensionStateRuntime, buildExtensionEditorSelection } from "./editor_extension_state_runtime.ts";
+import { createEditorHoverCommandRuntime } from './editor_hover_command_runtime.ts';
 import {
   createEditorCodeInspectorRuntime,
   type CodeInspectorRuntime,
@@ -1030,7 +1031,13 @@ interface MonacoBootWindowLike extends Window {
       return editor;
     },
     rpcCall: editorWbaRpcCall,
+    showLocations: (payload) => {
+      if (!codeInspectorRuntime) throw new Error('Code Inspector is unavailable');
+      codeInspectorRuntime.showLocations(payload);
+    },
   });
+
+  let hoverCommands: ReturnType<typeof createEditorHoverCommandRuntime> | null = null;
 
   function isEditorWbaRpcConnected(): boolean {
     return editorWbaRpcTransport.isConnected();
@@ -1191,6 +1198,7 @@ interface MonacoBootWindowLike extends Window {
       codeInspectorRuntime?.dispose();
       extensionEditorMenuRuntime?.dispose();
       extensionEditorStateRuntime?.dispose();
+      hoverCommands?.dispose();
     },
     { once: true },
   );
@@ -1219,6 +1227,27 @@ interface MonacoBootWindowLike extends Window {
       return monacoRangeFromProtoRange(window.monaco, range);
     },
     projectMonacoHoverContents: projectMonacoHoverContents,
+    prepareHoverContents: (contents: unknown[], context: NonNullable<ReturnType<typeof _currentLanguageContext>>) => {
+      if (!hoverCommands) {
+        const api = window.monaco as unknown as {
+          editor: { registerCommand: Parameters<typeof createEditorHoverCommandRuntime>[0]['registerCommand'] };
+        };
+        hoverCommands = createEditorHoverCommandRuntime({
+          registerCommand: (id, handler) => api.editor.registerCommand(id, handler),
+          getContext: _currentLanguageContext,
+          getGeneration: () => wbaConnectionRevision,
+          execute: (params) => editorWbaRpcCall('vscode.extensionCommands.execute', {
+            ...params, selection: buildExtensionEditorSelection(diffEditor?.getModifiedEditor?.() ?? editor),
+          }, { timeoutMs: 35000 }).catch((error: unknown) => {
+            editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, {
+              message: `Hover command failed: ${error instanceof Error ? error.message : String(error)}`,
+            });
+            throw error;
+          }),
+        });
+      }
+      return hoverCommands.prepare(contents, context);
+    },
     ensureTextmateTokenization: ensureTextmateTokenization,
     flushMirrorDebounce: _flushMirrorDebounce,
     ensureWorkbenchLanguageCatalogInstalled: function () {
@@ -2576,8 +2605,10 @@ interface MonacoBootWindowLike extends Window {
           languageBridgeProviders.cacheInlineCompletionProviderRegistration,
         cacheLanguageProviderRegistration:
           languageBridgeProviders.cacheLanguageProviderRegistration,
-        resetDynamicProviderCaches:
-          languageBridgeProviders.resetDynamicProviderCaches,
+        resetDynamicProviderCaches: (reason?: string) => {
+          hoverCommands?.reset();
+          languageBridgeProviders.resetDynamicProviderCaches(reason);
+        },
         onWorkspaceSwitchedAck: function (event) {
           const win = window as Window &
             typeof globalThis & {
@@ -2625,6 +2656,7 @@ interface MonacoBootWindowLike extends Window {
         wbaRpcSocket.on("disconnect", () => {
           console.warn("[wba] socket disconnected");
           wbaConnectionRevision += 1;
+          hoverCommands?.reset();
           wbaResyncPromise = null;
           wbaActiveModelSyncQueued = true;
         });
