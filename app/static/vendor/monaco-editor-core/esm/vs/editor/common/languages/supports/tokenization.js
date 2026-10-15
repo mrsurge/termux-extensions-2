@@ -129,6 +129,22 @@ export class ColorMap {
     getColorMap() {
         return this._id2color.slice(0);
     }
+    static fromIndexedColors(colors) {
+        const result = new ColorMap();
+        // These indices are already encoded in TextMate tokens. Never deduplicate
+        // or discard alpha while adopting the external palette.
+        for (let i = 1; i < colors.length; i++) {
+            const color = colors[i];
+            result._id2color[i] = color;
+            if (color) {
+                const key = normalizeColorHex(color);
+                if (!result._color2id.has(key))
+                    result._color2id.set(key, i);
+            }
+        }
+        result._lastColorId = colors.length - 1;
+        return result;
+    }
 }
 export class TokenTheme {
     static createFromRawTokenTheme(source, customTokenColors) {
@@ -204,24 +220,15 @@ export class TokenTheme {
                 changed++;
             }
         }
-        if (changed === 0) {
-            return;
-        }
-        this._root.reindexColors(translation);
-        const colorMap = new ColorMap();
-        for (let i = 1; i < newColorMap.length; i++) {
-            const color = newColorMap[i];
-            if (color) {
-                colorMap.getId(normalizeColorHex(color));
-            }
-        }
+        const colorMap = ColorMap.fromIndexedColors(newColorMap);
+        if (changed !== 0)
+            this._root.reindexColors(translation);
         this._colorMap = colorMap;
         this._cache.clear();
     }
 }
 function normalizeColorHex(color) {
-    const hex = color.toString().toUpperCase().replace('#', '');
-    return hex.length >= 6 ? hex.substring(0, 6) : hex;
+    return Color.Format.CSS.formatHexA(color, true).substring(1).toUpperCase();
 }
 function findNearestColorIndex(hex, palette) {
     const r0 = parseInt(hex.substring(0, 2), 16);

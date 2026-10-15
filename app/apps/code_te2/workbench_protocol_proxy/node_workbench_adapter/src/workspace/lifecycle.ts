@@ -66,6 +66,7 @@ export interface LifecycleRuntime {
   authority: string;
   extRpcIds: LifecycleExtRpcIds;
   readTextFile: (path: string) => Promise<string>;
+  getWatcherExcludes: (root: string) => string[];
   uriForPath: (path: string, authority: string | null) => Record<string, unknown>;
   uriToString: (uri: unknown) => string;
   resolveLanguageId: (
@@ -614,7 +615,8 @@ export async function setupFileWatcher(runtime: LifecycleRuntime, workspaceRoot:
       const authority = runtime.useRemote ? runtime.authority : null;
       const rootUri = runtime.uriForPath(String(workspaceRoot), authority);
       runtime.log(`[watcher] calling watch() sessionId=${sessionId} watchId=${watchId} uri=${JSON.stringify(rootUri)}`);
-      await runtime.watcher.mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes: ["**/.git/*.lock"] }]);
+      const excludes = runtime.getWatcherExcludes(String(workspaceRoot));
+      await runtime.watcher.mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes }]);
       runtime.onEvent({ type: "watcher/subscribed", ts_ms: Date.now(), root: String(workspaceRoot) });
       runtime.log(`[watcher] watch() call returned OK — subscribed to ${workspaceRoot}`);
     } else {

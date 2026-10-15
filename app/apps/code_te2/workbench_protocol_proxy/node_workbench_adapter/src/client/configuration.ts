@@ -301,6 +301,29 @@ export function extractExtensionConfigDefaults(scannedExtensions: unknown[], log
   return { contents: allContents, keys: allKeys };
 }
 
+// Match VS Code's resource-scoped watcher defaults, then layer the same User
+// and workspace settings sent to the extension host. False explicitly re-enables
+// a default exclusion. This must be recomputed for each subscription/restart.
+export function resolveWatcherExcludes(runtime: ConfigurationRuntime, folder: string): string[] {
+  const values: Record<string, boolean> = {
+    ".git/objects/**": true, ".git/subtree-cache/**": true, ".hg/store/**": true,
+    "*/.git/objects/**": true, "*/.git/subtree-cache/**": true, "*/.hg/store/**": true,
+  };
+  const configuration = buildConfigurationInitData(runtime, folder, null);
+  for (const scope of [configuration.userRemote, configuration.workspace]) {
+    const files = isRecord(scope) && isRecord(scope.contents) ? scope.contents.files : null;
+    const excludes = isRecord(files) ? files.watcherExclude : null;
+    if (!isRecord(excludes)) continue;
+    for (const [pattern, enabled] of Object.entries(excludes)) {
+      if (typeof enabled === "boolean") values[pattern] = enabled;
+    }
+  }
+  // Framework-owned lock suppression is independent of user exclusions.
+  values["**/.git/*.lock"] = true;
+  values["**/.git/index.lock+"] = true;
+  return Object.keys(values).filter(pattern => values[pattern]);
+}
+
 export function buildConfigurationInitData(runtime: ConfigurationRuntime, folder: string | null, authority: string | null): Record<string, unknown> {
   const empty = emptyConfigSection();
   const extracted = runtime.rawExtensionConfigs ?? { contents: {}, keys: [] };

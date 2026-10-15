@@ -1,5 +1,28 @@
 # Monaco core and quick-fix tracker
 
+## Based Ayu reload / watcher follow-up
+
+- [x] Approved read-only comparison without client reload/runtime restart.
+- [x] Exact live Electron/Cefrium comparison: same selected theme and palette,
+  different `.mtk6` CSS (Ayu #ff8f40 vs stock #ce9178); isolated live-object
+  reproduction throws `Illegal value for token color: RGBA(1`.
+- [x] Approved fixes/builds/tests/docs, with publication and restarts excluded.
+- [x] Fork fix preserves alpha, duplicate palette indices and repeat application.
+- [x] WBA recursive watch resolves defaults/User/workspace excludes on every
+  subscription, honoring false overrides and retaining Git lock suppression.
+- [x] `gulp editor-distro`: zero compilation errors; published only generated
+  tokenization JS/map. Retained unrelated vendored semantic-theme changes.
+- [x] App typecheck, Monaco bootstrap and host/WBA builds pass.
+- [x] 62 focused theme/TextMate/configuration/document/command regressions pass.
+  Updated an older theme-test DOM mock to include the existing style API.
+- [x] Isolated Chrome cold/live palette regression passes against the actual
+  published ESM, including alpha CSS, duplicate indices and repeated application.
+- [x] User reports the resulting slice appears to be working and authorizes
+  checkpoint commit/push. Live acceptance is user-reported; client publication
+  and WBA lifecycle were user-managed, not performed by the agent.
+- [ ] Separate issue: Electron console registration can disappear after page
+  reload; no repair/reload performed as part of this slice.
+
 ## Investigation and plan
 
 - [x] User approved read-only audit of build minimality and hover quick fixes.
@@ -108,6 +131,22 @@ quick-fix workstream.
     real dispatch-adapter regression. User live acceptance is recorded above.
 - [ ] Quick Fix provider lifecycle/edit support remains the following substep,
   not implemented by the hover-command foundation.
+
+### Context-command compatibility follow-up
+
+- [x] User reported repeated Unsupported workbench command: _setContext plus
+  unhandled promise rejections after enabling the real command dispatch hook.
+- [x] Verify pinned VS Code source: extHostApiCommands translates public
+  setContext to _setContext, registered by contextKeyService.ts. This was a
+  command compatibility gap, not a TypeScript runtime/type failure.
+- [x] User approved a narrow alias fix: both names reach the existing context
+  store, without broad command passthrough or changed value policy.
+- [x] Add real Workbench dispatch regression covering _setContext true/false/
+  undefined, public alias compatibility and reset. All 24 focused command/hover/
+  navigation tests, app typecheck and normal host/WBA build pass. Host output is
+  unchanged; only the WBA command-runtime module needs runtime replacement.
+- [ ] Restart WBA and verify the _setContext rejection spam stops live. No
+  runtime restart or client publication was performed by the agent.
 
 - [ ] Audit edit/command owner and first supported safe action subset.
 - [ ] Approve typed provider/provide/resolve/release and edit-execution scope.

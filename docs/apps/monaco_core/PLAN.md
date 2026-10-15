@@ -11,6 +11,31 @@ after the remaining measurements and ownership checks.
 
 ## Source-backed baseline
 
+### Approved maintenance follow-up: theme restoration and watcher exclusions
+
+User approved source fixes, regressions and normal bundle builds without live
+runtime restarts or client publication. Compare clients without refreshing the
+evidence first. Electron and Cefrium both selected Based Ayu Dark with identical
+TextMate palettes, but Cefrium's token CSS still contained stock dark colors.
+A disposable token-theme reindex in that client reproduced `Illegal value for
+token color: RGBA(1` without mutating its active theme.
+
+- Fix the fork's token-palette adoption: format Color objects as hexadecimal
+  through Color.Format.CSS, retaining alpha; preserve exact externally encoded
+  indices including duplicate colors. Reapplication must also replace a palette
+  when existing rule indices do not move. Test unit and real browser cold/live
+  paths. Publish only the generated tokenization module/map, then rebuild the
+  bootstrap and host. Do not replace unrelated ESM: this checkout's generated
+  standaloneThemeService omits already-vendored semantic-selector patches.
+- Resolve WBA recursive-watch excludes from the existing configuration projection
+  on every subscription: VS Code defaults, User, then workspace boolean overrides,
+  plus framework-owned Git lock suppression. Restart must reread current settings
+  instead of using the hardcoded lock-only list. Code Server settings sync already
+  runs before launch; this fixes the separate management-IPC watcher request.
+- No Python/myPyC or native-client source changes. Activation needs matching host
+  assets in each native client and a new WBA process. Preserve the unrelated
+  Electron console-reconnect report as a separate investigation.
+
 - `worktrees/vscode-te2-diff/build/gulpfile.editor.js` defines `editor-distro`:
   extract standalone editor sources with `shakeLevel: 2` (class members), compile
   ESM and publish core resources. This excludes the full VS Code workbench but

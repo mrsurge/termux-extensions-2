@@ -2174,6 +2174,13 @@ code-server parcel watcher detects disk change
 ### VS Code watcher settings sync (dual-watcher suppression)
 The WBA/code-server side remains the primary watcher source. TE2 fallback watcher settings should avoid running a duplicate expensive watcher unless the native watcher path is unavailable or explicitly degraded.
 
+Code Server's settings-file synchronization and WBA's management-IPC recursive
+watch are separate consumers. WBA resolves its `excludes` from the existing
+configuration projection for every subscription/restart: VS Code resource
+defaults, User, then workspace boolean overrides, with Git lock suppression
+retained. Writing settings.json alone does not configure that explicit watch.
+Regression: `tests/watcher_exclusions.test.mjs` in Code TE2.
+
 ---
 
 ## 20) Cursor stability and published Monaco artifacts
@@ -2589,6 +2596,12 @@ semantic style property. TextMate-derived rules remain the fallback when a
 theme has no explicit semantic style. This keeps encoded TextMate scopes,
 semantic-token rules, and visible Monaco theme state aligned without a
 separate built-in-theme parser.
+The Monaco token-theme reindexer must preserve external palette indices exactly,
+including duplicate RGB values and alpha. Color.toString() may return rgba(),
+not hexadecimal; use Color.Format.CSS for keys rather than slicing that string.
+Rebuild/publish only the required ESM modules when the source fork and vendored
+semantic-theme patches differ. Regression: `test/te2/theme-palette-alpha.mjs`
+in the fork, plus Code TE2's `tests/textmate_palette_alpha.test.mjs`.
 TextMate grammar catalog persistence is independent of selected-theme projection:
 the extension registry stores only bounded contribution descriptors, identities and
 filename/extension language associations, while raw grammar bodies are loaded on

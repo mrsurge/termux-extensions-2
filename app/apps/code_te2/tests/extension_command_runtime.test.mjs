@@ -19,7 +19,7 @@ const RPC_IDS = {
   ExtHostCommands: 89,
 };
 
-test('real Workbench dispatch adapter retains command registration, execution callbacks and retirement', async () => {
+test('real Workbench dispatch adapter retains context updates, command registration, callbacks and retirement', async () => {
   const sent = [], navigation = [];
   const commands = new ExtensionCommandRuntime({
     rpcIds: RPC_IDS, activateByEvent: async () => {}, syncSelection() {},
@@ -39,6 +39,26 @@ test('real Workbench dispatch adapter retains command registration, execution ca
   const dispatch = (method, args) => handleExtHostRequest(client._extHostDispatchRuntime(), {
     kind: 'ext', type: 1, req: 42, rpcId: RPC_IDS.MainThreadCommands, method, args,
   });
+  commands.setExtensions([{
+    id: 'sample.context', contributes: {
+      commands: [{ command: 'sample.contextAction', title: 'Context action', enablement: 'sample.contextReady' }],
+      menus: { 'editor/context': [{ command: 'sample.contextAction' }] },
+    },
+  }]);
+  const enabled = async () => (await commands.resolveMenu({ menu: 'editor/context', path: '/workspace/main.rs' })).actions[0].enabled;
+  assert.equal(await enabled(), false);
+  // This is the actual API→ext-host wire name, not just the public API alias.
+  dispatch('$executeCommand', ['_setContext', ['sample.contextReady', true]]);
+  assert.equal(await enabled(), true);
+  dispatch('$executeCommand', ['_setContext', ['sample.contextReady', false]]);
+  assert.equal(await enabled(), false);
+  dispatch('$executeCommand', ['setContext', ['sample.contextReady', true]]);
+  assert.equal(await enabled(), true);
+  dispatch('$executeCommand', ['_setContext', ['sample.contextReady', undefined]]);
+  assert.equal(await enabled(), false);
+  dispatch('$executeCommand', ['_setContext', ['sample.contextReady', true]]);
+  commands.resetContext();
+  assert.equal(await enabled(), false);
   assert.equal(dispatch('$registerCommand', [command]), true);
   await commands.execute({ surface: 'hover', command, arguments: [0], path: '/workspace/main.rs' });
   assert.deepEqual(sent, [[command, 0]]);

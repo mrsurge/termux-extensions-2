@@ -354,7 +354,8 @@ export class ExtensionCommandRuntime {
           return { handled: true, replyResult: [...this.registeredCommands] };
         case "$executeCommand": {
           const commandArgs = Array.isArray(message.args?.[1]) ? message.args?.[1] : [];
-          if (command === "setContext") {
+          // The extension API translates setContext to the private wire command.
+          if (command === "_setContext" || command === "setContext") {
             const key = stringValue(commandArgs?.[0]);
             if (!key) {
               return { handled: true, error: new Error("setContext requires a key") };

@@ -119445,8 +119445,7 @@ function resolveParsedTokenThemeRules(parsedThemeRules, customTokenColors) {
   return new TokenTheme(colorMap, root);
 }
 function normalizeColorHex(color) {
-  const hex = color.toString().toUpperCase().replace("#", "");
-  return hex.length >= 6 ? hex.substring(0, 6) : hex;
+  return Color.Format.CSS.formatHexA(color, true).substring(1).toUpperCase();
 }
 function findNearestColorIndex(hex, palette) {
   const r0 = parseInt(hex.substring(0, 2), 16);
@@ -119528,7 +119527,7 @@ var init_tokenization = __esm({
       }
     };
     colorRegExp = /^#?([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/;
-    ColorMap = class {
+    ColorMap = class _ColorMap {
       constructor() {
         this._lastColorId = 0;
         this._id2color = [];
@@ -119554,6 +119553,20 @@ var init_tokenization = __esm({
       }
       getColorMap() {
         return this._id2color.slice(0);
+      }
+      static fromIndexedColors(colors) {
+        const result = new _ColorMap();
+        for (let i2 = 1; i2 < colors.length; i2++) {
+          const color = colors[i2];
+          result._id2color[i2] = color;
+          if (color) {
+            const key = normalizeColorHex(color);
+            if (!result._color2id.has(key))
+              result._color2id.set(key, i2);
+          }
+        }
+        result._lastColorId = colors.length - 1;
+        return result;
       }
     };
     TokenTheme = class {
@@ -119626,17 +119639,9 @@ var init_tokenization = __esm({
             changed++;
           }
         }
-        if (changed === 0) {
-          return;
-        }
-        this._root.reindexColors(translation);
-        const colorMap = new ColorMap();
-        for (let i2 = 1; i2 < newColorMap.length; i2++) {
-          const color = newColorMap[i2];
-          if (color) {
-            colorMap.getId(normalizeColorHex(color));
-          }
-        }
+        const colorMap = ColorMap.fromIndexedColors(newColorMap);
+        if (changed !== 0)
+          this._root.reindexColors(translation);
         this._colorMap = colorMap;
         this._cache.clear();
       }

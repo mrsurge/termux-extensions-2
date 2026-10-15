@@ -225,6 +225,7 @@ export interface CodeNavigationRuntimeDeps {
 }
 
 export interface WorkspaceLifecycleRuntimeDeps {
+  getWatcherExcludes: LifecycleRuntime["getWatcherExcludes"];
   extProtocol: unknown;
   state: LifecycleRuntime["state"];
   activeEditorId: string | null;
@@ -612,6 +613,7 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
   let currentMgmtIpc = deps.mgmtIpc;
   let currentFsWatcherSub = deps.fsWatcherSub;
   return {
+    getWatcherExcludes: (root) => deps.getWatcherExcludes(root),
     ensureConnected: () => ensureConnected(deps.extProtocol),
     state: deps.state,
     session: {

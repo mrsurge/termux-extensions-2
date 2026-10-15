@@ -37,6 +37,7 @@ import {
 } from "../protocol/ext-host-dispatch.mjs";
 import {
   buildConfigurationInitData,
+  resolveWatcherExcludes,
   buildSettingsSchema,
   extractExtensionConfigDefaults,
   getVirtualVscodeContent,
@@ -1500,6 +1501,7 @@ export class WorkbenchClient {
 
   _workspaceLifecycleRuntime() {
     return createWorkspaceLifecycleRuntime({
+      getWatcherExcludes: (root) => resolveWatcherExcludes(this._configurationRuntime(), root),
       extProtocol: this.ext?.protocol ?? null,
       state: this.state,
       activeEditorId: this._activeEditorId,
