@@ -2489,6 +2489,9 @@ interface MonacoBootWindowLike extends Window {
           typeof registerEditorSaveMirrorSocketHandlers
         >[0],
         buildSaveMirrorSocketDeps({
+          onGuardedDraftApplied: function (path: string, content: string) {
+            _wbPublishDidChange(path, content, model?.getLanguageId?.() || '', _wbCurrentGeneration());
+          },
           rpcNotifications: editorRpcTransport,
           getCurrentPath: function () {
             return currentPath;

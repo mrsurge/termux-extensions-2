@@ -71,6 +71,8 @@ export const EXPLORER_RPC_METHODS = {
   pulseAlive: "explorer.pulse.alive",
   refresh: "explorer.refresh",
   reviewDiscard: "explorer.review.discard",
+  reviewRevertHunk: "explorer.review.revertHunk",
+  reviewSaveHunks: "explorer.review.saveHunks",
   reviewList: "explorer.review.list",
   reviewSave: "explorer.review.save",
   searchCancel: "explorer.search.cancel",

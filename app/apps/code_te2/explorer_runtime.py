@@ -262,11 +262,12 @@ class ExplorerDispatcher:
         )
 
         # 1. Review List
-        from .explorer import review
-        reviews = await review.list_reviews(project_root, lightweight=True)
+        from .explorer.services.review_projection import owner
+        projection = await owner.snapshot(project_root)
+        reviews = projection['entries']
         await publish_review_state_changed(
             project_root,
-            {"entries": reviews},
+            projection,
             source=source,
         )
 
@@ -1169,6 +1170,28 @@ class ExplorerDispatcher:
             result,
             msg_id,
         )
+
+    async def handle_review_saveHunks(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.search_review import parse_review_revert_hunk_params, ExplorerSearchReviewContractError
+        from .explorer.services.review_projection import owner
+        try:
+            params = parse_review_revert_hunk_params(payload)
+            result = await owner.save_hunks(self.project_root, params['rel'], params['identity'], params['hunkIndices'])
+        except (ExplorerSearchReviewContractError, ValueError, RuntimeError, OSError) as exc:
+            return await self.send_error(str(exc), msg_id)
+        await self.emit_personal('explorer.review.hunks.saved', result, msg_id)
+        await self.broadcast_review_state()
+
+    async def handle_review_revertHunk(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.search_review import parse_review_revert_hunk_params, ExplorerSearchReviewContractError
+        from .explorer.services.review_projection import owner
+        try:
+            params = parse_review_revert_hunk_params(payload)
+            result = await owner.revert(self.project_root, params['rel'], params['identity'], params['hunkIndices'])
+        except (ExplorerSearchReviewContractError, ValueError, RuntimeError) as exc:
+            return await self.send_error(str(exc), msg_id)
+        await self.emit_personal('explorer.review.hunk.reverted', result, msg_id)
+        await self.broadcast_review_state()
 
     async def handle_review_list(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (

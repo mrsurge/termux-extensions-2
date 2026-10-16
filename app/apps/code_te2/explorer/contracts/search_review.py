@@ -118,6 +118,29 @@ class ReviewFilesParams(TypedDict):
     files: list[str]
 
 
+class ReviewRevertHunkParams(TypedDict):
+    rel: str
+    identity: str
+    hunkIndex: int
+    hunkIndices: list[int]
+
+
+def parse_review_revert_hunk_params(payload: object) -> ReviewRevertHunkParams:
+    raw = _as_object(payload)
+    rel = _required_string(raw.get('rel'), 'rel')
+    identity = _required_string(raw.get('identity'), 'identity')
+    indexes = raw.get('hunkIndices', [raw.get('hunkIndex')])
+    if (rel.startswith(('/', '\\')) or '..' in rel.split('/') or not isinstance(indexes, list)
+            or not 0 < len(cast(list[object], indexes)) <= 10000):
+        raise ExplorerSearchReviewContractError('Invalid draft hunk target')
+    selected: list[int] = []
+    for index in cast(list[object], indexes):
+        if type(index) is not int or not 0 <= index < 10000 or index in selected:
+            raise ExplorerSearchReviewContractError('Invalid draft hunk target')
+        selected.append(index)
+    return {'rel': rel, 'identity': identity, 'hunkIndex': selected[0], 'hunkIndices': selected}
+
+
 class SearchNameResultEntry(TypedDict):
     path: str
     rel: str

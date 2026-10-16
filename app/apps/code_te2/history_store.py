@@ -827,6 +827,18 @@ class HistoryStore:
         except Exception:
             return 0
 
+    def replace_review_draft(self, project_path: str, file_path: str, expected_revision: int,
+                            expected_sha256: str, content: str, disk_sha256: str,
+                            *, advance_base: bool = False) -> JsonDict:
+        sidecar = ProjectSidecar.load_or_create(self._normalize_project_path(project_path))
+        entry = sidecar.replace_review_draft(file_path, expected_revision, expected_sha256, content, disk_sha256, advance_base=advance_base)
+        try:
+            idx = DraftIndexSidecar.load_or_create(project_path)
+            idx.update_from_abs_file(file_path, unsaved=bool(entry.get('unsaved')))
+        except Exception:
+            pass  # The committed sidecar remains authoritative if decoration indexing fails.
+        return entry
+
     def upsert_cached_document(
         self,
         project_path: str,

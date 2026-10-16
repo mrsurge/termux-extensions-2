@@ -11,6 +11,7 @@ import {
   type ExplorerContentQueryWidgetState,
 } from "./content-query-widget.ts";
 import { createExplorerReviewResultsRenderer } from "./review-results-renderer.ts";
+import { createReviewProjection } from './review-projection.ts';
 import { createExplorerSearchController } from "./controller.ts";
 import type { ActualSearchBenchmarkCase } from "./benchmark.ts";
 import { renderSearchOverlayBody } from "./overlay-body-renderer.ts";
@@ -66,9 +67,6 @@ interface ExplorerSearchResultsPayload {
   base?: ExplorerDiffBaseInfo | null;
 }
 
-interface ExplorerReviewEntriesPayload {
-  entries?: unknown[];
-}
 
 interface SearchModeOption {
   id: ExplorerSearchMode;
@@ -123,12 +121,6 @@ function getSearchResultsPayload(
   return value as ExplorerSearchResultsPayload;
 }
 
-function getReviewEntriesPayload(
-  value: unknown,
-): ExplorerReviewEntriesPayload | null {
-  if (!isRecord(value)) return null;
-  return value as ExplorerReviewEntriesPayload;
-}
 
 export function createExplorerSearchOverlayController(
   deps: ExplorerSearchOverlayControllerDeps,
@@ -154,6 +146,7 @@ export function createExplorerSearchOverlayController(
   let searchDebounceTimer: ExplorerSearchTimer = null;
   let lastKnownProjectPath = "";
   let reviewEntries: unknown[] = [];
+  const reviewProjection = createReviewProjection();
   let contentSearchOptions: ExplorerContentSearchOptions = {
     isRegex: false,
     isCaseSensitive: false,
@@ -223,6 +216,13 @@ export function createExplorerSearchOverlayController(
   });
 
   const reviewResultsRenderer = createExplorerReviewResultsRenderer({
+    revertHunk: (rel, identity, hunkIndex) =>
+      deps.requestExplorer(EXPLORER_RPC_METHODS.reviewRevertHunk, { rel, identity, hunkIndex }),
+    revertHunks: (rel, identity, hunkIndices) =>
+      deps.requestExplorer(EXPLORER_RPC_METHODS.reviewRevertHunk, { rel, identity, hunkIndices }),
+    saveHunks: (rel, identity, hunkIndices) =>
+      deps.requestExplorer(EXPLORER_RPC_METHODS.reviewSaveHunks, { rel, identity, hunkIndices }),
+    saveFiles: files => deps.requestExplorer(EXPLORER_RPC_METHODS.reviewSave, { files }),
     fetchReviewResults: (force) => searchController.fetchReviewResults(force),
     hasExplorerRpc: () => deps.hasExplorerRpc(),
     notifyExplorer: (method, payload) => {
@@ -519,6 +519,7 @@ export function createExplorerSearchOverlayController(
     sendBus: (method, payload) => deps.notifyExplorer(method, payload),
     requestBus: (method, payload, timeoutMs) =>
       deps.requestExplorer(method, payload, timeoutMs),
+    applyReviewProjection: handleReviewEntriesUpdated,
     getProjectPath: () => deps.getProjectPath(),
     getSearchOverlayVisible: () => searchOverlayVisible,
     setSearchOverlayVisible: (next) => {
@@ -549,6 +550,10 @@ export function createExplorerSearchOverlayController(
       searchDebounceTimer = next;
     },
     setLastKnownProjectPath: (next) => {
+      if (next !== lastKnownProjectPath) {
+        reviewProjection.reset(next || '');
+        reviewEntries = [];
+      }
       lastKnownProjectPath = next || "";
     },
     getContentSearchOptions: () => contentSearchOptions,
@@ -644,10 +649,9 @@ export function createExplorerSearchOverlayController(
   }
 
   function handleReviewEntriesUpdated(payload: unknown): void {
-    const typedPayload = getReviewEntriesPayload(payload);
-    reviewEntries = Array.isArray(typedPayload?.entries)
-      ? typedPayload.entries
-      : [];
+    const next = reviewProjection.apply(payload, deps.getProjectPath());
+    if (!next) return;
+    reviewEntries = next;
     if (searchMode !== "review") {
       return;
     }

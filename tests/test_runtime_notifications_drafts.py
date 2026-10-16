@@ -14,7 +14,7 @@ def test_draft_notification_without_explorer_clients_does_not_forward_http() -> 
             with (
                 patch.object(runtime_notifications.manager, "has_connections", return_value=False),
                 patch.object(runtime_notifications, "mark_draft_cache_dirty") as mark_dirty,
-                patch.object(runtime_notifications, "_schedule_debounce_task") as schedule,
+                patch.object(runtime_notifications._draft_projection, "submit") as schedule,
             ):
                 runtime_notifications.notify_draft_state_changed("/workspace/project")
             mark_dirty.assert_not_called()
@@ -32,11 +32,12 @@ def test_draft_notification_with_explorer_clients_keeps_local_publication() -> N
             with (
                 patch.object(runtime_notifications.manager, "has_connections", return_value=True),
                 patch.object(runtime_notifications, "mark_draft_cache_dirty") as mark_dirty,
-                patch.object(runtime_notifications, "_schedule_debounce_task") as schedule,
+                patch.object(runtime_notifications._draft_projection, "submit") as schedule,
             ):
                 runtime_notifications.notify_draft_state_changed("/workspace/project")
             mark_dirty.assert_called_once_with(Path("/workspace/project"))
-            assert schedule.call_args.kwargs["name"] == "code_te2_draft_decorations"
+            schedule.assert_called_once()
+            assert schedule.call_args.args[0].__name__ == 'do_broadcast'
         finally:
             runtime_notifications.set_explorer_event_loop(None)
 

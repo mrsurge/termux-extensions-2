@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Mapping
 from uuid import uuid4
 from typing import TypedDict
 
@@ -173,7 +174,7 @@ async def publish_preferences_changed(
 
 async def publish_review_state_changed(
     project_root: str | Path,
-    payload: ReviewStatePayload,
+    payload: Mapping[str, object],
     *,
     source: str,
 ) -> None:

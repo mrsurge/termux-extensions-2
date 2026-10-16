@@ -29,6 +29,24 @@ export function renderSearchOverlayBody(
     return;
   }
 
+  if (searchMode === 'review') {
+    let body = resultsContainer.querySelector<HTMLElement>(':scope > .fe-review-projection-body');
+    if (!body) {
+      body = document.createElement('div');
+      body.className = 'fe-review-projection-body';
+      resultsContainer.replaceChildren(body);
+    }
+    resultsContainer.querySelector(':scope > .fe-review-status')?.remove();
+    if (searchResults) deps.renderReviewResults(body, searchResults);
+    if (searchLoading || searchError) {
+      const status = document.createElement('div');
+      status.className = 'fe-review-status fe-search-status';
+      status.textContent = searchError || 'Updating drafts…';
+      resultsContainer.prepend(status);
+    }
+    return;
+  }
+
   if (searchMode === 'changes') {
     let body = resultsContainer.querySelector<HTMLElement>(':scope > .fe-changes-progressive-body');
     if (!body) {
@@ -127,10 +145,7 @@ export function renderSearchOverlayBody(
   if (searchLoading && !searchResults) {
     const loading = document.createElement("div");
     loading.className = "fe-search-loading";
-    loading.textContent =
-      searchMode === "review"
-          ? "Loading drafts…"
-          : "Searching…";
+    loading.textContent = "Searching…";
     resultsContainer.appendChild(loading);
     return;
   }
@@ -155,8 +170,6 @@ export function renderSearchOverlayBody(
     hint.className = "fe-search-hint";
     if (searchMode === "content") {
       hint.textContent = "Type at least 2 characters to search within files.";
-    } else if (searchMode === "review") {
-      hint.textContent = "Review unsaved draft edits across files.";
     }
     resultsContainer.appendChild(hint);
     return;
@@ -164,7 +177,5 @@ export function renderSearchOverlayBody(
 
   if (searchMode === "content") {
     deps.renderContentResults(resultsContainer, searchResults);
-  } else if (searchMode === "review") {
-    deps.renderReviewResults(resultsContainer, searchResults);
   }
 }

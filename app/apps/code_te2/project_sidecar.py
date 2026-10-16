@@ -571,6 +571,67 @@ class ProjectSidecar:
                 continue
         return results
 
+    def read_review_snapshot(self) -> tuple[int, list[DraftEntry]]:
+        """Read persisted membership strictly; failure is never an empty list.
+
+        Unlike reload's recovery semantics this is a projection read, not a
+        migration or repair. Do not mutate the shared sidecar cache here.
+        """
+        data = self._read_review_state()
+        revision = cast(int, data.get('document_state_revision', 0))
+        entries: list[DraftEntry] = []
+        for raw in _as_dict(data['session_cache']).values():
+            if not isinstance(raw, dict):
+                raise ValueError('Invalid draft review entry')
+            entry = _as_dict(raw)
+            if entry.get('unsaved'):
+                if not isinstance(entry.get('file_path'), str) or not isinstance(entry.get('content'), str):
+                    raise ValueError('Invalid draft review content')
+                entries.append(dict(entry))
+        return revision, entries
+
+    def _read_review_state(self) -> JsonDict:
+        decoded = cast(object, json.loads(self._path.read_text(encoding='utf-8')))
+        if not isinstance(decoded, dict):
+            raise ValueError('Invalid draft review sidecar')
+        data = _as_dict(decoded)
+        revision = data.get('document_state_revision', 0)
+        cache = data.get('session_cache')
+        if data.get('version') != self.VERSION or type(revision) is not int or not isinstance(cache, dict):
+            raise ValueError('Invalid draft review snapshot')
+        return data
+
+    def replace_review_draft(self, file_path: str, expected_revision: int,
+                            expected_sha256: str, content: str, disk_sha256: str,
+                            *, advance_base: bool = False) -> DraftEntry:
+        """Synchronous worker-owned compare/commit; propagate persistence errors."""
+        data = self._read_review_state()
+        key = _make_file_cache_key(self.project_path, file_path)
+        cache = _as_dict(data['session_cache'])
+        entry = _as_dict(cache.get(key))
+        previous_content = entry.get('content')
+        if (not entry.get('unsaved') or not isinstance(previous_content, str)
+                or entry.get('document_revision', 0) != expected_revision
+                or hashlib.sha256(previous_content.encode('utf-8')).hexdigest() != expected_sha256):
+            raise ValueError('Draft changed; refresh the review before reverting')
+        previous_state = self._data
+        self._data = data
+        try:
+            digest = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            updated = dict(entry)
+            updated.update(content=content, content_length=len(content), content_sha256=digest,
+                           unsaved=digest != disk_sha256, document_revision=self.advance_document_revision(file_path),
+                           updated_at=_utc_timestamp())
+            if advance_base or digest == disk_sha256:
+                updated['base_sha256'] = disk_sha256
+            cache[key] = updated
+            self._data['session_cache'] = cache
+            self.save()
+            return updated
+        except Exception:
+            self._data = previous_state
+            raise
+
     def prune_clean_drafts(self) -> int:
         """Remove cached draft entries that are explicitly marked unsaved == False."""
         cache = _as_dict(self._data.get("session_cache"))

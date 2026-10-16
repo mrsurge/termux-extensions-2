@@ -829,13 +829,51 @@ When a file is edited:
 4. Explorer UI applies `data-hasDraft="1"` attribute to file/folder nodes (CSS handles visual indicator)
 
 ### Review panel flow
-1. User opens Review Edits tab -> frontend sends `review:list`
-2. Server calls `review.list_reviews(project, lightweight=False)` -> computes diff hunks per draft
-3. Server broadcasts `review:setEntries` with entries
-4. Live updates: `_broadcast_draft_decorations()` also broadcasts `review:setEntries`, so the review list auto-refreshes when drafts change
-5. User selects files and clicks Save/Discard:
-   - `review:save` -> `handle_review_save` -> writes to disk, clears caches, emits editor cache state through the editor backend hook
-   - `review:discard` -> `handle_review_discard` -> clears caches, reverts editor if file open, emits editor cache state through the editor backend hook
+
+The Drafts overlay requests `explorer.review.list` on its Explorer RPC lane.
+Initial requests, session bootstrap and live/post-mutation updates share
+`explorer/services/review_projection.py`. The owner builds complete snapshots
+off-loop, retaining unchanged per-file diffs by draft hash/disk stamp. Strict
+sidecar reads distinguish a real empty membership from a failed read and check
+the persisted document revision before/after building. Project-generation changes
+reject the result rather than publishing it under a new project.
+
+Snapshots carry project root/generation, projection ID, revision and `complete`.
+Live snapshots use `explorer.review.entries.updated`. The client rejects malformed,
+wrong-project and stale snapshots, atomically reconciles membership and retains
+unchanged row objects/DOM groups/selection. Only omissions from an accepted full
+snapshot remove items. Refresh/loading errors retain the last complete view.
+
+Save/Discard remain whole-file operations through `explorer.review.save/discard`;
+mutation replies have separate completion methods and never impersonate empty
+entries notifications. The backend still owns writes/cache clearing and editor
+notifications. Draft persistence stores full document content. Review-only hunks
+now include three context lines; shared inline-editor diffs retain zero context.
+Each review hunk has a confirmed `explorer.review.revertHunk` action. Backend
+projection/item, draft revision/hash and disk identity guards protect exact draft
+replacements; disk remains unchanged. Strict sidecar persistence has no
+success-shaped fallback. Conditional editor mirrors check prior model content
+before applying and update WBA through the existing document publisher.
+Bulk Save/Discard remain whole-file operations; selected hunk Save uses the
+separate guarded `explorer.review.saveHunks` method.
+Drafts uses the shared Explorer overlay file/hunk chrome with independent collapse
+and checkbox controls. Parent checkboxes select every hunk; partial selection is
+indeterminate. Selection belongs to the retained
+file identity and is cleared when it changes. Revert Selected sends hunk indexes
+together per file to the same guarded RPC for one draft commit; files are processed
+sequentially, without cross-file atomicity or mutation retries. File Discard remains
+independent of selection and available when preview hunks are suppressed.
+Save Selected converts retained hunks into exact UTF-8 byte edits for existing
+`fs.textEdits.apply`, then advances the latest full draft's base hash without
+changing its content. Newer edits survive; matching content/disk hashes become
+clean. Original-base admission, post-write disk validation and strict fresh-draft
+compare/commit guard reconciliation. A committed disk write is not rolled back if
+sidecar reconciliation fails; explicit result flags identify that case. Owned tasks
+finish after caller cancellation; attempted receipts prohibit replaying uncertain
+writes. Same-content conditional editor mirrors update base/dirty metadata without
+replacing model text. Existing pipe size/path/encoding limits remain; new files
+retain whole-file Save. Disk and sidecar are not a joint atomic transaction.
+Plan/tests/activation gates: `docs/apps/draft_overlay/PLAN.md` and `TRACKER.md`.
 
 ### Cross-surface communication (explorer -> editor)
 Explorer does not connect to the editor frontend directly. Cross-surface actions flow through backend hooks/services and then through the target surface notification lane:
