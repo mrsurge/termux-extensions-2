@@ -300,3 +300,34 @@ provide/resolve/release lifecycle tests; stale/disconnect/version guards;
 single-file edit undo and command tests; strict checks/build; approved live
 acceptance with representative extensions. Preserve ordinary hover latency:
 quick-fix discovery must not block the existing hover text.
+
+### Minimal Quick Fix implementation (2026-10-15)
+
+User approved the TypeScript-only editor/WBA slice after draft-system checkpoint
+`2a392d77`. WBA ProviderRegistry owns CodeAction registration/selectors, snapshot
+and resync; MainThreadLanguageFeatures-scoped unregister retires only this slice's
+providers. `QuickFixService` owns bounded exact-client/path/version result receipts,
+ExtHost provide/resolve/release, provider identity checks, session/workspace reset
+and command admission. It requests only quickfix kinds and drops non-quickfix or
+untyped results, even when the provider omitted kind metadata. No provider polling
+or action execution is added to ordinary hover text generation.
+
+The editor registers one wildcard Monaco provider using the public metadata
+argument, so Monaco supplies intersecting markers and its existing hover/lightbulb
+Quick Fix UI. With no diagnostic markers, in Web Worker mode or for refactor/source
+requests it does not call WBA. A private, single-use action gateway resolves and
+validates before execution. Only current-model plain text edits or admitted
+command-only fixes are supported initially. Reject multi-file/resource/notebook,
+snippet/EOL, overlapping/out-of-model/version-mismatched and mixed edit-plus-command
+actions in their entirety. Plain text edits use executeEdits bracketed by undo
+stops, leaving normal draft/WBA publishing intact; commands use the existing
+exact-client extension executor with a Quick Fix admission surface.
+
+Document/model version, model instance, connection generation, result disposal and
+provider reset fence application. Content/model changes dispose retained lists;
+late cancelled/stale provide results are released, not presented. Releases defer
+while a command is executing so extension cache-backed arguments stay alive.
+Frontend cancellation fences consumption; it does not claim remote computation
+has been cancelled. New WBA process and frontend asset publication/reload are
+activation prerequisites; no Python/mypyc, Rust/native, fork or Android source
+change or runtime transition is part of this slice.

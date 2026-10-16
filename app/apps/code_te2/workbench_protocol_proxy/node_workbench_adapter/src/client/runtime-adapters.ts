@@ -371,6 +371,7 @@ export interface ExtHostDispatchRuntimeDeps {
   replyEmptyMethods: ReadonlySet<string>;
   replyNullMethods: ReadonlySet<string>;
   mainThreadConsoleRpcId: number;
+  mainThreadLanguageFeaturesRpcId: number;
   mainThreadExtensionServiceRpcId: number;
   mainThreadLoggerRpcId: number;
   mainThreadOutputServiceRpcId: number;
@@ -794,6 +795,7 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
     providerRegistry: deps.providerRegistry,
     extRequests: deps.requestOwner,
     rpcIds: {
+      MainThreadLanguageFeatures: deps.mainThreadLanguageFeaturesRpcId,
       MainThreadConsole: deps.mainThreadConsoleRpcId,
       MainThreadExtensionService: deps.mainThreadExtensionServiceRpcId,
       MainThreadLogger: deps.mainThreadLoggerRpcId,

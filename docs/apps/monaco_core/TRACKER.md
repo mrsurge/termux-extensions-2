@@ -129,8 +129,33 @@ quick-fix workstream.
     remain. A new WBA process is required; no automatic restart was performed.
   - Final pre-commit targeted regression run passes all 72 tests, including the
     real dispatch-adapter regression. User live acceptance is recorded above.
-- [ ] Quick Fix provider lifecycle/edit support remains the following substep,
-  not implemented by the hover-command foundation.
+- [x] Quick Fix provider lifecycle/edit subset implemented in its separately
+  approved follow-up below, not by the earlier hover-command foundation.
+
+### Minimal diagnostic Quick Fix follow-up
+
+- [x] Draft review live accepted and committed/pushed as 2a392d77 before return
+  to this work. User approved editor/WBA TypeScript implementation/tests/build only.
+- [x] Provider registration/selectors/snapshot/resync and RPC-ID-scoped retirement;
+  bounded owner/document/version result receipts and provide/resolve/release.
+- [x] Existing Monaco diagnostic-hover/action UI integration; only quickfix kinds,
+  no refactors or normal-hover text blocking dependency.
+- [x] Guarded single-use current-document text edits with undo stops, or existing
+  admitted extension commands. Whole unsupported actions reject, never fragments.
+- [x] Version/model-instance/disconnect/reset/disposal fences and late-result
+  release; executing commands retain cache-backed arguments until completion.
+- [x] Source-based WBA type-check comparison: 104 baseline/current diagnostics,
+  zero new diagnostics (existing whole-WBA strict debt is not claimed fixed).
+- [x] 56 focused regressions pass, including the actual Workbench factory/server
+  dispatch lifecycle, hover/navigation/identity regressions and Quick Fix tests.
+  App typecheck and normal host/WBA build pass; source whitespace check passes.
+- [ ] User publishes frontend assets/reloads and restarts WBA to activate.
+- [ ] Live diagnostic Quick Fix acceptance with representative extensions.
+
+Limits: plain current-file edits or command-only fixes; no mixed edit+command,
+multi-file/resource/notebook/snippet/EOL operations, untyped actions or refactors.
+No Python/mypyc/native build is needed for this slice. No runtime transitions or
+client publication were performed by the agent.
 
 ### Context-command compatibility follow-up
 

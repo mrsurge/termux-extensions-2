@@ -51,6 +51,7 @@ export interface ExtHostDispatchRuntime {
     deleteSentMeta: (req: number) => void;
   };
   rpcIds: {
+    MainThreadLanguageFeatures: number;
     MainThreadConsole: number;
     MainThreadExtensionService: number;
     MainThreadLogger: number;
@@ -254,6 +255,7 @@ function logActivationLifecycle(runtime: ExtHostDispatchRuntime, msg: DecodedExt
 }
 
 function applyProviderRegistration(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
+  if (msg.method === '$unregister' && msg.rpcId !== runtime.rpcIds.MainThreadLanguageFeatures) return;
   if (msg.method && msg.method.startsWith("$register") && msg.method.endsWith("Provider")) {
     runtime.log(`[providers] ${msg.method} handle=${msg.args?.[0]} selector=${JSON.stringify(msg.args?.[1])?.slice(0, 300)}`);
   }

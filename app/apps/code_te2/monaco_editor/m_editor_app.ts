@@ -135,6 +135,7 @@ import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
 import { createEditorExtensionStateRuntime, buildExtensionEditorSelection } from "./editor_extension_state_runtime.ts";
 import { createEditorHoverCommandRuntime } from './editor_hover_command_runtime.ts';
+import { createEditorQuickFixRuntime } from './editor_quick_fix_runtime.ts';
 import {
   createEditorCodeInspectorRuntime,
   type CodeInspectorRuntime,
@@ -1038,6 +1039,7 @@ interface MonacoBootWindowLike extends Window {
   });
 
   let hoverCommands: ReturnType<typeof createEditorHoverCommandRuntime> | null = null;
+  let quickFixes: ReturnType<typeof createEditorQuickFixRuntime> | null = null;
 
   function isEditorWbaRpcConnected(): boolean {
     return editorWbaRpcTransport.isConnected();
@@ -1199,6 +1201,7 @@ interface MonacoBootWindowLike extends Window {
       extensionEditorMenuRuntime?.dispose();
       extensionEditorStateRuntime?.dispose();
       hoverCommands?.dispose();
+      quickFixes?.dispose();
     },
     { once: true },
   );
@@ -1411,6 +1414,21 @@ interface MonacoBootWindowLike extends Window {
 
   function installWorkbenchLanguageBridgeProviders() {
     if (_languageWorkersEnabled()) return;
+    if (!quickFixes && window.monaco) quickFixes = createEditorQuickFixRuntime({
+      monaco: window.monaco as unknown as Parameters<typeof createEditorQuickFixRuntime>[0]['monaco'],
+      getContext: _currentLanguageContext,
+      getGeneration: () => wbaConnectionRevision,
+      getClient: () => String(fileEditorSocketQuery().client_instance_id || ''),
+      isEnabled: () => !_languageWorkersEnabled(),
+      getEditor: () => (diffEditor?.getModifiedEditor?.() ?? editor) as unknown as ReturnType<Parameters<typeof createEditorQuickFixRuntime>[0]['getEditor']>,
+      call: (method, params) => {
+        if (method === 'vscode.codeActions.provide') _flushMirrorDebounce();
+        return editorWbaRpcCall(method, {
+          ...params, selection: buildExtensionEditorSelection(diffEditor?.getModifiedEditor?.() ?? editor),
+        });
+      },
+      notify: message => { editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, {message}); },
+    });
     languageBridgeProviders.installWorkbenchLanguageBridgeProviders();
   }
 
@@ -2581,6 +2599,7 @@ interface MonacoBootWindowLike extends Window {
       );
 
       registerEditorWbaRuntimeHandlers(editorWbaRpcTransport, {
+        onQuickFixProvidersChanged: () => quickFixes?.changed(),
         onDocumentSymbolsProviderRegistered(language) {
           if (currentPath && model?.getLanguageId?.() === language) {
             breadcrumbRuntime.requestSymbols(currentPath, { reason: "provider_registered" });
@@ -2610,6 +2629,7 @@ interface MonacoBootWindowLike extends Window {
           languageBridgeProviders.cacheLanguageProviderRegistration,
         resetDynamicProviderCaches: (reason?: string) => {
           hoverCommands?.reset();
+          quickFixes?.reset();
           languageBridgeProviders.resetDynamicProviderCaches(reason);
         },
         onWorkspaceSwitchedAck: function (event) {
@@ -2660,6 +2680,7 @@ interface MonacoBootWindowLike extends Window {
           console.warn("[wba] socket disconnected");
           wbaConnectionRevision += 1;
           hoverCommands?.reset();
+          quickFixes?.reset();
           wbaResyncPromise = null;
           wbaActiveModelSyncQueued = true;
         });

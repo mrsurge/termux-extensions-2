@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { QuickFixService } from '../extensions/intelligence/code-actions.mjs';
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -238,6 +239,7 @@ const REPLY_NULL_METHODS = new Set(
 );
 const PARSE_ALL_ARGS = String(process.env.TE2_PARSE_ALL_ARGS || "") === "1";
 const PARSE_ARGS_ONLY_METHODS = new Set<string>([
+  "$unregister",
   // Provider registration + minimal main-thread contract methods.
   "$registerHoverProvider",
   "$registerDocumentSymbolProvider",
@@ -803,6 +805,7 @@ export class WorkbenchClient {
   _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
+  _quickFixes: QuickFixService;
   _diagnosticSnapshots: DiagnosticsSnapshotStore;
   _semanticTokenProjections: SemanticTokenProjectionManager;
   _semanticTokenProviderSignatures: Map<string, string>;
@@ -993,6 +996,22 @@ export class WorkbenchClient {
       log: (...args) => console.log(...args),
     });
     this._providerRegistry = new ProviderRegistry();
+    this._quickFixes = new QuickFixService({
+      commandSupported: command => this._extensionCommands.canExecuteQuickFix(command),
+      registry: this._providerRegistry,
+      document: params => ({languageId:String(params.languageId || this.state.activeLanguageId || 'plaintext'),
+        scheme:this._useRemote ? 'vscode-remote' : 'file', authority:this._authority || DEFAULT_REMOTE_AUTHORITY, path:String(params.path || '')}),
+      uri: filePath => this._uriForPath(filePath, this._authority || DEFAULT_REMOTE_AUTHORITY),
+      request: async (method, args) => {
+        this._inlayHintsRuntime().ensureConnected();
+        const {promise} = this._sendExtPending(_rpcIds.ExtHostLanguageFeatures, method, args,
+          method !== '$releaseCodeActions', {timeoutMs:15000, timeoutMessage:'Quick Fix provider timed out'});
+        const reply = await promise;
+        if (isRecord(reply) && reply.type === 9) return reply.result;
+        if (isRecord(reply) && reply.type === 7) return undefined;
+        throw Error('Quick Fix provider request failed');
+      },
+    });
     this._diagnosticSnapshots = new DiagnosticsSnapshotStore({
       uriToString: (resource) => stringifyUriSafe(resource),
     });
@@ -2046,6 +2065,7 @@ export class WorkbenchClient {
       replyEmptyMethods: REPLY_EMPTY_METHODS,
       replyNullMethods: REPLY_NULL_METHODS,
       mainThreadConsoleRpcId: _rpcIds.MainThreadConsole,
+      mainThreadLanguageFeaturesRpcId: _rpcIds.MainThreadLanguageFeatures,
       mainThreadExtensionServiceRpcId: _rpcIds.MainThreadExtensionService,
       mainThreadLoggerRpcId: _rpcIds.MainThreadLogger,
       mainThreadOutputServiceRpcId: _rpcIds.MainThreadOutputService,
@@ -2244,6 +2264,7 @@ export class WorkbenchClient {
     this._semanticTokenProjections.clear(reason || "session_reset");
     this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
+    this._quickFixes.reset();
     this._diagnosticSnapshots.clear();
     this._webviews.clear(reason || "session_reset");
     this._extensionEditorNavigation.reset(reason || "session_reset");
@@ -2837,6 +2858,10 @@ export class WorkbenchClient {
     return provideInlayHints(this._inlayHintsRuntime(), params);
   }
 
+  codeActions(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this._quickFixes.call(method, params);
+  }
+
   async resolveInlayHint(
     params: unknown = {},
   ): Promise<Record<string, unknown>> {
@@ -2958,6 +2983,7 @@ export class WorkbenchClient {
    * their analysis to the new project.  Also re-subscribes the file watcher.
    */
   async _switchWorkspace(newFolder: string): Promise<Record<string, unknown>> {
+    this._quickFixes.reset(true);
     this._webviews.clear("workspace_switch", false);
     const result = {
       ...(await switchWorkbenchWorkspace(

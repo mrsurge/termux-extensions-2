@@ -741,6 +741,19 @@ Representative notifications:
 - Open, mirror, cache, save/clean, discard, and external-change projections are fenced by `document_revision`. The backend owns revision assignment; frontend state is bounded and memory-only. This prevents delayed arrival from overwriting newer state but does not provide CRDT/OT same-file collaboration.
 
 ### Diagnostics and language features
+
+Diagnostic Quick Fixes use the direct WBA lane through
+`vscode.codeActions.provide/resolve/release`, distinct from trusted Markdown command
+links. WBA retains exact-client/path/version provider-cache receipts; only quickfix
+kinds are projected. Monaco's registered provider uses its existing marker-hover
+and action UI without awaiting actions in ordinary hover text. The single-use
+`te2.quickFix.apply` gateway validates model instance/version/generation and the
+whole resolved action before current-file executeEdits (normal undo/draft path)
+or admitted command-only execution. Multi-file/resource/notebook, snippet/EOL,
+overlapping and mixed edit+command actions are rejected, not partially applied.
+Web Worker mode stays exclusive. Provider/result/disconnect/model lifecycle
+releases retained caches; stale replies never apply. Technical and acceptance
+scope: `docs/apps/monaco_core/PLAN.md` and `TRACKER.md`.
 Primary editor diagnostics, hovers, completions, symbols, semantic tokens, folding, inlay hints, and similar language-intelligence calls use the direct `/wba` path. The `/rpc/editor` lane carries state/control and typed editor notifications.
 
 ---

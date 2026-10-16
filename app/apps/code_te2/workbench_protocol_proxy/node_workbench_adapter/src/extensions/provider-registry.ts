@@ -16,6 +16,7 @@ const picomatch = require(
 ) as Picomatch;
 
 export const PROVIDER_KINDS = [
+  "codeActions",
   "hover",
   "documentSymbols",
   "foldingRanges",
@@ -34,6 +35,7 @@ export const PROVIDER_KINDS = [
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 
 export interface ProviderEntry {
+  providedKinds?: string[];
   handle: number;
   selector: unknown[];
   label?: string | null;
@@ -61,6 +63,7 @@ export interface ProviderRegistrationOutcome {
 
 export interface ProviderResyncOutcome {
   replayed: {
+    codeActions: number;
     semanticTokens: number;
     hover: number;
     completions: number;
@@ -267,6 +270,7 @@ function methodMatches(method: unknown, name: string): method is string {
 export class ProviderRegistry {
   private readonly providers: Record<ProviderKind, Map<number, ProviderEntry>> =
     {
+      codeActions: new Map<number, ProviderEntry>(),
       hover: new Map<number, ProviderEntry>(),
       documentSymbols: new Map<number, ProviderEntry>(),
       foldingRanges: new Map<number, ProviderEntry>(),
@@ -296,6 +300,23 @@ export class ProviderRegistry {
     args: unknown,
   ): ProviderRegistrationOutcome {
     if (!Array.isArray(args)) return emptyOutcome(false);
+    if (methodMatches(method, "$unregister")) {
+      const handle = finiteHandle(args[0]);
+      if (handle === null) return emptyOutcome(true);
+      const outcome = emptyOutcome(true);
+      if (this.providers.codeActions.delete(handle)) outcome.events.push({ type: 'provider/unregistered', kind:'codeActions', handle });
+      return outcome;
+    }
+    if (methodMatches(method, "$registerCodeActionSupport")) {
+      const outcome = emptyOutcome(true);
+      const handle = finiteHandle(args[0]), selector = normalizeSelector(args[1]);
+      if (handle === null || !selector) return outcome;
+      const metadata = isRecord(args[2]) ? args[2] : {};
+      const providedKinds = Array.isArray(metadata.providedKinds) ? metadata.providedKinds.filter((v): v is string => typeof v === 'string') : undefined;
+      this.providers.codeActions.set(handle, {handle, selector, ...(providedKinds ? {providedKinds} : {}), supportsResolve: args[5] === true});
+      outcome.events.push({type:'provider/codeActions', handle});
+      return outcome;
+    }
     if (methodMatches(method, "$registerTextDocumentContentProvider")) {
       return this.registerTextDocumentContentProvider(args);
     }
@@ -358,6 +379,7 @@ export class ProviderRegistry {
 
   snapshot(): Record<ProviderKind, ProviderEntry[]> {
     return {
+      codeActions: this.list('codeActions'),
       hover: this.list("hover"),
       documentSymbols: this.list("documentSymbols"),
       foldingRanges: this.list("foldingRanges"),
@@ -469,6 +491,7 @@ export class ProviderRegistry {
 
   buildResyncEvents(): ProviderResyncOutcome {
     const replayed = {
+      codeActions: this.providers.codeActions.size,
       semanticTokens: 0,
       hover: 0,
       completions: 0,
@@ -484,6 +507,7 @@ export class ProviderRegistry {
       callHierarchy: 0,
     };
     const events: Record<string, unknown>[] = [];
+    for (const entry of this.providers.codeActions.values()) events.push({type:'provider/codeActions', handle:entry.handle});
 
     for (const entry of this.providers.completions.values()) {
       for (const language of completionLanguages(entry.selector)) {

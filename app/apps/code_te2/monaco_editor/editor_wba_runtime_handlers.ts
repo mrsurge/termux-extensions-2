@@ -16,6 +16,7 @@ interface WbaNotificationTransportLike {
 }
 
 interface EditorWbaRuntimeHandlerDeps {
+  onQuickFixProvidersChanged?(): void;
   getCurrentPath(): string | null;
   getModel(): unknown;
   absPathFromVscodeUri(raw: string): string | null;
@@ -104,6 +105,10 @@ export function registerEditorWbaRuntimeHandlers(
   transport.onNotification("te2.event", (event: Record<string, unknown>) => {
     try {
       const type = eventType(event);
+      if (type === 'provider/codeActions' || type === 'provider/unregistered' && event.kind === 'codeActions') {
+        deps.onQuickFixProvidersChanged?.();
+        return;
+      }
       if (type === "extension/message") {
         deps.notifyExtensionMessage?.(event);
         return;

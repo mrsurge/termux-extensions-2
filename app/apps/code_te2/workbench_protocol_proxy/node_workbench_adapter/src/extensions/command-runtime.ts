@@ -270,6 +270,10 @@ export class ExtensionCommandRuntime {
 
   constructor(private readonly options: CommandRuntimeOptions) {}
 
+  canExecuteQuickFix(command: string): boolean {
+    return this.commands.has(command) || this.registeredCommands.has(command);
+  }
+
   reset(): void {
     this.registeredCommands.clear();
     this.contextValues.clear();
@@ -454,7 +458,7 @@ export class ExtensionCommandRuntime {
     const commandId = stringValue(params.command);
     if (!commandId) throw new Error("Missing required param: command");
     const definition = this.commands.get(commandId);
-    if (!definition && !(params.surface === "hover" && this.registeredCommands.has(commandId))) {
+    if (!definition && !((params.surface === "hover" || params.surface === "quickfix") && this.registeredCommands.has(commandId))) {
       throw new Error(`Unknown extension command: ${commandId}`);
     }
     const filePath = stringValue(params.path);
