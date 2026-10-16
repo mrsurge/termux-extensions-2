@@ -9,8 +9,11 @@
 - [x] Electromux source bundles and 19 shared-shell/consumer tests passed,
   including real subprocess cancellation and external ownership preservation.
 - [x] New progress helper passes `ty check`; `git diff --check` passes.
-- [ ] Live editable cold-build/cached/release/cancel acceptance after separately
-  approved runtime/client activation.
+- [x] User confirms the cold-build/cached/cancel startup group checked out on
+  2026-10-15. This does not assert an exhaustive release/device failure matrix.
+
+Current release gates: ../release_0_2_354/TRACKER.md. The separate deleted mypyc
+selection failure is recorded there, not treated as a launcher build-wait failure.
 
 Unrelated dependency-release edits and user files are preserved. No shared
 runtime restart, APK build, release publication or commit/push in this slice.

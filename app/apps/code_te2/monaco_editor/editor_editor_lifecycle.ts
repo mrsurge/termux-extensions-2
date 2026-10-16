@@ -1,4 +1,5 @@
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
+import { withDiffLineNumbers } from './editor_diff_line_numbers.ts';
 
 interface MonacoPositionLike {
   [key: string]: unknown;
@@ -283,7 +284,7 @@ export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiff
   deps.setDiffEditor(diffEditor);
 
   try {
-    const options = deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs());
+    const options = withDiffLineNumbers(deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs()));
     const themeKey = themeFromPrefs(deps.getCachedPrefs());
     const diffOptions = Object.assign({}, options, { minimap: { enabled: false } });
     delete diffOptions.theme;

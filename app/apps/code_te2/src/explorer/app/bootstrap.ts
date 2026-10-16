@@ -24,6 +24,7 @@ import { createExplorerActiveFileUtils } from "../tree/active-file-utils.ts";
 import { createExplorerTreeRenderer } from "../tree/renderer.ts";
 import { createExplorerTreeMenuController } from "../tree/menu-controller.ts";
 import { createExplorerTreeClickHandler } from "../tree/click-handler.ts";
+import { installExplorerKeyboard } from '../tree/keyboard.ts';
 import { createExplorerTreeDecorationsController } from "../tree/decorations.ts";
 import type { ExplorerTreeMenuEntry } from "../tree/types.ts";
 import {
@@ -436,7 +437,7 @@ const explorerTreeClickHandler = createExplorerTreeClickHandler({
   openCardMenuForEntry: (entry, anchorEl) =>
     explorerTreeMenuController.openCardMenuForEntry(entry, anchorEl),
   openFile: async (rel) => {
-    await explorerFileOpenBridge.openFileAndMaybeJump(rel, null, { source: "explorer_tree" });
+    await explorerFileOpenBridge.openFileAndMaybeJump(rel, null, { source: "explorer_tree", focus: true });
   },
 });
 
@@ -1018,6 +1019,16 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
   // Basic click handling: expand/collapse dirs, open files, open context menu
   if (treeElement) {
     explorerNameSearchController.bind(treeElement);
+    const drawer = document.getElementById('fe-drawer');
+    if (drawer) {
+      const disposeKeyboard = installExplorerKeyboard(treeElement, drawer, {
+        openExplorer: () => explorerChromeController.toggleDrawer(true),
+        openSearch: () => explorerNameSearchController.open(),
+        closeSearch: () => explorerNameSearchController.close('keyboard'),
+        isSearchVisible: () => explorerNameSearchController.isVisible(),
+      });
+      window.addEventListener('pagehide', disposeKeyboard, { once: true });
+    }
     treeElement.addEventListener("click", (ev) => {
       void explorerTreeClickHandler.handleTreeClick(ev);
     });

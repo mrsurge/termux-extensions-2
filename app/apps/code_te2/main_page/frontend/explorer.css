@@ -16,6 +16,11 @@
 }
 
 /* Drawer container - positioned off-screen by default */
+.fe-tree-text:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #8099b3);
+  outline-offset: 2px;
+}
+
 .fe-drawer {
   position: fixed;
   top: 0;

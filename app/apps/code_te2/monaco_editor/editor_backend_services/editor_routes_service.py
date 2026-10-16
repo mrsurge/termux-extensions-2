@@ -119,6 +119,7 @@ def build_view_state_dict(
         pass
     return {
         "showLineNumbers": editor_prefs.get("showLineNumbers"),
+        "relativeLineNumbers": editor_prefs.get("relativeLineNumbers", False),
         "showSyntax": editor_prefs.get("showSyntax"),
         "showShading": editor_prefs.get("showShading"),
         "wordWrap": editor_prefs.get("wordWrap"),

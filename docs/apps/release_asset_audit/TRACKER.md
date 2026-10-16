@@ -1,5 +1,10 @@
 # Release asset audit tracker
 
+Current release scope: ../release_0_2_354/PLAN.md, R1 static dependency/mapping
+closure and R2 Gecko staging optimization. See its TRACKER.md for pending gates
+and GECKO_SIZE_AUDIT.md for the read-only old-APK baseline. Historical published
+artifact acceptance below does not validate a newly built release candidate.
+
 ## ALS proxy static assets — additional slice
 
 User reports ALS working after Cefrium staging build/packaging repair. Treat this

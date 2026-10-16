@@ -1,0 +1,198 @@
+# 0.2.354 release finish plan
+
+Consolidated 2026-10-15 at `2e77c843`. Source wins over historical planning.
+This is the release cut line, not permission to reopen every unchecked old task.
+Execution status, acceptance and the owning-document index are in TRACKER.md.
+
+## Approval and release boundary
+
+User approved documentation consolidation and read-only investigation, followed
+by the two R1 proven asset fixes and focused regressions/audit updates recorded
+in TRACKER.md. On 2026-10-16 the user also approved a staging-only native
+compression switch and two same-source Gecko comparison APK builds, leaving
+R8/debug/release unchanged. No runtime restart, installation, merge, version bump
+or publication is approved. Obtain concrete scope approval for each remaining
+implementation/build slice and separate release approval.
+
+Subsequent 2026-10-16 approval covers staging R8/resource shrinking and a trial
+APK build/artifact checks, retaining the accepted compressed baseline and mapping
+file. That build succeeded but exposed a Kotlin/R8 metadata compatibility warning;
+toolchain changes, installation and release acceptance are not implied. After
+the JSON-corrected APK passed user live acceptance, the user explicitly deferred
+the metadata warning/toolchain alignment for now; keep it visible, not suppressed.
+
+Ship the existing bug fixes and accepted improvements. Finish bounded asset,
+Gecko staging and keyboard ergonomics work; avoid experimental architecture.
+The ALS framework-pipe/Sidebar IPC migration is explicitly next-version work.
+
+## Ordered remaining work
+
+### 1. Complete static app delivery, not another transport
+
+All eight built-in app entry templates/scripts are already represented by
+`app/android_editor_assets_bundle.json`. Shared `/static/js`, fonts, CodeMirror,
+xterm, app icons and ALS's pinned static snapshot also have bundle entries.
+The Rust OTA ZIP endpoint and APK seed publisher use that same manifest.
+Electron and Android additionally own URL interception/required-file checks;
+copying an asset into the archive does not itself establish its URL mapping.
+
+Audit the complete reachable static dependency closure for each app against OTA
+inventory, APK seed, Electron inventory, Gecko and Cefrium/TE2 Termux mappings.
+Include by-ID aliases, query strings, modules, workers, fonts, icons and CSS URLs.
+Use an app/client matrix and exact resource evidence. Add only proven missing
+resources/mappings, not source trees, dependencies or debug artifacts wholesale.
+Confirm generated minified app outputs are current before final publication.
+Source audit and the two corrected URL/inventory gaps: STATIC_ASSET_AUDIT.md.
+ALS's snapshot must match the selected new ALS dependency, not blindly retain
+the currently vendored 0.2.132 provenance.
+
+Acceptance: several simultaneously open Sidebar apps on a slow connection use
+native-local static resources. Dynamic shell/bootstrap documents, data, sockets,
+readiness and user/extension resources remain live services, not OTA candidates.
+Retain fail-local behavior for mapped missing files; do not hide gaps via fetching.
+
+### 2. Gecko staging APK size and production optimization
+
+Read-only baseline: existing October 12 arm64 staging APK is 205,044,077 bytes
+(195.5 MiB), not a candidate built from today's source. Native libraries occupy
+166,800,200 bytes (159.1 MiB); libxul alone is 147,057,776 bytes (140.2 MiB).
+DEX contributes 8,366,278 ZIP bytes (8.0 MiB). Full ELF debug/symbol sections are
+already absent from libxul; `.dynsym` and a small `.gnu_debuglink` remain.
+
+The audited baseline staging disabled minification/resource shrinking. A later
+approved staging trial now enables both with the existing optimized release
+rules; -Pte2.gecko.optimize=false restores unoptimized comparison behavior.
+Debug/release remain unchanged. Preserve necessary msgpack reflective classes
+and Gecko/JNI consumer rules; no blanket keep rules or unsupported score claims.
+See GECKO_SIZE_AUDIT.md. Build only after approval and disk preflight; compare final
+APK ZIP categories, signatures, manifest/resources, install and live functionality.
+Do not promise dramatic savings: R8 does not shrink Gecko's ELF engine.
+
+User clarification (2026-10-16): downloadable release APK size is the primary
+objective, not installed footprint. Add a compressed-native-library candidate
+using packaging.jniLibs.useLegacyPackaging=true. Unlike direct APK loading of
+uncompressed/page-aligned libraries, this requests compressed .so entries and
+installation-time extraction. Already-stripped libraries can still compress;
+R8 savings and native ZIP compression must be measured separately.
+
+Before implementation, inspect Gecko's native loading/extraction assumptions and
+merged manifest/packaging overrides, then approve the concrete staging scope.
+The compression-only trial is now implemented/built with user approval; details,
+artifact hashes and pending device gates are in GECKO_SIZE_AUDIT.md. The subsequent
+R8 trial saves another 6,839,447 bytes, but R8 8.9.32 emits a Kotlin metadata
+warning against Kotlin 2.2.10; the user accepts deferring it after corrected live
+validation. No startup/RAM gain has been measured.
+Compare same-source APKs with and without native compression; report total and
+per-library compressed bytes, installation/extraction behavior, available-storage
+requirements and cold launch. Verify signatures, ABI/page-size compatibility,
+updates and real-device functionality. Do not promise a savings percentage or
+manually recompress a signed APK. Keep debug behavior unchanged and scope this
+candidate to Gecko; Cefrium/TE2 Termux require separate loader review/approval.
+
+This supersedes the earlier blanket deferral of native compression investigation,
+not the requirement for implementation/build approval. Do not replace Gecko,
+upgrade AGP or hand-strip native libraries for this release without new approval.
+
+After Gecko validation, reuse the proven packaging pattern for other APKs only
+after checking each renderer/native loader. Long-term direction: at most two
+Android application forms, standalone and Termux shared-UID, expected to use the
+same renderer and shared packaging policy. Keep identity/signing/permissions and
+Termux integration variant-specific. Renderer convergence is direction, not an
+authorized migration or a reason to change existing clients in this release.
+
+TE2 Termux follow-up is separately approved: its existing .so packaging already
+uses compression and staging R8/resource shrinking. Trial DEX compression only
+for Termux staging, with a same-source comparison opt-out, preserving ordinary
+Cefrium/debug/release, native signing and CEF dat/pak/bin loading policy. Compare
+APK contents/signature/shared UID and obtain device acceptance without automatic
+installation. Details: TERMUX_COMPRESSION_AUDIT.md.
+
+2026-10-16 closure: user marks APK Deflate steps complete. Reuse the TE2 Termux
+pattern for ordinary Cefrium because both share the same base build. Its DEX
+compression switch is currently Termux-staging-only, so this records the chosen
+reuse direction, not an already-applied Cefrium change. Preserve CEF data-loading
+exceptions and variant identity/signing; final release artifact checks remain R5.
+
+### 3. Bounded desktop keyboard ergonomics
+
+Approved matrix (2026-10-16): root Quick Access `rn` + Enter toggles persisted
+relative line numbers, with On/Off description; `e` + Enter opens/focuses Explorer.
+Go to Line retains absolute syntax and accepts `:8:k` / `:8:j`, optionally
+`:8:k:4` for column 4, clamped to logical model lines/columns. Explorer arrow keys
+navigate visible rows; Left/Right collapse/expand or move parent/child;
+Space/Enter reuse click behavior and file opening requests editor focus. Ctrl+F
+belongs to name search while Explorer has focus. Search and first tree row are
+adjacent through Tab/Shift+Tab; Escape dismisses search, then returns editor focus.
+Ctrl+Shift+Comma/Period cycles displayed tabs backward/forward, wraps, skips
+missing files and suppresses overlapping opens. No extra Sidebar key matrix is
+part of the selected slice. Browser/native interception is not added speculatively.
+
+Audit existing host, Monaco, Explorer, file search, Sidebar and Terminal bindings
+before adding shortcuts. Reuse action owners and native Monaco command palette;
+do not introduce a second command system or cross-surface private calls.
+Include Explorer/file-search/Sidebar focus and navigation plus relative line
+numbers. Current Monaco options only map showLineNumbers to on/off.
+
+Propose a concrete key/action matrix before implementation. Expose applicable
+actions in the command palette and existing settings/menu affordances; honor
+enabled preferences and existing shortcuts. Guard editable inputs, IME,
+Terminal/TUI ownership, repeat handling, Ctrl/Cmd differences, overlay Escape and
+focus restoration. Preserve mobile controls. Validate normal/diff editors and
+refresh persistence without duplicating registrations.
+
+### 4. Small known correctness follow-ups
+
+- Editable fallback: user deleted a selected mypyc artifact/pin and got a missing
+  domain manifest failure instead of interpreted startup. `_select_editable_domain`
+  currently treats an existing/dangling default symlink as selected and preserves
+  explicit CODE_TE2_MYPYC_DIR. Investigate provenance first: distinguish missing
+  automatic editable artifacts from explicit selections and packaged corruption.
+  Propose missing-auto-artifact fallback/diagnostic behavior without broad silent
+  fallback for malformed/incompatible payloads. User rebuilt/activated to recover.
+- Terminal extension profile generator: the documented TS2488/unknown iterable
+  still exists in activation-events.ts. Narrow profiles with Array.isArray and add
+  valid/missing/malformed fixtures; this was explicitly promised for next release.
+- Record pre-existing test failures separately from runtime bugs; modernize stale
+  retired-Python mount assertions without restoring obsolete architecture. The
+  suppressed-preview MRU test needs bounded triage, not a new Explorer redesign.
+
+### 5. Packaging and final release verification
+
+Do not infer clean dependency closure from source imports. TE2 currently requires
+FWS 0.2.65 and ALS 0.2.132; the latter's old FWS pin conflicts with that cleanup.
+Sibling ALS source is 0.2.136 and requires FWS 0.2.65, but source is not published
+wheel evidence. Verify/build compatible cleaned ALS native wheels, update the TE2
+pin/target dependency locks, and validate optional uvloop target selection and
+private-runtime ABI. FWS 0.2.65 is already published: do not repeat its release
+merely because a historical checkbox remains open.
+
+Build matched current-source Linux/Termux wheels, native worker/domain receipts,
+OTA and staging APK assets. Reuse artifacts only under the established fingerprint
+and provenance checks. Enforce the strict 100,000,000-byte PyPI wheel budget.
+Fresh Debian and Android/Termux installs must prove version, native selection,
+real WBA/Node imports, console/MCP, app launch and dependency closure. Check
+libarchive.file_reader, not merely import libarchive. Then perform the separately
+approved merge/tag/GitHub/PyPI publication workflow. README already states Gboard
+18+ support; update release references at release time, not during this audit.
+
+## Explicit next-version backlog
+
+First post-release investigation: browser-engine-backed Electromux runtime,
+using EdgeJS's experimental engine-free host-JS mode as a candidate. The root
+`ELECTROMUX_ENGINE_REUSE_PROPOSAL.md` records scope, evidence, no-fork-first audit
+and acceptance gates. This priority does not expand the current release cut line.
+
+ALS intent migration: editor -> framework -> ALS mentions; ALS -> framework ->
+editor file opens and project switches. Reuse framework brokerage and typed
+intents, not editor-presence-dependent Sidebar socket mediation. Preserve exact
+client/presentation/project ownership and standalone behavior. Coordinate with
+the user's in-progress reconnectable FWS UDS work; no prerequisite code changes
+are authorized here. Intent preferences/manifests are future possibilities, not
+extra requirements for the immediate cutover. Target the existing 0.2.355 follow-up.
+
+Also defer Monaco graph/GPU experiments, general workspace edits/refactors,
+observability/benchmark expansion, Electromux platform expansion, additional
+native diagnostics, Aria socket/intent/502 modernization and archive intent/feature
+expansion. Existing known issues remain documented; none are silently declared
+fixed. A newly confirmed destructive or launch-breaking regression can reopen the
+release cut line only by explicit user decision.

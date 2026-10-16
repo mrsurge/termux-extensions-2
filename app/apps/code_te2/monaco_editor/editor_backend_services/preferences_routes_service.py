@@ -167,6 +167,9 @@ async def handle_update_preference(
         elif key == "trackAgentSidebarEdits":
             value = bool(value)
             print(f"[editor_app] trackAgentSidebarEdits set to {value}", file=sys.stderr)
+        elif key == "relativeLineNumbers":
+            if not isinstance(value, bool):
+                raise EditorServiceError(kind="invalid", detail="relativeLineNumbers must be boolean")
         elif key in ["showLineNumbers", "showSyntax", "autoCloseBrackets", "autocompletion", "autoSave"]:
             pass
 

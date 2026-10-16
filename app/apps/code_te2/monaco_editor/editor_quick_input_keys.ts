@@ -76,6 +76,10 @@ export function bindQuickInputKeys(editor: QuickInputEditor, doc: Document,
       || (event.key.length > 1 && !['Dead', 'Unidentified', 'Process'].includes(event.key)))) queueMicrotask(consume);
   };
   const beforeinput = (event: InputEvent): void => {
+    // The editor Ctrl adapter owns cancelable Ctrl-letter text transactions;
+    // one-shot Shift must not type uppercase text before that command replay.
+    const win = doc.defaultView;
+    if (win?.ctrl || win?.__androidTerminalCtrlDesired) return;
     if (!armed() || !textAllowed() || !owns(event.target) || event.isComposing || !event.cancelable || event.inputType !== 'insertText' || !event.data) return;
     const text = shiftedCommittedText(event.data);
     const input = focusedQuickInput(doc);

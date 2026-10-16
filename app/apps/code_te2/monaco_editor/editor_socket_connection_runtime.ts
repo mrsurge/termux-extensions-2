@@ -1,5 +1,6 @@
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
+import { withDiffLineNumbers } from './editor_diff_line_numbers.ts';
 import { acceptDocumentProjection, isCurrentDocumentProjection } from './editor_document_revision_runtime.ts';
 import { traceInlineDiffInit } from './editor_inline_diff_init_trace.ts';
 import { updateComparisonBaselineFence } from './editor_git_baseline_runtime.ts';
@@ -397,7 +398,8 @@ export function registerEditorSocketConnectionHandlers(
       const diffEditor = deps.getDiffEditor();
       const model = deps.getModel();
       if (!editor) return;
-      const opts = deps.buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
+      const projectedOptions = deps.buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
+      const opts = diffEditor ? withDiffLineNumbers(projectedOptions) : projectedOptions;
       const nextPrefsEditor = asRecord(nextPrefs.editor);
       let theme = null;
       try { theme = nextPrefsEditor && nextPrefsEditor.theme ? nextPrefsEditor.theme : null; } catch (_) { theme = null; }

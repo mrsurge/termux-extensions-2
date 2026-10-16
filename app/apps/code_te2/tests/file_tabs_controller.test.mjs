@@ -8,6 +8,36 @@ import { build } from 'esbuild';
 const appRoot = path.resolve(import.meta.dirname, '..');
 let moduleSequence = 0;
 
+test('tab cycling follows displayed order, wraps, skips missing files and fences overlapping opens', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController, fileTabOrderStorageKey } = await importFileTabs();
+    const track = new FakeElement();
+    track.querySelectorAll = () => track.children.filter(tab => tab.dataset.exists === 'true');
+    const opened = [];
+    let finish;
+    const controller = createFileTabsController({
+      viewport: new FakeElement(), track, formatFileNameDisplay: value => value,
+      openFile: path => { opened.push(path); return new Promise(resolve => { finish = resolve; }); },
+      closeRecentFile: async () => {}, resetToNewFile() {},
+    });
+    localStorage.setItem(fileTabOrderStorageKey('/workspace'), JSON.stringify(['/workspace/c', '/workspace/a', '/workspace/b']));
+    controller.broadcastOpenState({ projectPath: '/workspace', clientForeground: { path: '/workspace/a' }, recents: [
+      { path: '/workspace/a', exists: true }, { path: '/workspace/b', exists: false }, { path: '/workspace/c', exists: true },
+    ] });
+    controller.installWindowHooks(); controller.installWindowHooks();
+    const cycle = direction => window.dispatchEvent(new CustomEvent('code-te2:cycle-file-tab', { detail: direction }));
+    cycle(1); cycle(-1);
+    assert.deepEqual(opened, ['/workspace/c']);
+    finish(); await new Promise(resolve => setImmediate(resolve));
+    controller.broadcastOpenState({ projectPath: '/workspace', clientForeground: { path: '/workspace/c' }, recents: [
+      { path: '/workspace/a', exists: true }, { path: '/workspace/b', exists: false }, { path: '/workspace/c', exists: true },
+    ] });
+    cycle(-1); assert.deepEqual(opened, ['/workspace/c', '/workspace/a']);
+    finish(); await new Promise(resolve => setImmediate(resolve));
+  } finally { dom.restore(); }
+});
+
 test('host chrome uses file tabs without a duplicate filename projection', async () => {
   const template = await readFile(path.join(appRoot, 'template.html'), 'utf8');
 

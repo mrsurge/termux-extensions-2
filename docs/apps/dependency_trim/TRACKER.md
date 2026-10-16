@@ -1,5 +1,11 @@
 # Dependency reduction tracker
 
+2026-10-15 consolidation: ../release_0_2_354/PLAN.md and TRACKER.md govern
+current release gating. Preserve source/acceptance history below; old unchecked
+steps are not automatically unfinished release tasks. FWS 0.2.65 is already
+published. Compatible cleaned ALS wheels/pins and fresh target dependency closure
+remain packaging gates. ALS/Sidebar framework-pipe cutover is deferred to 0.2.355.
+
 Release targets: **0.2.354 — FastAPI removal**; **0.2.355 — backend Sidebar IPC
 framework-pipe cutover**. Recording these targets is not implementation or release
 authorization. FastMCP/Pydantic/cryptography dependency closure remains separately

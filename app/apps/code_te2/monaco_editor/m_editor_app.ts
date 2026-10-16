@@ -132,6 +132,7 @@ import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.
 import { createEditorExtensionNavigationRuntime } from "./editor_extension_navigation_runtime.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
+import { installEditorKeyboardRuntime } from './editor_keyboard_runtime.ts';
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
 import { createEditorExtensionStateRuntime, buildExtensionEditorSelection } from "./editor_extension_state_runtime.ts";
 import { createEditorHoverCommandRuntime } from './editor_hover_command_runtime.ts';
@@ -419,6 +420,11 @@ interface MonacoBootWindowLike extends Window {
   const _workerLogOnce: Record<string, boolean> = Object.create(null);
   let currentPath: string | null = null;
   let cachedPrefs: CachedPrefsLike | null = null;
+  const keyboardRuntime = installEditorKeyboardRuntime({
+    getEditor: () => editor,
+    getPrefs: () => cachedPrefs,
+    updatePreference: (key, value) => editorRpcCall('editor.preference.update', { key, value }),
+  });
   let editorRpcSocket: EditorSocketLike | null = null;
   let wbaRpcSocket: EditorSocketLike | null = null;
   let lastModelReadySyncKey: string | null = null;
@@ -1988,15 +1994,21 @@ interface MonacoBootWindowLike extends Window {
 
   async function ensureEditorWithPrefs() {
     await ensureDocumentTheme();
-    return await ensureEditorWithPrefsRuntime(editorLifecycleDeps);
+    const result = await ensureEditorWithPrefsRuntime(editorLifecycleDeps);
+    keyboardRuntime.bindEditor();
+    return result;
   }
 
   function ensurePlainEditorWithPrefs() {
-    return ensurePlainEditorWithPrefsRuntime(editorLifecycleDeps);
+    const result = ensurePlainEditorWithPrefsRuntime(editorLifecycleDeps);
+    keyboardRuntime.bindEditor();
+    return result;
   }
 
   function ensureDiffEditorWithPrefs() {
-    return ensureDiffEditorWithPrefsRuntime(editorLifecycleDeps);
+    const result = ensureDiffEditorWithPrefsRuntime(editorLifecycleDeps);
+    keyboardRuntime.bindEditor();
+    return result;
   }
 
   // Force-flush the mirror/didChange debounce so the ext host has the latest

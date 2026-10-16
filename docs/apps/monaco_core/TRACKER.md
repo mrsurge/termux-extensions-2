@@ -149,8 +149,8 @@ quick-fix workstream.
 - [x] 56 focused regressions pass, including the actual Workbench factory/server
   dispatch lifecycle, hover/navigation/identity regressions and Quick Fix tests.
   App typecheck and normal host/WBA build pass; source whitespace check passes.
-- [ ] User publishes frontend assets/reloads and restarts WBA to activate.
-- [ ] Live diagnostic Quick Fix acceptance with representative extensions.
+- [x] User-managed activation and live diagnostic Quick Fix acceptance confirmed
+  explicitly before commit/push 2e77c843; not an exhaustive provider/device matrix.
 
 Limits: plain current-file edits or command-only fixes; no mixed edit+command,
 multi-file/resource/notebook/snippet/EOL operations, untyped actions or refactors.
@@ -173,12 +173,11 @@ client publication were performed by the agent.
 - [ ] Restart WBA and verify the _setContext rejection spam stops live. No
   runtime restart or client publication was performed by the agent.
 
-- [ ] Audit edit/command owner and first supported safe action subset.
-- [ ] Approve typed provider/provide/resolve/release and edit-execution scope.
-- [ ] Implement WBA and Monaco provider projection, quickfix-only filtering.
-- [ ] Validate cancellation/cache/version/client/disconnect fences and undo.
-- [ ] Validate existing hover remains independent of quick-fix response latency.
-- [ ] Build/publish with approval and accept representative extension fixes live.
+- [x] Audit, approve and implement the minimal safe Quick Fix subset above.
+- [x] Focused tests cover cancellation/cache/version/client/disconnect and undo.
+- [x] Normal hover has no Quick Fix response dependency; extra timing benchmarks
+  are deferred, not an unimplemented feature.
+- [x] Build and user live acceptance recorded above; committed/pushed 2e77c843.
 
 Refactors, broad workspace edits, upstream fork changes and release-default GPU
 activation are not implied. Initial planning was read-only; subsequent source,

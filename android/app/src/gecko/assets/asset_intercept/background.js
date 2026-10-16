@@ -140,6 +140,7 @@ const LOCAL_FILES = new Set([
   "/apps/code_te2/static/dist/explorer-search-widget.css",
   "/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
   "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
+  "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/codicon-LN6W7LCM.ttf",
   "/api/app/code_te2/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
   "/apps/code_te2/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
   "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
@@ -148,6 +149,7 @@ const LOCAL_FILES = new Set([
 
 // Exact built-in resources only; dynamic app/API URLs retain framework routing.
 const BUILTIN_APP_ASSETS = new Map([
+  ["/apps/code_te2/extensions/sidebar_extension/manifest.json", "/apps/code_te2/extensions/sidebar_extension/manifest.json"],
   ["/apps/als_rs/template.html", "/apps/als_rs/template.html"],
   ["/apps/by-id/als-rs/template.html", "/apps/als_rs/template.html"],
   ["/apps/als_rs/main.js", "/apps/als_rs/main.js"],

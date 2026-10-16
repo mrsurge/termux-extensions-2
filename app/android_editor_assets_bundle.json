@@ -150,6 +150,11 @@
     },
     {
       "kind": "file",
+      "src": "app/apps/code_te2/extensions/sidebar_extension/manifest.json",
+      "dest": "apps/code_te2/extensions/sidebar_extension/manifest.json"
+    },
+    {
+      "kind": "file",
       "src": "app/extensions/apps/main.js",
       "dest": "extensions/apps/main.js"
     },

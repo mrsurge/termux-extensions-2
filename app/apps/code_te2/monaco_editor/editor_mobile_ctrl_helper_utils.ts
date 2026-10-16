@@ -82,11 +82,45 @@ function installHandlerOnCurrentInput(): void {
   const input = state.input;
   const handler = state.handler;
   if (!input || typeof handler !== 'function') return;
+  let disposed = false;
+  let claimedImeKey = false;
+
+  const beforeInput = (event: InputEvent): void => {
+    // Gboard can emit a real insertText before its 229 keyup lets the legacy
+    // helper replay Ctrl+letter. A focus-changing command then flushes that
+    // pending text on blur. Claim only the cancelable ASCII-letter transaction,
+    // before either the textarea or Monaco's Android projection is mutated.
+    if (state.replayingControlChord || !/\bAndroid\b/i.test(window.navigator.userAgent)
+      || input.ownerDocument.activeElement !== input || !event.cancelable
+      || event.inputType !== 'insertText' || !event.data || !/^[a-z]$/i.test(event.data)
+      || !(window.ctrl || window.__androidTerminalCtrlDesired)) return;
+    const owner = state.editor;
+    const modifiers = currentMobileEditorModifiers(window);
+    const control = String.fromCharCode(event.data.toUpperCase().charCodeAt(0) - 64);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    claimedImeKey = true;
+    releaseControlLatch();
+    queueMicrotask(() => {
+      // A closed/replaced editor or intervening focus change must not be
+      // re-focused by delayed replay. The claimed command is never queued.
+      if (disposed || state.editor !== owner || state.input !== input
+        || input.ownerDocument.activeElement !== input) return;
+      dispatchControlInput(control, modifiers);
+    });
+  };
 
   const forwardEvent = (event: KeyboardEvent): void => {
     // Replayed Ctrl chords must reach Monaco instead of re-entering the
     // vendored Gboard interceptor that produced them.
     if (state.replayingControlChord) return;
+    if (event.type === 'keydown') claimedImeKey = false;
+    if (event.type === 'keyup' && claimedImeKey && event.keyCode === 229) {
+      claimedImeKey = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
 
     let keepDefault = true;
     try {
@@ -103,10 +137,13 @@ function installHandlerOnCurrentInput(): void {
 
   input.addEventListener('keydown', forwardEvent, true);
   input.addEventListener('keyup', forwardEvent, true);
+  input.addEventListener('beforeinput', beforeInput, true);
 
   state.disposeHandler = () => {
+    disposed = true;
     input.removeEventListener('keydown', forwardEvent, true);
     input.removeEventListener('keyup', forwardEvent, true);
+    input.removeEventListener('beforeinput', beforeInput, true);
   };
 }
 
@@ -143,7 +180,16 @@ function buildKeyboardEvent(type: 'keydown' | 'keyup', chord: ControlChordLike):
   return event;
 }
 
-function dispatchControlInput(data: string): void {
+function releaseControlLatch(): void {
+  if (typeof window.__androidTerminalSetCtrl === 'function') {
+    window.__androidTerminalSetCtrl(false);
+  } else {
+    window.__androidTerminalCtrlDesired = false;
+    window.ctrl = false;
+  }
+}
+
+function dispatchControlInput(data: string, modifierSnapshot?: ReturnType<typeof currentMobileEditorModifiers>): void {
   const text = typeof data === 'string' ? data : '';
   if (!text) return;
 
@@ -151,7 +197,7 @@ function dispatchControlInput(data: string): void {
   if (!input) return;
   // Control bytes erase modifier identity. Preserve the one-shot modifier
   // snapshot before replay/consumption; sticky Sel remains navigation-only.
-  const modifiers = currentMobileEditorModifiers(window);
+  const modifiers = modifierSnapshot || currentMobileEditorModifiers(window);
 
   try { state.editor?.focus?.(); } catch (_) {}
 
@@ -169,12 +215,7 @@ function dispatchControlInput(data: string): void {
     state.replayingControlChord = false;
     publishMobileEditorModifiersConsumed(window,
       new URLSearchParams(window.location.search).get('te2_editor_role') === 'secondary' ? 'secondary' : 'primary');
-    if (typeof window.__androidTerminalSetCtrl === 'function') {
-      window.__androidTerminalSetCtrl(false);
-    } else {
-      window.__androidTerminalCtrlDesired = false;
-      window.ctrl = false;
-    }
+    releaseControlLatch();
   }
 }
 

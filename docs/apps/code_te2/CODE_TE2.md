@@ -2939,12 +2939,39 @@ There are three distinct layers:
      Ctrl for the next command, a double tap locks it across dock and Gboard
      actions, and another tap releases it; the locked state is never represented
      by an unpaired synthetic keydown.
+     For an armed Ctrl on Android, the editor adapter claims cancelable ASCII
+     `insertText` before textarea mutation and replays its control chord in a
+     microtask guarded by editor/input/focus identity. The matching 229 keyup
+     cannot replay it again, including locked Ctrl. Shift's text transformer
+     yields to the Ctrl transaction. This prevents focus-changing commands from
+     flushing the shortcut letter as pending Android text on blur; ordinary
+     text/paste/non-ASCII and noncancelable input retain their existing paths.
    - The mobile special-key dock is visible by default and has two rows. The
      first provides Ctrl, Alt, persistent Select/Shift, and arrow navigation;
      the second provides one-shot Shift, Tab, Home, End, Page Up/Down, Cmd and Esc. Enter remains on the virtual keyboard, not duplicated in the dock.
      F1, Ctrl/Cmd+Shift+P and Ctrl/Cmd+colon open the unprefixed Quick Access help/options view through `editor.action.te2QuickAccess`, registered by the authored Monaco bootstrap builder. Ctrl+Shift+O retains the symbol picker; stock `editor.action.quickCommand` and typed `>` retain explicit commands. The bootstrap binds colon as Shift+Semicolon, while the editor-scoped key helper recognizes the actual colon key value for other layouts. Quick Access is a separate context-menu entry; Command Palette remains explicit commands. Extra keys preserve focused quick-input fields; caret defaults are explicit because synthetic keys do not perform native text navigation.
      One-shot Shift is separate from sticky Sel, composes with modifiers and is carried through guarded Ctrl-byte reconstruction. It uppercases only cancellable committed insertText, never active composition or guessed punctuation layouts.
      The implementation is in editor_quick_input_keys.ts and editor_mobile_special_keys_utils.ts; existing editor realms own their actions. Historical command restrictions stay unchanged.
+     TE2's root provider adds `rn` + Enter (Relative Line Numbers On/Off toggle)
+     and `e` + Enter (open/focus Explorer), without executing partial typed queries.
+     `scripts/monaco_quick_access.mjs` extends the existing help/Go to Line
+     providers; `:8:k` / `:8:j` jumps eight logical lines up/down, with optional
+     column such as `:8:k:4`. Absolute and offset syntax remain Monaco-owned.
+     Root rn/e entries follow the stock choices. The bootstrap's guarded
+     `scripts/monaco_preserve_relative_gutter.mjs` transform omits the pinned
+     Go to Line provider's temporary absolute-number override; relative gutters
+     remain visible while choosing a jump. Vendored source is not modified;
+     upstream block drift fails the build for review rather than silently patching.
+     The existing preference service owns `relativeLineNumbers` (default false);
+     hidden line numbers still win.
+     Inline diff creation and live preference projection apply
+     `editor_diff_line_numbers.ts`: relative becomes absolute only for the diff
+     presentation, without persisting that override. Plain recreation restores
+     the saved relative choice; hidden gutters remain hidden.
+     Editor-focused Ctrl+Shift+Comma/Period cycles the displayed host tab order with wrap, through the existing open
+     owner, not a second file-state registry. Explorer keyboard presentation is
+     owned by `src/explorer/tree/keyboard.ts`: visible-row arrows, Space/Enter
+     click semantics, scoped Ctrl+F, search/tree Tab adjacency and two-stage Escape.
      When the Terminal drawer owns focus, navigation keys still use its established request bridge rather than another input path.
    - The four arrow buttons repeat after a 420 ms hold delay at a 55 ms cadence.
      Pointer capture preserves the gesture if the finger drifts outside the

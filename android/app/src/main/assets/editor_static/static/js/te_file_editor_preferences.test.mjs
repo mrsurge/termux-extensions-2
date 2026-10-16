@@ -47,31 +47,8 @@ test('cancel and failed consent do not navigate; later attempts still work', asy
   assert.equal(calls, 1);
 });
 
-test('actual CM6 confirmation handlers discard then resume, or retain failed-save guard', async () => {
-  const source = readFileSync(new URL('../../apps/file_editor/main.js', import.meta.url), 'utf8');
-  const code = source.slice(source.indexOf('let confirmResolve = null;'), source.indexOf('// ---------- State load/init'));
-  const buttons = Array.from({ length: 4 }, () => ({ addEventListener(_, handler) { this.click = handler; } }));
-  let text = 'draft', dirty = true, shown = false, saves = false, navigations = 0;
-  const request = new Function('createGuardedNavigation', 'confirmClose', 'btnCancel', 'btnDiscard', 'btnSaveConfirm',
-    'setText', 'markUnsaved', 'showConfirm', 'hideConfirm', 'saveFile', 'isDirty',
-    `const lastSavedContent = 'disk'; ${code.replace('() => unsaved', '() => isDirty()')} return guardedNavigation;`)(
-    createGuardedNavigation, ...buttons, value => { text = value; }, flag => { dirty = flag; },
-    () => { shown = true; }, () => { shown = false; }, async () => saves, () => dirty);
-  const discard = request(() => { navigations++; });
-  buttons[2].click();
-  assert.equal(await discard, true);
-  assert.equal(text, 'disk'); assert.equal(dirty, false); assert.equal(navigations, 1);
-  dirty = true;
-  const failedSave = request(() => { navigations++; });
-  await buttons[3].click();
-  assert.equal(shown, true); assert.equal(navigations, 1);
-  buttons[1].click();
-  assert.equal(await failedSave, false);
-  const saved = request(() => { navigations++; });
-  saves = true;
-  await buttons[3].click();
-  assert.equal(await saved, true); assert.equal(navigations, 2);
-});
+// Actual CM6 confirmation handlers are now exercised by the app-owned
+// frontend.test.mjs against compiled typed source, not slices of generated JS.
 
 test('actual app-shell exit awaits consent and keeps the original navigation only', async () => {
   const source = readFileSync(new URL('../../templates/app_shell.html', import.meta.url), 'utf8');

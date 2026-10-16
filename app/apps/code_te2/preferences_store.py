@@ -20,6 +20,7 @@ def _as_dict(value: object) -> JsonDict:
 
 DEFAULT_EDITOR_PREFS: JsonDict = {
     "showLineNumbers": True,
+    "relativeLineNumbers": False,
     "showSyntax": True,
     "showShading": False,
     "wordWrap": False,

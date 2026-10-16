@@ -1,5 +1,9 @@
 # Unified Linux And Termux Release Installer Tracker
 
+Current release gates and acceptance reconciliation are consolidated in
+../release_0_2_354/PLAN.md and TRACKER.md. Retain earlier versioned evidence below;
+historical unchecked matrices do not automatically reopen accepted releases.
+
 Last updated: 2026-10-05
 
 ## Program status
@@ -49,7 +53,7 @@ Last updated: 2026-10-05
   OTA, publication, commit or tag move is part of this trim validation.
 
 
-- [ ] Before release, add the Android keyboard support requirement to README:
+- [x] README already contains the Android keyboard support requirement:
   Gboard 18 or newer is required for supported operation. Older versions may
   work, but are unsupported. Wording is recorded in the client-runtime PLAN;
   no runtime keyboard detection or enforcement is planned.

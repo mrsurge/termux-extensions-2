@@ -6,8 +6,9 @@
 - [x] Preserve explicit/broken selections and strict release payload contract.
 - [x] README source-build and mypyc workflow documentation.
 - [x] Targeted bootstrap/build regression validation: 28 tests pass.
-- [ ] User CLI ↔ TE2 Termux editable launch acceptance.
-- [ ] Fresh editable interpreted-domain live acceptance.
+- [x] User confirms CLI ↔ TE2 Termux no longer fight over native builds.
+- [x] User confirms the startup group checked out, except the deleted selected
+  mypyc artifact case recorded below; absence and broken selection differ.
 
 ## Evidence boundaries
 
@@ -78,7 +79,8 @@ then reuses. No Rust source was modified, and no native build was run.
 - [x] Exact-match reuse verifies metadata and library checksums before skipping compilation.
 - [x] Read-only selected-snapshot status without extra startup hashing.
 - [x] Documentation and regression coverage.
-- [ ] Live no-op fingerprinted rebuild acceptance (no full compilation run by agent).
+- [x] User confirms no-op fingerprinted rebuild acceptance on 2026-10-15;
+  no full compilation run by the agent during release consolidation.
 
 Targeted build/workflow/native-runtime regressions: 97 passed; opt-in real C
 compiler benchmark skipped; one existing setuptools/wheel deprecation warning.
@@ -87,3 +89,15 @@ framework/bootstrap, outside the inventoried app/libs domain, to avoid compiling
 build-only tooling into Code TE2. No package operations, cache deletion, Pixel
 deployment, full mypyc build or worker/framework restart was performed. User's
 untracked ccache source/archive files remain untouched.
+
+## Deleted selected mypyc artifact follow-up
+
+- [x] User reports deleting a mypyc build/pin caused native Python import
+  FileNotFoundError for domain-a7f57a2.../manifest.json; rebuild/activate recovered.
+- [x] Source distinguishes no automatic selector (interpreted) from a retained
+  broken/explicit selector (strict). The exact deleted-path provenance still
+  needs investigation; no runtime repair was performed during consolidation.
+- [ ] Investigate safe handling of a missing automatically selected editable
+  artifact, preserving explicit selection and packaged integrity failures.
+
+Current release scope and approvals: ../release_0_2_354/PLAN.md.

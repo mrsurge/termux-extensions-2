@@ -90215,8 +90215,8 @@ var init_listView = __esm({
         if (targetIndex === void 0) {
           return void 0;
         }
-        const relativePosition = browserEvent.offsetY / this.items[targetIndex].size;
-        const sector = Math.floor(relativePosition / 0.25);
+        const relativePosition2 = browserEvent.offsetY / this.items[targetIndex].size;
+        const sector = Math.floor(relativePosition2 / 0.25);
         return clamp(sector, 0, 3);
       }
       getItemIndexFromEventTarget(target) {
@@ -233197,18 +233197,6 @@ var AbstractGotoLineQuickAccessProvider = class _AbstractGotoLineQuickAccessProv
     picker.toggles = [toggle];
     updatePickerAndEditor();
     disposables.add(picker.onDidChangeValue(() => updatePickerAndEditor()));
-    const codeEditor = getCodeEditor(editor2);
-    if (codeEditor) {
-      const options2 = codeEditor.getOptions();
-      const lineNumbers = options2.get(
-        76
-        /* EditorOption.lineNumbers */
-      );
-      if (lineNumbers.renderType === 2) {
-        codeEditor.updateOptions({ lineNumbers: "on" });
-        disposables.add(toDisposable(() => codeEditor.updateOptions({ lineNumbers: "relative" })));
-      }
-    }
     return disposables;
   }
   toRange(lineNumber = 1, column = 1) {
@@ -234956,6 +234944,69 @@ init_editor_api();
 init_editorExtensions();
 init_editorContextKeys();
 init_quickInput();
+
+// scripts/monaco_quick_access.mjs
+init_platform2();
+init_quickAccess();
+init_lifecycle();
+function relativePosition(editor2, value) {
+  const match2 = /^(\d+)(?::?)([jk])(?::(\d+))?$/i.exec(value.trim());
+  if (!match2) return null;
+  const model = editor2.getModel();
+  const origin = editor2.getPosition();
+  if (!model || !origin) return null;
+  const distance = Number(match2[1]);
+  const requestedColumn = match2[3] === void 0 ? 1 : Number(match2[3]);
+  if (!Number.isSafeInteger(distance) || !Number.isSafeInteger(requestedColumn)) return null;
+  const lineNumber = Math.max(1, Math.min(model.getLineCount(), origin.lineNumber + (match2[2].toLowerCase() === "j" ? distance : -distance)));
+  const column = Math.max(1, Math.min(model.getLineMaxColumn(lineNumber), requestedColumn));
+  return { lineNumber, column, label: `Press Enter to go to line ${lineNumber}, column ${column} (${distance} lines ${match2[2].toLowerCase() === "j" ? "down" : "up"}).` };
+}
+var Te2GotoLineProvider = class extends StandaloneGotoLineQuickAccessProvider {
+  parsePosition(editor2, value) {
+    const relative2 = relativePosition(editor2, value);
+    if (relative2) return relative2;
+    if (/[jk]/i.test(value)) return { label: "Use :8:k or :8:j, optionally followed by :column." };
+    return super.parsePosition(editor2, value);
+  }
+};
+var Te2RootProvider = class extends HelpQuickAccessProvider {
+  provide(picker) {
+    const disposables = new DisposableStore();
+    const state = { enabled: false };
+    window.dispatchEvent(new CustomEvent("code-te2:relative-numbers-query", { detail: state }));
+    const picks = [
+      ...this.getQuickAccessProviders().filter((p) => p.prefix && p.prefix !== "?"),
+      { label: "rn", description: `Relative Line Numbers: ${state.enabled ? "On" : "Off"} \u2014 Toggle`, action: "relative-numbers" },
+      { label: "e", description: "Open / Focus Explorer", action: "explorer" }
+    ];
+    const update = () => {
+      const query = picker.value.trim().toLowerCase();
+      const exact = picks.filter((item) => item.label === query);
+      picker.items = exact.length ? exact : picks.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query));
+    };
+    update();
+    disposables.add(picker.onDidChangeValue(update));
+    disposables.add(picker.onDidAccept(() => {
+      const item = picker.selectedItems[0];
+      if (!item) return;
+      if (item.action) {
+        picker.hide();
+        window.dispatchEvent(new CustomEvent("code-te2:palette-action", { detail: item.action }));
+      } else this.quickInputService.quickAccess.show(item.prefix, { preserveValue: true });
+    }));
+    return disposables;
+  }
+};
+function installTe2QuickAccess() {
+  const registry = Registry.as(Extensions10.Quickaccess);
+  const goto = registry.getQuickAccessProvider(":");
+  if (goto?.prefix === ":") goto.ctor = Te2GotoLineProvider;
+  registry.registerQuickAccessProvider({ ctor: Te2RootProvider, prefix: "", helpEntries: [{ description: "Quick Access" }] });
+}
+
+// te2_monaco_bootstrap_entry.js
+installTe2QuickAccess();
 var Te2QuickAccessAction = class extends EditorAction {
   constructor() {
     super({

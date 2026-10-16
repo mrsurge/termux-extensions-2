@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { preserveRelativeGotoGutter } from './monaco_preserve_relative_gutter.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,6 +44,10 @@ function pluginResolveMonacoEntryAndContrib() {
   return {
     name: "te2-monaco-bootstrap-alias",
     setup(ctx) {
+      ctx.onLoad({ filter: /[/\\]contrib[/\\]quickAccess[/\\]browser[/\\]gotoLineQuickAccess\.js$/ }, ({ path: modulePath }) => ({
+        contents: preserveRelativeGotoGutter(fs.readFileSync(modulePath, 'utf8')),
+        loader: 'js',
+      }));
       ctx.onResolve({ filter: /^@te2-monaco-main$/ }, () => ({ path: monacoMain }));
       const quickAccessModules = {
         '@te2-editor-extensions': 'vs/editor/browser/editorExtensions.js',
@@ -105,6 +110,9 @@ import * as monacoNs from "@te2-monaco-main";
 import { EditorAction, registerEditorAction } from "@te2-editor-extensions";
 import { EditorContextKeys } from "@te2-editor-context-keys";
 import { IQuickInputService } from "@te2-quick-input-service";
+import { installTe2QuickAccess } from "./scripts/monaco_quick_access.mjs";
+
+installTe2QuickAccess();
 
 // Use the existing standalone help provider (empty prefix), not a second picker.
 // The stock quickCommand action remains the explicit '>' commands entrypoint.
