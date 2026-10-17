@@ -34,6 +34,24 @@ Old unchecked boxes are evidence to reconcile, not automatic release tasks.
 
 ## Remaining release work — execute in this order
 
+- [x] Approved keyboard follow-up: suppress digit-only absolute previews while
+  actual relative gutters are active; j/k preview and Enter absolute acceptance
+  remain. Guarded Monaco bundle hook leaves vendored sources unchanged.
+- [x] Cursor presentation follow-up: existing file-open transaction retains at
+  most 100 per-file cursor positions per client/store, clamps on restore, keeps
+  scroll restoration separate, and respects explicit line/column navigation.
+  Desktop opens and keyboard-triggered Explorer/tab cycling focus/restore;
+  mobile touch tree opens keep focus=false. No cross-reload cursor persistence,
+  backend protocol change, mypyc rebuild or runtime transition added.
+- [x] Follow-up checks: 46 targeted tests, 2 selected transport open/jump tests,
+  TypeScript check, Monaco bootstrap and final host build pass. Broad transport suite has
+  38 pass/4 TextMate fixture failures (missing location.search), outside this
+  edit scope; do not report the whole suite green.
+- [x] User live acceptance (2026-10-17): relative preview and desktop/keyboard
+  cursor-restoration follow-up working; requests commit/push. No agent runtime
+  restart or client publication performed; cross-reload persistence remains out
+  of scope.
+
 - [x] R1 source audit: entrypoints, literal static dependency graph, computed
   icon families and pinned ALS inventory checked; two proven gaps fixed with
   approval. See STATIC_ASSET_AUDIT.md for limits, matrix and focused test evidence.

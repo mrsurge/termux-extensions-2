@@ -20,6 +20,11 @@ export function relativePosition(editor, value) {
 }
 
 class Te2GotoLineProvider extends StandaloneGotoLineQuickAccessProvider {
+  shouldPreviewPosition(editor, value) {
+    // Pinned EditorOption.lineNumbers (76), RenderLineNumbersType.Relative (2).
+    // Inspect actual presentation: inline diffs intentionally use absolute gutters.
+    return editor.getOptions?.().get(76)?.renderType !== 2 || relativePosition(editor, value) !== null;
+  }
   parsePosition(editor, value) {
     const relative = relativePosition(editor, value);
     if (relative) return relative;

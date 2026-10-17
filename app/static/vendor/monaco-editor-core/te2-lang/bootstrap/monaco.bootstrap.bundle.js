@@ -233174,6 +233174,10 @@ var AbstractGotoLineQuickAccessProvider = class _AbstractGotoLineQuickAccessProv
         this.clearDecorations(editor2);
         return;
       }
+      if (this.shouldPreviewPosition?.(editor2, inputText) === false) {
+        this.clearDecorations(editor2);
+        return;
+      }
       const range2 = this.toRange(lineNumber, column);
       editor2.revealRangeInCenter(
         range2,
@@ -234963,6 +234967,9 @@ function relativePosition(editor2, value) {
   return { lineNumber, column, label: `Press Enter to go to line ${lineNumber}, column ${column} (${distance} lines ${match2[2].toLowerCase() === "j" ? "down" : "up"}).` };
 }
 var Te2GotoLineProvider = class extends StandaloneGotoLineQuickAccessProvider {
+  shouldPreviewPosition(editor2, value) {
+    return editor2.getOptions?.().get(76)?.renderType !== 2 || relativePosition(editor2, value) !== null;
+  }
   parsePosition(editor2, value) {
     const relative2 = relativePosition(editor2, value);
     if (relative2) return relative2;

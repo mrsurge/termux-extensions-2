@@ -18,7 +18,7 @@ test('tab cycling follows displayed order, wraps, skips missing files and fences
     let finish;
     const controller = createFileTabsController({
       viewport: new FakeElement(), track, formatFileNameDisplay: value => value,
-      openFile: path => { opened.push(path); return new Promise(resolve => { finish = resolve; }); },
+      openFile: (path, options) => { assert.equal(options.keyboard, true); opened.push(path); return new Promise(resolve => { finish = resolve; }); },
       closeRecentFile: async () => {}, resetToNewFile() {},
     });
     localStorage.setItem(fileTabOrderStorageKey('/workspace'), JSON.stringify(['/workspace/c', '/workspace/a', '/workspace/b']));

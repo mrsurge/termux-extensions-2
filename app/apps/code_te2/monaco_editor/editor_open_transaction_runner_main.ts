@@ -13,9 +13,10 @@ import {
 } from './editor_open_transaction_state.ts';
 import { awaitOpenCompletion } from './editor_open_transaction_runner.ts';
 import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
+import { rememberOpenCursor, restoreOpenCursor } from './editor_cursor_memory.ts';
 
 interface RunEditorOpenTransactionDeps {
-  getWindow(): { monaco?: unknown };
+  getWindow(): { monaco?: unknown; navigator?: { userAgent?: string } };
   getCurrentPath(): string | null;
   setCurrentPath(path: string): void;
   getBaseSha256(): string | null;
@@ -66,6 +67,10 @@ interface RunEditorOpenTransactionDeps {
 }
 
 interface OpenEditorLike extends EditorLike {
+  setPosition?(position: { lineNumber: number; column: number }): void;
+  focus?(): void;
+  getScrollTop?(): number;
+  setScrollTop?(value: number): void;
   setModel?(model: OpenModelLike | null): void;
   setValue?(value: string): void;
   saveViewState?(): unknown;
@@ -84,6 +89,8 @@ interface OpenDiffEditorLike {
 }
 
 interface OpenModelLike extends EditorModelLike {
+  getLineCount?(): number;
+  getLineMaxColumn?(line: number): number;
   getValue(): string;
   getLanguageId?(): string;
   setValue?(value: string): void;
@@ -125,6 +132,11 @@ export async function runEditorOpenTransaction(
   } catch (_) {}
 
   deps.setBaseSha256(payload.base_sha256 || deps.getBaseSha256());
+  const previousPath = deps.getCurrentPath();
+  const previousModelPath = deps.getModel()?.uri?.toString();
+  if (previousPath && previousModelPath && deps.absPathFromVscodeUri(previousModelPath) === previousPath) {
+    rememberOpenCursor(deps.openTransactionStore, previousPath, deps.getEditor()?.getPosition?.());
+  }
   if (!sameFileNavigationOnly) {
     try { deps.flushScrollState(); } catch (_) {}
     try { deps.clearDiagnosticsForLeavingModel('file_switch'); } catch (_) {}
@@ -271,6 +283,13 @@ export async function runEditorOpenTransaction(
           column: tx && tx.hasExplicitNavigation ? tx.column : null,
         });
       } catch (_) {}
+    }
+
+    if (satisfied && !tx.hasExplicitNavigation && model
+      && (payload.focus === true || payload.place_cursor === true
+        || (payload.focus !== false && !/Android|iPhone|iPad|iPod|Mobile/i.test(deps.getWindow()?.navigator?.userAgent || '')))) {
+      restoreOpenCursor(deps.openTransactionStore, currentPath, editor, model,
+        deps.coercePositiveInt(payload.scroll_line) || editor.getPosition?.()?.lineNumber || 1);
     }
 
     if (satisfied && payload.symbol_range) {

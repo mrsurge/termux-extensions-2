@@ -49,6 +49,43 @@ test('relative jumps preserve absolute syntax, clamp logical lines/columns and r
   } finally { win.happyDOM.abort(); }
 });
 
+test('relative gutters withhold incomplete absolute previews but retain Enter and j/k previews', async () => {
+  const win = dom();
+  try {
+    const { preserveRelativeGotoGutter, gateGotoPositionPreview } = await import('../../../../scripts/monaco_preserve_relative_gutter.mjs');
+    const source = gateGotoPositionPreview(preserveRelativeGotoGutter(await readFile('../../static/vendor/monaco-editor-core/esm/vs/editor/contrib/quickAccess/browser/gotoLineQuickAccess.js', 'utf8')));
+    const method = source.slice(source.indexOf('    provideWithTextEditor('), source.indexOf('    toRange('));
+    const provide = vm.runInNewContext(`(class { ${method} }).prototype.provideWithTextEditor`, {
+      DisposableStore: class { add() {} }, Toggle: class { onChange() {} }, Codicon: { indexZero: {} },
+      localize: () => '', asCssVariable: x => x,
+      inputActiveOptionBorder: '', inputActiveOptionForeground: '', inputActiveOptionBackground: '',
+      AbstractGotoLineQuickAccessProvider: { PREFIX: ':' },
+    });
+    const registry = await providers(), provider = new registry.goto.ctor();
+    let renderType = 2;
+    const revealed = [], accepted = [];
+    const editor = { getOptions: () => ({ get: () => ({ renderType }) }),
+      getModel: () => ({ getLineCount: () => 100, getLineMaxColumn: () => 80 }),
+      getPosition: () => ({ lineNumber: 50 }), revealRangeInCenter: range => revealed.push(range.startLineNumber) };
+    const parse = provider.parsePosition.bind(provider);
+    provider.parsePosition = (editor, value) => /^\d+$/.test(value) ? { lineNumber: Number(value), column: 1, label: value } : parse(editor, value);
+    provider.toRange = (lineNumber, column) => ({ startLineNumber: lineNumber, startColumn: column });
+    provider.gotoLocation = (_context, options) => accepted.push(options.range.startLineNumber);
+    provider.clearDecorations = () => {}; provider.addDecorations = () => {};
+    let change, accept;
+    const picker = { value: ':2', hide() {}, onDidAccept(fn) { accept = fn; }, onDidChangeValue(fn) { change = fn; } };
+    provide.call(provider, { editor }, picker);
+    assert.deepEqual(revealed, []);
+    picker.value = ':20'; change(); assert.deepEqual(revealed, []);
+    picker.selectedItems = picker.items; accept({ inBackground: false }); assert.deepEqual(accepted, [20]);
+    picker.value = ':20j'; change(); assert.deepEqual(revealed, [70]);
+    picker.value = ':20k'; change(); assert.deepEqual(revealed, [70, 30]);
+    picker.value = ':20'; change(); assert.deepEqual(revealed, [70, 30]);
+    renderType = 1; picker.value = ':21'; change(); assert.deepEqual(revealed, [70, 30, 21]);
+    assert.throws(() => gateGotoPositionPreview('changed provider'), /review before building/);
+  } finally { win.happyDOM.abort(); }
+});
+
 test('root rn/e entries filter, show toggle state and activate only on accept', async () => {
   const win = dom();
   try {

@@ -2962,6 +2962,9 @@ There are three distinct layers:
      Go to Line provider's temporary absolute-number override; relative gutters
      remain visible while choosing a jump. Vendored source is not modified;
      upstream block drift fails the build for review rather than silently patching.
+     The same guarded bundle path gates preview independently of acceptance:
+     relative gutters suppress absolute-number previews until Enter, while
+     complete j/k expressions still preview. Absolute gutter behavior is unchanged.
      The existing preference service owns `relativeLineNumbers` (default false);
      hidden line numbers still win.
      Inline diff creation and live preference projection apply
@@ -2972,6 +2975,12 @@ There are three distinct layers:
      owner, not a second file-state registry. Explorer keyboard presentation is
      owned by `src/explorer/tree/keyboard.ts`: visible-row arrows, Space/Enter
      click semantics, scoped Ctrl+F, search/tree Tab adjacency and two-stage Escape.
+     The open transaction owns bounded per-client cursor presentation memory
+     (`editor_cursor_memory.ts`, 100 paths, no cross-reload persistence). Desktop
+     opens or explicit focus/place-cursor intent restore a clamped cursor without
+     changing the separately restored scroll viewport; explicit line/column
+     navigation wins. Keyboard tab cycling uses existing focus/place_cursor fields;
+     keyboard Explorer click semantics pass focus=true, mobile touch passes false.
      When the Terminal drawer owns focus, navigation keys still use its established request bridge rather than another input path.
    - The four arrow buttons repeat after a 420 ms hold delay at a 55 ms cadence.
      Pointer capture preserves the gesture if the finger drifts outside the

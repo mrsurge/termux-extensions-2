@@ -12,3 +12,14 @@ export function preserveRelativeGotoGutter(source) {
   }
   return source.slice(0, start) + source.slice(end);
 }
+
+export function gateGotoPositionPreview(source) {
+  const marker = '            // Reveal\n            const range = this.toRange(lineNumber, column);';
+  if (source.split(marker).length !== 2) throw new Error('Pinned Go to Line preview changed; review before building');
+  return source.replace(marker, `            // TE2 keeps Enter acceptance available while withholding ambiguous previews.
+            if (this.shouldPreviewPosition?.(editor, inputText) === false) {
+                this.clearDecorations(editor);
+                return;
+            }
+${marker}`);
+}

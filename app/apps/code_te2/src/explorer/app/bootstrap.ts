@@ -436,8 +436,8 @@ const explorerTreeClickHandler = createExplorerTreeClickHandler({
     explorerNameSearchController.handleSearchDirectoryClick(rel),
   openCardMenuForEntry: (entry, anchorEl) =>
     explorerTreeMenuController.openCardMenuForEntry(entry, anchorEl),
-  openFile: async (rel) => {
-    await explorerFileOpenBridge.openFileAndMaybeJump(rel, null, { source: "explorer_tree", focus: true });
+  openFile: async (rel, keyboard) => {
+    await explorerFileOpenBridge.openFileAndMaybeJump(rel, null, { source: "explorer_tree", focus: keyboard === true || !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) });
   },
 });
 

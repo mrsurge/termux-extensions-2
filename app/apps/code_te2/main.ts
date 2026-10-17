@@ -1071,7 +1071,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     viewport: fileTabsViewport,
     track: fileTabsTrack,
     formatFileNameDisplay: (name: string) => formatFileNameDisplay(name),
-    openFile: (path: string) => openFile(path),
+    openFile: (path: string, options?: { keyboard: boolean }) => openFile(path, options?.keyboard ? { focus: true, placeCursor: true } : {}),
     openInSecondWindow: (
       typeof electronSecondEditor?.openSecondEditor === 'function'
       || mobileSecondEditor.supported
