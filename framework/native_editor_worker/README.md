@@ -228,11 +228,21 @@ cutover. The matching-ABI Pixel/Termux probe also built and imported all 135
 compiled wrappers; that initial probe did not switch the worker. See
 `docs/apps/client_runtime_polish/PLAN.md` §6 for evidence and gates.
 
-The native worker now accepts `CODE_TE2_MYPYC_DIR` pointing to a matching
-build's manifest/lib directory. The experimental shellspec selects
-`.codex-scratch/mypyc-active`; build/validate a snapshot and explicitly select it before starting
-the worker, or remove that shellspec environment entry to run interpreted.
-There is no automatic build or silent fallback. Startup reports the compiled
+The native worker accepts `CODE_TE2_MYPYC_DIR` pointing to a matching build's
+manifest/lib directory. Bootstrap supplies the shellspec selection. In editable
+installs, an absent automatic `.codex-scratch/mypyc-active` target (including a
+dangling symlink after deleting a snapshot) selects an empty value and interpreted
+imports in the same Rust/PyO3 worker. The selector is not rewritten or deleted.
+An existing target remains strict: missing/malformed manifests, missing libraries,
+ABI errors and permission failures are not silently bypassed. Explicit selections
+(including an intentionally empty value) retain their policy.
+
+`CODE_TE2_FORCE_INTERPRETED=1 te2` deliberately overrides editable domain selection,
+including an explicit path, without changing the worker binary or snapshot. A
+new normal framework invocation resumes normal selection. This is bootstrap-owned
+and does not change a live worker or a manually launched raw worker. Packaged
+installs reject the override and require the verified compiled payload.
+There is no automatic mypyc build. Startup reports the compiled
 module count. The overlay links source-owned resource directories into its lib
 layout because compiled modules resolve sibling assets relative to their `.so`.
 These development symlinks are not a portable wheel packaging solution.

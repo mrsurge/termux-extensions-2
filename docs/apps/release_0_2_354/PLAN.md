@@ -157,11 +157,12 @@ refresh persistence without duplicating registrations.
 
 - Editable fallback: user deleted a selected mypyc artifact/pin and got a missing
   domain manifest failure instead of interpreted startup. `_select_editable_domain`
-  currently treats an existing/dangling default symlink as selected and preserves
-  explicit CODE_TE2_MYPYC_DIR. Investigate provenance first: distinguish missing
-  automatic editable artifacts from explicit selections and packaged corruption.
-  Propose missing-auto-artifact fallback/diagnostic behavior without broad silent
-  fallback for malformed/incompatible payloads. User rebuilt/activated to recover.
+  formerly treated a dangling default symlink as selected. The approved source
+  correction follows the automatic selector and falls back only when its target
+  is absent, preserving explicit selections, existing broken targets and I/O
+  failures. CODE_TE2_FORCE_INTERPRETED=1 deliberately overrides editable domain
+  selection without changing the Rust worker or artifacts; packaged installs
+  reject this override. Validation/live gates are in TRACKER.md.
 - Terminal extension profile generator: the documented TS2488/unknown iterable
   still exists in activation-events.ts. Narrow profiles with Array.isArray and add
   valid/missing/malformed fixtures; this was explicitly promised for next release.

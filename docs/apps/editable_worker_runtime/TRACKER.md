@@ -1,8 +1,9 @@
 # Editable worker runtime tracker
 
 Historical implementation/test evidence. Current pre-release status is maintained
-once in docs/apps/release_0_2_354/TRACKER.md (2026-10-17 consolidation), including
-the unresolved missing-selected-artifact case. No new implementation is implied.
+once in docs/apps/release_0_2_354/TRACKER.md (2026-10-17 consolidation). The
+2026-10-17 missing-auto-target/force-interpreted source correction and pending
+live activation are recorded there; older evidence below remains historical.
 
 - [x] Read-only source investigation and implementation approval.
 - [x] Preserve worker build variants and reuse equivalent interpreter aliases.

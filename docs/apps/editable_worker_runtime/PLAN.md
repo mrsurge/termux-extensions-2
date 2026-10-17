@@ -26,8 +26,12 @@ without relaxing packaged release validation or changing pipe-facing ownership.
 1. Retain immutable worker fingerprint variants; do not alter framework pruning.
 2. Key Python identity by runtime base prefix/version and ABI/library properties,
    not invocation aliases. Preserve actual compiler flag/toolchain distinctions.
-3. Select interpreted domain only for an absent default editable selector.
-   Preserve explicit values and broken selections; leave release resolution strict.
+3. Select interpreted domain when the automatic editable selector's target is
+   absent, including a dangling link after snapshot deletion. Preserve explicit
+   values and existing broken targets; permission failures remain errors. Leave
+   release resolution strict. The user-approved CODE_TE2_FORCE_INTERPRETED=1
+   override deliberately selects interpreted domain for editable launches only,
+   taking precedence over explicit domain selection without touching artifacts.
 4. Document local-architecture source prerequisites and explicit mypyc build,
    activation and restart semantics in README/native worker guide.
 5. Regression-test alternating environments, interpreter aliases, changed ABI,
@@ -37,6 +41,22 @@ No Android/native client edits, APK builds, device mutation, runtime restarts,
 automatic mypyc compilation, publication or releases are part of this slice.
 Retained binary cache garbage collection remains explicit future work; do not
 restore unconditional pruning that can delete another framework's selected path.
+
+## Missing automatic snapshot and explicit override — 2026-10-17
+
+Bootstrap's former `exists() or is_symlink()` condition treated a deleted default
+snapshot as selected because its dangling symlink remained. Follow the selector
+with stat and catch only FileNotFoundError for automatic fallback. Do not catch
+permission/I/O failures or inspect and suppress errors inside existing targets;
+the worker retains manifest/library/ABI admission. Explicit CODE_TE2_MYPYC_DIR
+values bypass this automatic test, unless the user intentionally sets
+CODE_TE2_FORCE_INTERPRETED=1. That override exports an empty domain directory and
+retains the same raw Rust worker/PyO3 interpreter; no worker Cargo change needed.
+Packaged runtime resolution rejects the force flag rather than inventing source
+fallback. Build fingerprints, cache pruning, selectors and snapshots are unchanged.
+The check is at framework startup, not a continuous watch or repair: deletion
+after selection can still fail worker admission and requires a fresh startup.
+Current tests/acceptance are tracked once in release_0_2_354/TRACKER.md.
 
 ## Unified manifest-driven follow-up (supersedes build identity above)
 

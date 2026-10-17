@@ -702,6 +702,9 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
     if not workers:
         return
     if not args.cargo_manifest and packaged_server_path() is not None:
+        if env.get('CODE_TE2_FORCE_INTERPRETED') == '1':
+            raise SystemExit('CODE_TE2_FORCE_INTERPRETED=1 is only supported for editable installs; '
+                             'packaged Code TE2 requires its matched compiled domain.')
         from importlib.metadata import version
         from app.release_runtime.code_te2 import packaged_runtime
         if {worker.app_id for worker in workers} != {"code_te2"}:
@@ -744,17 +747,26 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
 
 
 def _select_editable_domain(env: MutableMapping[str, str]) -> None:
+    if env.get('CODE_TE2_FORCE_INTERPRETED') == '1':
+        env['CODE_TE2_MYPYC_DIR'] = ''
+        print('[te2] Code TE2 domain: interpreted (CODE_TE2_FORCE_INTERPRETED=1). '
+              'The selected snapshot is unchanged.', flush=True)
+        return
     # Explicit selections (including an intentional empty value) remain user
     # policy. Broken selected snapshots must not silently become interpreted.
     if 'CODE_TE2_MYPYC_DIR' in env:
         return
     selected = _project_root() / '.codex-scratch' / 'mypyc-active'
-    if selected.exists() or selected.is_symlink():
-        env['CODE_TE2_MYPYC_DIR'] = str(selected)
-    else:
+    try:
+        selected.stat()  # Follow the automatic selector; a dangling link is absent.
+    except FileNotFoundError:
         env['CODE_TE2_MYPYC_DIR'] = ''
         print('[te2] Code TE2 domain: interpreted (no editable mypyc snapshot). '
               'To compile/activate: python -B app/apps/code_te2/build_mypyc.py', flush=True)
+    else:
+        # Do not inspect/suppress malformed manifests, missing libraries, or ABI
+        # failures here. Existing targets retain strict worker admission.
+        env['CODE_TE2_MYPYC_DIR'] = str(selected)
 
 
 def _rust_build_profile(args: BootstrapArgs) -> str:

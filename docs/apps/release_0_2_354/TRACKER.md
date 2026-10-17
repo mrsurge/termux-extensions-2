@@ -422,10 +422,26 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   approves checkpoint commit/push (2026-10-16). Targeted tests include Ctrl+G,
   Ctrl+Shift+O, ordinary-input bypass and locked Ctrl; exhaustive Gecko/device
   parity remains a final artifact check, not inferred from this live report.
-- [ ] R4: investigate/fix missing automatic editable mypyc artifact selection.
+- [x] R4: fix missing automatic editable mypyc artifact selection in bootstrap.
   User error: native Python import FileNotFoundError for domain-a7f57a2.../manifest.json
   after deleting the selected build/pin. Rebuild+activate recovered. Distinguish
   missing auto-selection from explicit selection or corrupted packaged payload.
+  A dangling default link now selects interpreted imports without changing it;
+  existing broken targets, permission errors and normal explicit selections stay
+  strict. User-approved CODE_TE2_FORCE_INTERPRETED=1 deliberately overrides the
+  editable domain choice, not the Rust worker; packaged installs reject it.
+- [x] R4 source validation: 91 focused native-worker bootstrap, strict packaged
+  runtime, bootstrap discovery, local mypyc workflow and binary-identity tests
+  pass; bootstrap ty and authored-source whitespace checks pass. Existing
+  setuptools wheel FutureWarning remains. Tests cover dangling/malformed/
+  explicit/permission cases, force precedence/reset and packaged rejection.
+- [x] R4 forced-interpreted startup live accepted by user (2026-10-17).
+  Live worker PID 2522732 has CODE_TE2_FORCE_INTERPRETED=1, empty
+  CODE_TE2_MYPYC_DIR and no __mypyc library mappings, confirming interpreted
+  imports in the same Rust/PyO3 worker. Missing-auto-target behavior is covered
+  by regression tests; no live snapshot was deleted to exercise that case.
+  User performed the runtime transition; no native/mypyc build or publication
+  was needed for this bootstrap change.
 - [ ] R4: fix terminal profiles Array.isArray narrowing with malformed fixtures.
 - [ ] R4: triage stale retired-Python mount and suppressed-preview MRU assertions;
   record known pre-existing failures accurately, without restoring old architecture.

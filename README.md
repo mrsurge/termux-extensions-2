@@ -374,6 +374,21 @@ for artifact paths and cache details. A broken or explicitly selected snapshot
 is not silently bypassed; packaged releases always require their validated
 compiled payload.
 
+If the automatic `.codex-scratch/mypyc-active` link points to a snapshot that
+has been deleted, editable startup also runs interpreted; it leaves the link
+untouched. Present-but-broken snapshots and explicit `CODE_TE2_MYPYC_DIR` paths
+still fail clearly. To deliberately skip mypyc for an editable framework launch,
+even when a compiled snapshot exists:
+
+```bash
+CODE_TE2_FORCE_INTERPRETED=1 te2
+```
+
+This overrides the domain selection only, retaining the same Rust worker and
+Python ABI. It does not rebuild/delete snapshots or change an already running
+worker. Omit the flag on the next framework launch to resume normal selection.
+Packaged installs reject this editable-only override.
+
 For a package install directly from Git:
 
 ```bash

@@ -293,6 +293,17 @@ def test_bad_packaged_pair_does_not_fall_back_to_cargo(monkeypatch: pytest.Monke
         bootstrap._prepare_native_workers(bootstrap._parse_args([]), {}, build=True)
 
 
+def test_packaged_bootstrap_rejects_forced_interpreted_without_source_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker = bootstrap.NativeWorkerBuild('code_te2', Path('/no/Cargo.toml'), 'code-te2-worker', 'CODE_TE2_WORKER_BIN', True)
+    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda: [worker])
+    monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: Path('/packaged-server'))
+    monkeypatch.setattr(bootstrap, '_select_editable_domain', lambda *args: pytest.fail('packaged runtime must not select editable source'))
+    env = {'CODE_TE2_FORCE_INTERPRETED': '1'}
+    with pytest.raises(SystemExit, match='only supported for editable installs'):
+        bootstrap._prepare_native_workers(bootstrap._parse_args([]), env, build=True)
+    assert 'CODE_TE2_MYPYC_DIR' not in env
+
+
 def test_release_wheel_requires_pair_and_uses_exact_cpython_tag(payload: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import runpy
     import setuptools
