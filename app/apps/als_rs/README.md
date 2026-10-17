@@ -1,12 +1,33 @@
 # ALS-RS proxy wrapper and native static assets
 
+## Worker serving readiness
+
+TE2 launches `als-rs --stdio --port 12459` as a native-testing pipe shell.
+`readiness_support: "pipe"` makes the current worker's `app.readiness`
+MessagePack notification the only serving gate. After router preparation and
+listener bind, ALS emits `status: ready`, `phase: serving` to framework.rust.
+The stream uses concatenated MessagePack envelope maps, NOT the separate
+extension-adapter's length-prefix framing. Stdout is protocol-only throughout
+bootstrap/native startup; diagnostics/build output go to stderr. There is no
+HTTP callback/probe fallback. `/api/health` remains an ordinary diagnostic route.
+
+Without --stdio, ALS is still standalone: no framework readiness publication or
+stdin ownership. Pipe EOF ends the owned server; malformed/truncated pipe input
+fails explicitly. Unknown requests receive framework method-not-found errors;
+this does not implement Sidebar intent migration. The existing
+sidebar_state.readiness.callback controls UI presentation readiness separately.
+The frontend wrapper trusts app_shell's framework readiness gate rather than
+polling /api/health a second time; its metadata request still resolves start_url.
+Activation needs the new ALS install, refreshed TE2 registry/worker launch and
+updated wrapper bytes through OTA/reload. No Code TE2 mypyc or APK is required.
+
 TE2 opens ALS through `/api/app/als-rs/proxy/`. The wrapper's `main.js` and
 `template.html` remain generic proxy-shell resources; native clients also package
 the actual ALS static frontend, not just that wrapper.
 
 ## Pinned frontend snapshot
 
-`vendor/frontend/manifest.json` pins ALS 0.2.132, source commit, source/served
+`vendor/frontend/manifest.json` pins the ALS version, source commit, source/served
 SHA-256 inventories and license. `vendor/frontend/static/` contains all 148 static
 resources (~4.82 MiB raw), excluding the existing map/backup policy. No backend,
 templates, installed-extension assets or mutable runtime data are vendored.

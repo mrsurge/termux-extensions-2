@@ -306,8 +306,37 @@ runtime was restarted, no APK assembled, no assets published, no push performed.
 
 ## Next investigation — ALS pipe readiness parity
 
-- [ ] Compare ALS worker launch/readiness against Code TE2 after this checkpoint.
+- [x] Compare ALS worker launch/readiness against Code TE2 after this checkpoint.
   User requires a pipe-backed ALS launch with --stdio when pipe readiness is
   expected, protocol-only stdout and all other output on stderr. Determine current
   ownership and propose the concrete correction before implementation; do not
   substitute HTTP readiness or change shared app state.
+
+- [x] Investigation confirms proc launch, HTTP readiness callback and native
+  stdout logging; --stdio is absent from both bootstrap and native argument path.
+- [x] User approves stdio/pipe-readiness-only correction; record scope in PLAN.md.
+- [x] Bootstrap flag propagation and protocol-only stdout across preparation.
+- [x] Shared native lifecycle, framed readiness and stderr diagnostics.
+- [x] Pipe-only TE2 manifest/shellspec and focused regression/build validation.
+- [x] User explicitly approves removing the additional frontend HTTP health poll;
+  wrapper now mounts from metadata after app_shell's existing lifecycle gate.
+- [x] User reports the updated slice working and grants live acceptance,
+  requesting commit/push. Installation, worker refresh and wrapper publication
+  were user-operated; no additional agent-run device matrix is claimed.
+
+Validation: 22 ALS bootstrap/MCP preparation tests, four Rust pipe tests, six
+isolated native server tests plus two corruption subtests, 46 TE2 backend
+regressions, two wrapper tests and nine native asset coverage tests pass. ALS
+production release executable builds with four jobs. Tests verify one exact
+MessagePack readiness map, live serving after readiness, no readiness HTTP POST,
+stdout cleanliness, stdin EOF, SIGTERM with stdin still open, malformed/truncated
+input, occupied-listener failure and standalone stdin independence. Disposable
+roots/fake framework avoid touching the live harness. Touched Rust files pass
+rustfmt with skip_children; unrelated formatting drift remains unchanged.
+
+Activation: install new ALS first; refresh the TE2 registry and replace the old
+ALS worker with the new pipe launch using user-approved lifecycle operations.
+Publish/force OTA and reload wrapper assets. No Code TE2 mypyc rebuild or APK is
+needed. No agent-operated install/restart/publication was performed by this slice.
+Existing conversation debug logs are diagnostics on stderr; durable transcripts
+and extension-adapter protocol I/O are preserved, not removed as debug output.

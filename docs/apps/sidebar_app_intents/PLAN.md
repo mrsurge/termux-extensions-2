@@ -789,3 +789,31 @@ are client-specific; document membership is shared, only the caller moves foregr
 Matching ALS native build, Code TE2 mypyc/source activation and frontend publication
 remain separate gates. No runtime restart, APK, release, console-ID migration or
 framework-pipe cutover is authorized here.
+
+## ALS stdio serving readiness — approved 2026-10-17
+
+Keep ALS independently launchable. Add explicit --stdio to its Python bootstrap
+and native server, preserving inherited stdin/stdout only for framework protocol.
+Preparation diagnostics/build stdout and native tracing go to stderr. Replace
+the HTTP readiness poster with the same concatenated MessagePack app.readiness
+notification used by Code TE2 after router preparation/listener bind. Standalone
+launches without --stdio emit no framework readiness and do not consume stdin.
+
+Switch the TE2 ALS shellspec to backend pipe/native_pipe_testing, declare stdout
+MessagePack/stderr text, and set manifest readiness_support to "pipe". Preserve
+the existing port, app identity and Sidebar per-presentation callback; that UI
+callback is separate from worker serving readiness. No HTTP readiness fallback.
+
+Use one native server lifecycle for executable/library entrypoints. Bound pipe
+input, handle EOF/corruption and unexpected serving failure through shutdown;
+unsupported inbound requests receive protocol errors, not fake service support.
+No Sidebar intent migration, mypyc work or event-loop replacement is included.
+Validate bootstrap flag/build-output behavior, exact framing/readiness, standalone
+mode, occupied-port failure, stdin EOF and signal shutdown in disposable runtimes.
+No shared framework/ALS restart, package install, APK or release is authorized.
+
+Additional user-approved seam: remove ALS main.js's redundant HTTP health polling.
+The framework app_shell already gates module initialization on worker readiness;
+retain the existing proxy metadata/start URL and launch query propagation, then
+mount directly. This is ALS-wrapper-only, not a generic proxy template migration.
+Matching wrapper OTA/reload becomes an activation gate; no native mapping change.
