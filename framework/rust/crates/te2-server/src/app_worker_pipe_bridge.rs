@@ -259,6 +259,42 @@ mod native {
         fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
             self.enqueue(encode_frame(&envelope)?)
         }
+
+        fn try_send_optional(&self, envelope: PipeEnvelope) -> anyhow::Result<bool> {
+            let encoded = encode_frame(&envelope)?;
+            if self.closed.load(Ordering::Acquire) {
+                anyhow::bail!("app-worker pipe writer is closed");
+            }
+            match self.sender.try_send(encoded) {
+                Ok(()) => Ok(true),
+                Err(TrySendError::Full(_)) => Ok(false),
+                Err(TrySendError::Disconnected(_)) => {
+                    anyhow::bail!("app-worker pipe writer is disconnected")
+                }
+            }
+        }
+
+        fn send_blocking(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
+            let mut encoded = encode_frame(&envelope)?;
+            loop {
+                if self.closed.load(Ordering::Acquire) {
+                    anyhow::bail!("app-worker pipe writer is closed");
+                }
+                match self.sender.try_send(encoded) {
+                    Ok(()) => return Ok(()),
+                    Err(TrySendError::Full(frame)) => {
+                        encoded = frame;
+                        // The search emitter already owns a blocking thread.
+                        // Retain only this frame and the bounded writer queue;
+                        // close remains observable even while the queue is full.
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        anyhow::bail!("app-worker pipe writer is disconnected")
+                    }
+                }
+            }
+        }
     }
 
     fn start_pipe_writer(
@@ -341,7 +377,123 @@ mod native {
     #[cfg(test)]
     mod tests {
         use super::{FerrousPipeSink, run_ordered_pipe_writer};
+        use crate::framework_services::pipe::{PipeEventSink, protocol::PipeEnvelope};
         use std::sync::{Arc, atomic::AtomicBool, mpsc::sync_channel};
+
+        fn notification(method: &str) -> PipeEnvelope {
+            serde_json::from_value(serde_json::json!({
+                "jsonrpc": "2.0", "protocolVersion": 1, "kind": "notification",
+                "method": method, "originNid": 2300, "originName": "service.search"
+            }))
+            .unwrap()
+        }
+
+        #[test]
+        fn saturated_search_progress_is_disposable_but_results_and_done_wait_in_order() {
+            let (sender, receiver) = sync_channel(1);
+            let sink = Arc::new(FerrousPipeSink {
+                intent_route: Arc::default(),
+                debug_route: Arc::default(),
+                sender,
+                closed: Arc::new(AtomicBool::new(false)),
+                shell_id: "shell".into(),
+                app_id: "app".into(),
+            });
+            assert!(
+                sink.try_send_optional(notification("search.job.progress"))
+                    .unwrap()
+            );
+            for _ in 0..4096 {
+                assert!(
+                    !sink
+                        .try_send_optional(notification("search.job.progress"))
+                        .unwrap()
+                );
+            }
+            let mut invalid = notification("search.job.progress");
+            invalid.protocol_version = 999;
+            assert!(sink.try_send_optional(invalid.clone()).is_err());
+            assert!(
+                sink.send_blocking(invalid).is_err(),
+                "invalid frames never wait/retry"
+            );
+            let (finished, completed) = std::sync::mpsc::channel();
+            let producer = sink.clone();
+            let task = std::thread::spawn(move || {
+                producer
+                    .send_blocking(notification("search.job.result"))
+                    .unwrap();
+                producer
+                    .send_blocking(notification("search.job.done"))
+                    .unwrap();
+                finished.send(()).unwrap();
+            });
+            assert!(
+                completed
+                    .recv_timeout(std::time::Duration::from_millis(20))
+                    .is_err()
+            );
+            let mut decoder = super::PipeDecoder::default();
+            let mut methods = Vec::new();
+            for _ in 0..3 {
+                let bytes = receiver
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap();
+                for envelope in decoder.feed(&bytes).unwrap() {
+                    methods.push(envelope.method.unwrap());
+                }
+            }
+            completed
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+            task.join().unwrap();
+            assert_eq!(
+                methods,
+                [
+                    "search.job.progress",
+                    "search.job.result",
+                    "search.job.done"
+                ]
+            );
+        }
+
+        #[test]
+        fn closing_a_saturated_search_writer_unblocks_required_delivery() {
+            let (sender, _receiver) = sync_channel(1);
+            let sink = Arc::new(FerrousPipeSink {
+                intent_route: Arc::default(),
+                debug_route: Arc::default(),
+                sender,
+                closed: Arc::new(AtomicBool::new(false)),
+                shell_id: "shell".into(),
+                app_id: "app".into(),
+            });
+            sink.enqueue(vec![1]).unwrap();
+            let producer = sink.clone();
+            let (finished, completed) = std::sync::mpsc::channel();
+            let task = std::thread::spawn(move || {
+                finished
+                    .send(producer.send_blocking(notification("search.job.done")))
+                    .unwrap();
+            });
+            assert!(
+                completed
+                    .recv_timeout(std::time::Duration::from_millis(20))
+                    .is_err()
+            );
+            sink.close();
+            assert!(
+                completed
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap()
+                    .is_err()
+            );
+            task.join().unwrap();
+            assert!(
+                sink.try_send_optional(notification("search.job.progress"))
+                    .is_err()
+            );
+        }
 
         #[test]
         fn bounded_writer_queue_preserves_order_and_fails_explicitly() {

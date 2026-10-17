@@ -9,6 +9,7 @@ import {
 } from './vscode_widget_vendor/patternInputWidget.ts';
 import { createExplorerSearchWidgetServices } from './vscode_widget_vendor/searchWidgetServices.ts';
 import type { ExplorerContentSearchOptions } from './types.ts';
+import { insertContentQueryNewline } from './content-query-keyboard.ts';
 
 interface ExplorerContentQueryWidgetDeps {
   onReplacementChanged?(expanded: boolean, text: string): void;
@@ -107,7 +108,7 @@ export function createExplorerContentQueryWidget(
     services.contextViewProvider,
     {
       label: 'Search',
-      placeholder: 'Search in files',
+      placeholder: 'Search in files (Shift+Enter for newline)',
       appendCaseSensitiveLabel: '',
       appendWholeWordsLabel: '',
       appendRegexLabel: '',
@@ -209,10 +210,10 @@ export function createExplorerContentQueryWidget(
     }
   };
 
-  searchInput.inputBox.inputElement.addEventListener(
-    'keydown',
-    maybeHandleEscape,
-  );
+  const queryKeyDown = (event: KeyboardEvent): void => {
+    if (!insertContentQueryNewline(event, searchInput.inputBox)) maybeHandleEscape(event);
+  };
+  searchInput.inputBox.inputElement.addEventListener('keydown', queryKeyDown, true);
   includeInput.getInputElement().addEventListener('keydown', maybeHandleEscape);
   excludeInput.getInputElement().addEventListener('keydown', maybeHandleEscape);
 
@@ -230,6 +231,7 @@ export function createExplorerContentQueryWidget(
   return {
     dispose(): void {
       resizeObserver?.disconnect();
+      searchInput.inputBox.inputElement.removeEventListener('keydown', queryKeyDown, true);
       searchInput.dispose();
       includeInput.dispose();
       excludeInput.dispose();

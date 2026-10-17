@@ -58,7 +58,43 @@ User reports that the memory-safety change regressed multiline searches. Restore
 that behavior without reverting bounded previews, per-file result reuse,
 byte-budgeted batches or delivery-failure cancellation. Pair the correction with
 desktop Shift+Enter newline entry so multiline queries need not be pasted.
-This section is an approved plan update, not implementation approval.
+This began as a planning-only follow-up; the concrete queue-pressure correction
+and its implementation approval are recorded below.
+
+### Confirmed queue-pressure failure and approved correction — 2026-10-17
+
+User's actual two-line query matches review_projection.py at source lines 104–105.
+Live UI was observed stuck at 999 scanned/zero hits. User supplied framework
+warnings for search-content-2: `app-worker pipe writer queue is full` repeated
+within milliseconds. This is progress-delivery pressure, not evidence of the
+preview byte cap rejecting a match or an OOM. Multiline providers emit per-file
+progress; the parallel provider already batches it. SearchJobContext previously
+sent all events as required through the nonblocking 256-frame pipe-writer queue;
+a rejected progress frame cancelled the producer and could also lose completion.
+
+Approved implementation preserves queue/frame/preview bounds and real delivery
+failure cancellation:
+
+- Coalesce outbound search progress to at most one update per 50 ms, retaining
+  latest counts for terminal reporting. A saturated *live* writer may discard
+  optional progress without cancelling. Closed/invalid transports remain errors.
+- Required result/done/error sends apply bounded backpressure from the existing
+  blocking search emitter only. Encode once and retry queue admission of that
+  same frame, not search/mutation execution; poll close while waiting. Existing
+  non-search send semantics are unchanged, and the Tokio reader is not blocked.
+- Supply source-owned endLineNumber (including clipped/Unicode multiline hits),
+  preserve it as endLine in Python's cache/projection, and display the match's
+  source line range in a nonshrinking gutter. Legacy payloads retain start-line
+  labels. Do not infer source extent from bounded preview text.
+- Shift+Enter uses InputBox.insertAtCursor on the active flexible query input,
+  preserving its value/change/layout owner and caret. Capture only the unmodified
+  Shift+Enter chord; leave IME/229, ordinary Enter and other modifier chords alone.
+
+Read errors and escaped-newline-regex routing are separate candidates, not proven
+causes of this reported failure and not changed by this slice. The multiline
+path still reads a whole file; this work does not promise constant-memory scans.
+Activation now needs matching framework, Code TE2 Python/mypyc and host assets;
+no shared runtime restart, OTA publication or APK work is approved here.
 
 Source observations, not a confirmed diagnosis:
 

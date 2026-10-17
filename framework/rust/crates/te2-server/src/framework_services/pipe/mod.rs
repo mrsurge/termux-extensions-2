@@ -13,6 +13,18 @@ use protocol::{PipeEnvelope, PipeError, PipeIdentity, PipeMessageKind};
 
 pub(crate) trait PipeEventSink: Send + Sync {
     fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()>;
+
+    /// Disposable progress may be dropped when a live writer is saturated.
+    /// Encoding failures and a closed transport remain errors.
+    fn try_send_optional(&self, envelope: PipeEnvelope) -> anyhow::Result<bool> {
+        self.send(envelope).map(|()| true)
+    }
+
+    /// Required search events apply bounded backpressure. Call only from a
+    /// blocking emitter, never from a Tokio async worker or the pipe reader.
+    fn send_blocking(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
+        self.send(envelope)
+    }
 }
 
 pub(crate) async fn dispatch_request(
@@ -101,6 +113,76 @@ mod tests {
             self.frames.lock().expect("frames lock").push(envelope);
             Ok(())
         }
+    }
+
+    #[derive(Default)]
+    struct DroppingProgressSink(TestSink);
+
+    impl PipeEventSink for DroppingProgressSink {
+        fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
+            self.0.send(envelope)
+        }
+        fn try_send_optional(&self, _: PipeEnvelope) -> anyhow::Result<bool> {
+            Ok(false) // A live but saturated progress lane, not broken delivery.
+        }
+    }
+
+    #[tokio::test]
+    async fn multiline_scan_outlives_progress_pressure_and_delivers_exact_result_and_done() {
+        let root = test_root("multiline-progress-pressure");
+        for index in 0..1100 {
+            fs::write(root.join(format!("f{index}.txt")), "unrelated\ntext\n").unwrap();
+        }
+        fs::write(root.join("target.py"), "before\n# Caller disconnect/cancellation must not abandon post-write reconciliation.\nif len(self._operations) >= 64:\nafter\n").unwrap();
+        let sink = Arc::new(DroppingProgressSink::default());
+        let scheduler = FrameworkServiceScheduler::default();
+        let responder = PipeIdentity {
+            nid: 2300,
+            name: "service.search".into(),
+        };
+        let response = dispatch_request(request("search.content.start", json!({
+            "query": "# Caller disconnect/cancellation must not abandon post-write reconciliation.\nif len(self._operations) >= 64:",
+            "useIgnoreFiles": false
+        }), &root), &responder, &scheduler, Some(sink.clone())).await;
+        assert!(response.error.is_none(), "{response:?}");
+        let frames = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let frames = sink.0.frames.lock().unwrap().clone();
+                if frames
+                    .iter()
+                    .any(|e| e.method.as_deref() == Some("search.job.done"))
+                {
+                    break frames;
+                }
+                sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("required completion despite discarded progress");
+        let done = frames
+            .iter()
+            .find(|e| e.method.as_deref() == Some("search.job.done"))
+            .unwrap()
+            .params
+            .as_ref()
+            .unwrap();
+        assert_eq!(done["cancelled"], false);
+        assert_eq!(done["filesScanned"], 1101);
+        assert_eq!(done["matchesFound"], 1);
+        assert_eq!(done["requiredEventFailures"], 0);
+        let result = frames
+            .iter()
+            .find(|e| e.method.as_deref() == Some("search.job.result"))
+            .unwrap()
+            .params
+            .as_ref()
+            .unwrap();
+        let hit = &result["result"]["files"][0]["matches"][0];
+        assert_eq!(hit["lineNumber"], 2);
+        assert_eq!(hit["endLineNumber"], 3);
+        assert_eq!(hit["columnNumber"], 1);
+        assert!(hit["editTarget"]["startByte"].is_number());
+        let _ = fs::remove_dir_all(root);
     }
 
     fn test_root(name: &str) -> PathBuf {

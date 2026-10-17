@@ -906,8 +906,15 @@ line/column and guarded `editTarget` source-byte coordinates remain independent.
 The Rust producer borrows matching input and retains the existing per-file
 snapshot/hash policy; previews do not add a read pass. Progressive results split
 into conservative 256 KiB batches appended to the same Python per-file record.
-Pipe notification rejection cancels the shared producer instead of warning and
-continuing. This does not cap total result count or eliminate the input line
+Search progress is optional and coalesced to at most one frame per 50 ms;
+pressure on a live bounded pipe writer may drop progress without cancelling.
+Required results/completion/errors wait for queue capacity on the blocking
+search emitter, observing close; invalid frames and real transport failures
+still cancel the producer. Existing non-search send behavior is unchanged.
+Source-owned `endLineNumber` survives Python as `endLine` and gives multiline
+hits a source-line range label independent of clipped snippets. Shift+Enter
+inserts a query newline through the existing flexible input-box pipeline.
+This does not cap total result count or eliminate the input line
 buffer. See `docs/apps/search_memory/PLAN.md` for scope and limits.
 
 Explorer filename search has both its source-tree input and a separately created

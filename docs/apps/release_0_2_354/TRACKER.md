@@ -87,10 +87,11 @@ documentation consolidation.
   bridge: 10 passed; ALS bridge/file-open routing: 3 passed (plus 4 retained View
   ribbon tests passed). Both frontend typechecks/builds and changed Python `ty`
   checks pass. Existing Node module-type warning remains; no failure.
-- [ ] Separately approve bridge refresh, matching Code TE2 domain/mypyc and client/
-  ALS asset activation. Obtain simultaneous multi-client/window/conversation
-  acceptance, including both disconnect orders. No restart, APK, OTA/seed,
-  version bump, commit or push performed. Technical plan: sidebar_app_intents/PLAN.md.
+- [x] User live acceptance of current multi-client routing: mentions reach the
+  correct ALS frontend and file opens reach the correct client. Exact build/
+  installation steps and both disconnect orders were not independently audited;
+  do not turn that unrun matrix into a demonstrated defect. Technical plan:
+  sidebar_app_intents/PLAN.md.
 
 ### Qualified Sidebar windows — corrected requirement, source slice
 
@@ -112,12 +113,18 @@ documentation consolidation.
   A broader transport/devtools run passed 44 but failed 4 existing TextMate
   fixtures (`usesHttpGrammarResources` reads undefined location.search); these
   unrelated fixture failures are not claimed fixed or counted as a full pass.
-- [ ] Separately approve matching Code TE2 mypyc/domain, ALS native install,
-  framework console bridge and client asset activation; then live-test multiple
-  main pages, shared/different Sidebar states, conversations and reconnects.
-  No docks need clearing. No restart, APK, OTA/seed, install, commit/push or
-  version change performed. Prior console-only acceptance is not acceptance of
-  this corrected model. Technical contract: sidebar_app_intents/PLAN.md.
+- [x] User confirms ongoing live testing: mentions target the correct ALS
+  frontend and file opens target the correct client. Current Electron/Cefrium
+  console inspection also confirms short main-page names and matching shared
+  Sidebar-state/parent suffixes. Accept the normal multi-client behavior; no
+  additional general foreground-routing implementation is outstanding.
+  User explicitly classifies deliberately launched duplicate app instances
+  sharing one persistent client ID as unsupported. They are mirror projections,
+  not independent routing clients; client-scoped notifications are not an open
+  routing defect or release blocker. Supported detached/secondary windows retain
+  their existing identity/presentation contracts. The user report
+  does not establish every reconnect/disconnect order or final packaged artifact.
+  Technical contract: sidebar_app_intents/PLAN.md.
 - [x] User-approved local ALS checkpoint `570deb5` pins identity source/tests/docs
   without a version bump or push. Refreshed TE2's vendored ALS frontend from that
   revision: all 149 static resources and source/served/license inventories pass
@@ -147,9 +154,9 @@ documentation consolidation.
   20 tests passed; frontend typecheck/build passed. This does not imply blanket
   acceptance of the separate qualified Sidebar routing work.
 - [x] Final frontend typecheck/build and source whitespace checks passed.
-- [ ] Publish matching assets separately and obtain mobile file-switch/shortcut
-  acceptance. No publication, restart,
-  mypyc rebuild, commit/push or version bump for this slice.
+- [x] Mobile file-switch/shortcut/Jmp/layout live acceptance reported by user;
+  source slice is in local checkpoint 75228e0c. No agent publication or restart
+  was performed. Final release artifact publication remains a separate gate.
 
 ### Pending — multiline search recovery and desktop query input
 
@@ -158,20 +165,41 @@ multiline-search or other user-note work.
 
 - [x] Record user regression report and preliminary read-only trace; Rust's
   multiline matcher still exists, but the failing layer is not yet established.
-- [ ] Trace a failing multiline case through input, request, enumeration, bounded
-  DTOs, Python retained results and rendering; approve the concrete correction.
-- [ ] Restore multiline behavior without weakening preview/batch/pipe memory
-  bounds, per-file reuse, cancellation or guarded replacement identity.
-- [ ] Add Shift+Enter newline entry through the existing flexible-height query
-  widget; preserve caret/selection, IME, Enter/Escape and multiline paste.
-- [ ] Regress LF/CRLF, literal/regex, Unicode, clipping, multiple/progressive hits,
-  highlights/navigation and exact replacement coordinates across affected layers.
-- [ ] Re-run huge-line memory/size and rejected-delivery regressions, frontend
-  typecheck/build; separately approve activation and obtain live acceptance.
+- [x] Live query captured at 999 scanned/zero matches; exact ripgrep query finds
+  review_projection.py lines 104–105. User's framework log confirms repeated
+  app-worker pipe writer queue-full failures for search-content-2. Source shows
+  per-file multiline progress pressure cancelling required delivery. Concrete
+  implementation/test scope approved through the input tool.
+- [x] Preserve byte/frame/queue limits and all matches. Coalesce optional outbound
+  progress and make saturated progress nonfatal; required result/done/error
+  frames wait on the existing blocking emitter, observing close. Real invalid
+  frame/closed-transport rejection still cancels. No mutation/search replay.
+- [x] Add source-owned multiline end-line extent through Rust/Python/TypeScript
+  projection and nonshrinking source-range labels, independent of clipped text.
+  Add guarded Shift+Enter via the actual flexible InputBox change/layout API.
+- [x] Focused frontend result/input/replacement/sticky/TextMate regressions:
+  30 passed. Python cache/replacement/hydration: 5 tests and 7 subtests passed;
+  changed Python ty checks pass (two pre-existing literal narrowing sites in
+  the touched contract module now use casts after existing validation).
+- [x] Rust targeted search suite: 42 passed, 4 rate benchmarks intentionally
+  ignored. Separate 1,101-file multiline pressure integration test passed;
+  covers required result/done and exact source/edit identity. Existing huge-line,
+  UTF-8 clipping, batching, replacement and rejection tests remain green.
+- [x] Final Rust validation: 151 framework-service tests passed (5 intentionally
+  ignored), plus 4 native writer tests passed. Includes a saturated one-frame
+  queue, 4,096 dropped progress frames, ordered required result/done delivery,
+  close while blocked and immediate invalid-frame rejection. Frontend typecheck/
+  build and authored source whitespace checks pass; existing Node module-type
+  warning remains. Disk retained ~2.5 GiB free; no caches/artifacts were removed.
+- [x] User reports the updated slice tested and working well, accepting search
+  completion, multiline line labels and Shift+Enter. No additional timing study
+  requested; perceived speed improvement is plausible reduced progress overhead,
+  not a measured matcher speedup. User authorizes commit/push; no agent runtime
+  restart, domain activation, OTA/seed publication or version bump performed.
 
-The bounded-search OOM correction remains accepted; that is not proof that the
-new multiline regression is fixed. Technical plan: docs/apps/search_memory/PLAN.md.
-No search implementation was made in this pass.
+The bounded-search OOM correction remains accepted, and the multiline
+queue-pressure follow-up now has separate user live acceptance.
+Technical correction and activation gates are detailed in search_memory/PLAN.md.
 
 ### Current ALS three-issue pre-release slice
 

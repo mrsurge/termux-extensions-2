@@ -74,7 +74,7 @@ def parse_search_replace_params(payload: object) -> SearchReplaceParams:
         selected.append(index)
     if phase == 'prepare' and not selected:
         raise ExplorerSearchReviewContractError('Select at least one match')
-    return {'phase': phase,
+    return {'phase': cast(Literal['prepare', 'apply'], phase),
         'searchId': _required_string(raw.get('searchId'), 'searchId'),
         'projectGeneration': generation,
         'relativePath': _required_string(raw.get('relativePath'), 'relativePath'),
@@ -188,6 +188,7 @@ def parse_content_edit_target(value: object) -> ContentEditTarget | None:
 class SearchContentMatch(TypedDict):
     editTarget: NotRequired[ContentEditTarget | None]
     line: int
+    endLine: NotRequired[int]
     column: int
     text: str
     snippet: str
@@ -235,6 +236,7 @@ class SearchTextRange(TypedDict):
 
 class SearchProviderContentMatch(TypedDict):
     lineNumber: int
+    endLineNumber: NotRequired[int]
     columnNumber: int
     lineText: str
     snippet: str
@@ -501,6 +503,7 @@ def project_search_content_result(
 def _project_provider_content_match(match: SearchProviderContentMatch) -> SearchContentMatch:
     return {
         "line": match["lineNumber"],
+        "endLine": match.get("endLineNumber", match["lineNumber"]),
         "column": max(0, match["columnNumber"] - 1),
         "text": match["lineText"],
         "snippet": match["snippet"],
@@ -540,7 +543,7 @@ def _parse_search_mode(value: object) -> SearchMode:
     if value is None:
         return "name"
     if value in ("name", "content", "changes"):
-        return value
+        return cast(SearchMode, value)
     raise ExplorerSearchReviewContractError("Invalid search mode")
 
 

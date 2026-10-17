@@ -289,6 +289,7 @@ pub(crate) struct SearchContentMatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) edit_target: Option<ContentEditTarget>,
     pub(crate) line_number: u64,
+    pub(crate) end_line_number: u64,
     pub(crate) column_number: usize,
     pub(crate) line_text: String,
     pub(crate) snippet: String,
@@ -1424,6 +1425,7 @@ fn content_match_dto(
         end_byte: match_end,
         edit_target: None,
         line_number,
+        end_line_number: line_number,
         column_number: match_start + 1,
         line_text: snippet.clone(),
         snippet,
@@ -1461,6 +1463,7 @@ fn content_multiline_match_dto(
         end_byte: match_end,
         edit_target: None,
         line_number: line_number_at_offset(text, match_start),
+        end_line_number: line_number_at_offset(text, match_end.saturating_sub(1).max(match_start)),
         column_number: match_start.saturating_sub(line_start) + 1,
         line_text,
         snippet,
@@ -1506,9 +1509,9 @@ fn containing_line_span(text: &str, match_start: usize, match_end: usize) -> (us
 }
 
 fn line_number_at_offset(text: &str, offset: usize) -> u64 {
-    text[..offset.min(text.len())]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
+    text.as_bytes()[..offset.min(text.len())]
+        .iter()
+        .filter(|byte| **byte == b'\n')
         .count() as u64
         + 1
 }
@@ -1972,6 +1975,10 @@ mod tests {
         );
         let text = format!("{}\n{}", "🦀".repeat(5000), "é".repeat(5000));
         let mut hit = content_multiline_match_dto(&text, 0, text.len(), 75);
+        assert_eq!(
+            hit.end_line_number, 2,
+            "source line extent is independent of clipped preview"
+        );
         attach_edit_targets(&text, std::slice::from_mut(&mut hit));
         assert!(hit.line_text.len() <= MAX_MATCH_PREVIEW_BYTES);
         assert!(hit.match_text.len() <= MAX_MATCH_PREVIEW_BYTES);
@@ -2355,6 +2362,7 @@ mod tests {
         );
         let first_match = &result.files[0].matches[0];
         assert_eq!(first_match.line_number, 2);
+        assert_eq!(first_match.end_line_number, 3);
         assert_eq!(first_match.column_number, 1);
         assert!(first_match.match_text.contains("needle one"));
         assert!(first_match.match_text.contains("needle two"));
@@ -2378,6 +2386,7 @@ bar_\d+"
         assert_eq!(result.match_count, 1);
         let found = &result.files[0].matches[0];
         assert_eq!(found.line_number, 2);
+        assert_eq!(found.end_line_number, 3);
         assert_eq!(found.column_number, 1);
         assert_eq!(found.match_text, "foo_123\nbar_456");
 

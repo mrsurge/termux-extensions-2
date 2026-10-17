@@ -102,6 +102,7 @@ class CachedContentMatch:
     line_ranges: tuple[SearchRange, ...] = ()
     snippet_ranges: tuple[SearchRange, ...] = ()
     edit_target: ContentEditTarget | None = None
+    end_line: int | None = None
 
 
 @dataclass(slots=True)
@@ -918,6 +919,7 @@ def _project_match(match: CachedContentMatch) -> SearchContentMatch:
     return {
         "editTarget": match.edit_target,
         "line": match.line,
+        "endLine": match.end_line if match.end_line is not None else match.line,
         "column": match.column,
         "text": match.text,
         "snippet": match.snippet,
@@ -1168,6 +1170,7 @@ def _content_match(value: object) -> CachedContentMatch | None:
         return None
     return CachedContentMatch(
         edit_target=parse_content_edit_target(raw.get("editTarget")),
+        end_line=_optional_int(raw.get("endLineNumber")),
         line=line_number,
         column=max(0, column_number - 1),
         text=_string(raw.get("lineText")),
@@ -1182,6 +1185,7 @@ def _provider_match_payload(match: CachedContentMatch) -> JsonObject:
     return {
         "editTarget": match.edit_target,
         "lineNumber": match.line,
+        "endLineNumber": match.end_line if match.end_line is not None else match.line,
         "columnNumber": match.column + 1,
         "lineText": match.text,
         "snippet": match.snippet,
