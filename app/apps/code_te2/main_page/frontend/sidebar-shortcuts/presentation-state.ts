@@ -25,6 +25,9 @@ export interface SidebarClientPresentationState {
 }
 
 export interface SidebarMentionTarget {
+  mainPageId?: string;
+  sidebarStateId?: string;
+  sidebarWindowId?: string;
   clientId: string;
   hostId: string;
   presentationId: string;

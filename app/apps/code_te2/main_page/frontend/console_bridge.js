@@ -268,9 +268,26 @@ export function initConsoleBridge(opts = {}) {
     _ownsSocket = true;
   }
 
-  // Tell the server this is a console-producing worker
+  const query = new URLSearchParams(window.location?.search || '');
+  const sidebarWindowId = query.get('sidebarWindowId') || '';
+  if (sidebarWindowId) _workerId = sidebarWindowId;
+  const requestedWorkerId = _workerId;
+  const registration = {
+    workerId: requestedWorkerId, workerLabel: _workerLabel, role: 'worker',
+    compactIdentity: true,
+    qualifiedIdentity: opts.qualifiedIdentity === true || !!sidebarWindowId,
+    clientInstanceId: opts.clientInstanceId || query.get('clientInstanceId') || '',
+    presentationId: query.get('presentationId') || '',
+  };
+  _socketHandlers.registered = (data) => {
+    if (data?.requestedWorkerId !== requestedWorkerId || typeof data.workerId !== 'string') return;
+    _workerId = data.workerId;
+    _emitBridgeStatus();
+  };
+  _bridgeSocket.on('console:registered', _socketHandlers.registered);
+  // Reconnect uses the original identity, not a retired runtime handle.
   _socketHandlers.connect = () => {
-    _bridgeSocket.emit('console:register', { workerId: _workerId, workerLabel: _workerLabel, role: 'worker' });
+    _bridgeSocket.emit('console:register', registration);
     _emitBridgeStatus();
   };
   _bridgeSocket.on('connect', _socketHandlers.connect);
@@ -287,7 +304,7 @@ export function initConsoleBridge(opts = {}) {
   }
   // If already connected, register immediately
   if (_bridgeSocket.connected) {
-    _bridgeSocket.emit('console:register', { workerId: _workerId, workerLabel: _workerLabel, role: 'worker' });
+    _bridgeSocket.emit('console:register', registration);
   }
 
   _patchConsole();
@@ -304,6 +321,9 @@ export function initConsoleBridge(opts = {}) {
  */
 export function destroyConsoleBridge() {
   if (!_bridgeActive) return;
+  if (_bridgeSocket?.connected) {
+    _bridgeSocket.emit('console:unregister', { role: 'worker', workerId: _workerId });
+  }
   for (const [reqId, pending] of _pendingEvals) {
     clearTimeout(pending.timeoutHandle);
     pending.reject(new Error('bridge_destroyed'));
@@ -314,6 +334,7 @@ export function destroyConsoleBridge() {
   }
   if (_bridgeSocket && typeof _bridgeSocket.off === 'function') {
     if (_socketHandlers.connect) _bridgeSocket.off('connect', _socketHandlers.connect);
+    if (_socketHandlers.registered) _bridgeSocket.off('console:registered', _socketHandlers.registered);
     if (_socketHandlers.disconnect) _bridgeSocket.off('disconnect', _socketHandlers.disconnect);
     if (_socketHandlers.eval) _bridgeSocket.off('console:eval', _socketHandlers.eval);
     if (_socketHandlers.evalCancel) _bridgeSocket.off('console:evalCancel', _socketHandlers.evalCancel);

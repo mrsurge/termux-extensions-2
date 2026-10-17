@@ -1015,13 +1015,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return null;
   }
 
-  function confirmProjectAction(options: { title: string; body: string; confirmText: string }): Promise<boolean> {
+  function confirmProjectAction(options: {
+    title: string; body: string; confirmText: string;
+    secondaryText?: string; onSecondary?: () => void;
+  }): Promise<boolean> {
     type WarningHelpers = {
       openWarningModal?: (options: {
         title?: string;
         body?: string;
         confirmText?: string;
+        secondaryText?: string;
         onConfirm?: () => Promise<void> | void;
+        onSecondary?: () => void;
         onCancel?: () => void;
       }) => void;
     };
@@ -1036,7 +1041,9 @@ document.addEventListener('DOMContentLoaded', () => {
         title: options.title,
         body: options.body,
         confirmText: options.confirmText,
+        secondaryText: options.secondaryText,
         onConfirm: () => resolve(true),
+        onSecondary: () => { options.onSecondary?.(); resolve(false); },
         onCancel: () => resolve(false),
       });
     });
@@ -1877,6 +1884,14 @@ document.addEventListener('DOMContentLoaded', () => {
     renderDiffBlock,
     makeCollapsible,
     confirmProjectAction,
+    chooseProjectFileAction: async (options) => {
+      let openExternal = false;
+      const confirmed = await confirmProjectAction({
+        ...options, secondaryText: 'Open without switching',
+        onSecondary: () => { openExternal = true; },
+      });
+      return confirmed ? 'switch' : openExternal ? 'external' : 'cancel';
+    },
     showProjectModal: () => {
       const opened = conversationModal.show('project');
       if (opened) settingsModalPrepared = false;

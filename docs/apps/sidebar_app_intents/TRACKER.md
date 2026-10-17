@@ -1,5 +1,10 @@
 # Sidebar App Intents Tracker
 
+Historical evidence, not an independent current checklist. Recent pre-release
+status/acceptance is consolidated in docs/apps/release_0_2_354/TRACKER.md
+(2026-10-17). Preserve older scope/history below; do not reopen its completed
+items or duplicate pending gates from this file.
+
 Plan: [PLAN.md](PLAN.md). Branch: `feature/code-te2-native-services`.
 Status: planned Sidebar app-intent workflows are implemented, regression-tested
 and user live-accepted. This includes File Explorer, Terminal, CM6, mobile
@@ -340,3 +345,28 @@ Publish/force OTA and reload wrapper assets. No Code TE2 mypyc rebuild or APK is
 needed. No agent-operated install/restart/publication was performed by this slice.
 Existing conversation debug logs are diagnostics on stderr; durable transcripts
 and extension-adapter protocol I/O are preserved, not removed as debug output.
+
+## ALS composer/navigation asset refresh
+
+- [x] User approves a local ALS checkpoint without a version bump, solely to
+  satisfy committed-source provenance before TE2 asset publication. ALS checkpoint
+  `fcc716b` includes composer newline/caret/Escape and Project dialog navigation
+  changes; it is not pushed or marked live accepted by this step.
+- [x] Refresh the managed ALS snapshot: existing version 0.2.138, 149 resources,
+  source/served hashes and exact source commit recorded in its manifest.
+- [x] Regenerate shared Android editor_static seed using the existing bundler;
+  framework/editor asset version remains 0.2.353. No APK assembled or installed.
+- [x] Fetch a fresh ZIP from the running framework's /api/editor_assets_bundle;
+  all 445 files match the Android seed byte for byte. ALS source hashes, projected
+  bundle, metadata/license and wrapper match the pinned inputs. Existing newer
+  Code TE2 host.js/explorer.css outputs are copied unchanged by the seed publisher.
+- [x] Snapshot verification and 12 ALS/native asset mapping tests pass. Authored
+  ALS asset/test/readme changes pass diff checks. Copied Code TE2 host.js retains
+  source-generated whitespace; unrelated search tracker/user notes are untouched.
+Client activation/live status is now tracked only in the consolidated release
+tracker; user subsequently reports the current slice seems to be working.
+Same-version installs still require force OTA, not assumed APK reseeding.
+
+Inspection ZIP: .codex-scratch/als-ota-6eXSBQ/editor-assets.zip (13,533,948 bytes),
+SHA-256 84a3991cd1cd7101fe03422b33a21495cabcb161ad34877f078e0547e769194e.
+No TE2 commit or either-repo push is performed by this asset refresh.

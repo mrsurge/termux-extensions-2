@@ -770,6 +770,24 @@ test results and user acceptance in the tracker, never inferred completion.
 
 ## ALS file-open presentation routing correction — 2026-10-17
 
+### File-open-only foreground-lag correction
+
+An exact live registered client/slot/presentation can originate a document-open
+intent while `_client_active_windows` still reflects another slot or is empty.
+Document opens therefore opt into `allow_registered_inactive` at their common
+backend owner; caller proof, current presentation, shared slot membership and
+requester-app ownership remain required. A supplied stale presentation is always
+rejected, including when the foreground happens to match. Missing presentation
+identity cannot use the exception. Other intent/project/terminal/app admission
+keeps its existing foreground requirement. No focus state is rewritten, fallback
+client chosen, operation replayed or notification broadcast by admission.
+
+This is the bounded pre-release repair, not the deferred framework-pipe/short-ID
+migration. Tests cover pure resolution plus the real document-open composition
+for both socket and pipe callers. Activation requires matching Code TE2 mypyc
+source and user-approved worker refresh; frontend publication cannot activate it.
+Current status/acceptance is maintained only in release_0_2_354/TRACKER.md.
+
 Approved maintenance scope: retain Sidebar IPC while removing global last-focus
 as authority for a user file click. Backend-persisted slots, conversation/query
 state and console labels stay shared. Order, foreground and rendered presentation
@@ -817,3 +835,89 @@ The framework app_shell already gates module initialization on worker readiness;
 retain the existing proxy metadata/start URL and launch query propagation, then
 mount directly. This is ALS-wrapper-only, not a generic proxy template migration.
 Matching wrapper OTA/reload becomes an activation gate; no native mapping change.
+
+## Multi-client console identity and routing — approved 2026-10-17
+
+Console observability is not Sidebar authority. Preserve durable client IDs,
+shared slots/conversations and exact transient presentation tuples; no native
+identity store or saved layout migration is included.
+
+The framework console owns a SID-indexed registry. Updated bridges register
+their original identity plus parent client/presentation context and receive
+`console:registered` with a compact runtime handle, e.g. `als:Ab12.Cd34`.
+Each token is four case-sensitive alphanumeric characters; the suffix groups a
+parent client, not an authorization grant. Allocation checks collisions with
+bounded retries/capacity; tokens are not reused during this framework runtime.
+Reconnect may receive a new page handle. Rediscover live handles before eval.
+
+Duplicate legacy names remain separate registrations; ambiguous legacy evals
+reject rather than broadcast. Eval targets one SID and replies must match that
+SID/registration. Disconnect rejects only its pending work; timeout cancellation
+stays pinned to the original SID. Logs use server-owned registration handles.
+Shared-socket teardown unregisters only a matching current handle.
+
+Never parse console suffixes into Sidebar destinations. ALS file-open RPC already
+reads the caller tuple from its URL and overrides supplied targets. Mentions
+retain client-local MRU selection and derive conversation from the validated
+shared slot. Bind Editor/Explorer/diagnostic/Sidebar mention entry lanes to their
+own connection's client before routing; another live client's ID must reject.
+
+Validate collisions/exhaustion, duplicate IDs, both disconnect orders, stale
+replies, shared-socket teardown, reconnect context, two-client file opens and
+distinct MRU mentions. Console-importing tests use disposable TE2_CACHE_HOME
+roots because imports reset the transcript. Typecheck/build both frontends.
+Activation needs separately approved runtime-bridge refresh, Code TE2 domain/
+mypyc activation and matching client/ALS assets. No restart, APK, OTA/seed,
+version bump, commit, push or framework-pipe migration is included in this slice.
+
+## Qualified Sidebar windows — corrected user requirement, 2026-10-17
+
+The console-only short-handle foundation above is retained but is not the
+requested Sidebar identity model. Code TE2 now owns short persistent references
+in `ui.sidebarIdentityReferences`: main pages are keyed by durable client plus
+window ID, shared states by existing host/slot ID. Four-character case-sensitive
+alphanumeric references have collision checks and explicit capacity errors.
+The maps do not rename existing clients, slots, conversations or saved layouts.
+
+For main page `f0f0` presenting shared ALS state `a1b2`, the effective Sidebar
+window is `als:a1b2.f0f0`, and its main-page console is `main_page:f0f0`.
+Another main page `c3d4` presents the same state as `als:a1b2.c3d4`.
+The wrapper manifest may declare `sidebar_state.presentation_prefix` (`als`);
+other apps use their declared console prefix. These are backend-registered
+presentation identities, not independently random console aliases.
+
+Sidebar host registration binds client/window to connection metadata and returns
+`mainPageId`. The existing presentation-update RPC registers a short window and
+returns `mainPageId`, `sidebarStateId`, `sidebarWindowId`; the transient
+`presentationId` remains the incarnation proof. Embedded and native/detached
+launch paths await this registration before final navigation, preserve the
+incarnation and inject the three short fields into their local URL. The URL's
+`te2_console_worker_id` is the qualified window ID. Main/ALS/shared console
+bridges request preservation of these exact names under the existing SID-owned
+console safeguards, rather than another random rename.
+
+Main-page registration readiness and identity requests are bounded and reject
+on disconnect; no stale acknowledgement crosses a connection epoch. Reconnect
+republishes current presentations. Qualified console replacement by the same
+client retains the name but changes SID ownership; old disconnect/replies cannot
+remove or answer for its replacement. Unqualified legacy duplicates remain
+ambiguous and do not broadcast evaluation.
+
+ALS file-open frontend and Rust DTO gateway preserve `sidebarWindowId` and
+`mainPageId`. TE2 validates both against the registered client, slot, live parent
+and incarnation before existing open authority runs. Mentions carry the same
+registered identity with the client-local MRU target; the target slot still owns
+the conversation. Compatibility without short fields retains existing tuple
+checks; supplied malformed/stale short fields never fall back. Qualified state
+publication cannot persist a client's suffix: presentation-only query fields
+are excluded from shared restore/query state and the shared console base stays
+unqualified. Old stored URLs are qualified when mounted, without clearing docks.
+
+Validation covers the exact examples above, same-installation distinct window
+references, restart restoration, collisions, stale incarnations/parents, both
+disconnect orders, shared-state URL isolation, requester binding, ALS gateway
+forwarding and frontend registration readiness. This adds an ALS Rust gateway
+change: activation needs its matching native build/install, Code TE2 mypyc/domain
+activation, framework console bridge refresh and matching client assets. No
+restart, package install, APK, OTA/seed publication, commit/push or version bump
+is included in source approval. Live multi-client acceptance remains separate.

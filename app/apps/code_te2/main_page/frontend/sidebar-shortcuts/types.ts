@@ -226,6 +226,7 @@ export interface SidebarShortcutsOptions {
     method: UiIpcRpcMethod,
     payload?: UnknownRecord,
   ) => Promise<unknown>;
+  requestSidebarRpc?: (method: SidebarIpcRpcMethod, payload?: UnknownRecord) => Promise<UnknownRecord>;
   emitSidebarRpcRequest?: (
     method: SidebarIpcRpcMethod,
     payload?: UnknownRecord,

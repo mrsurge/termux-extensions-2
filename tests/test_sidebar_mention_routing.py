@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.apps.code_te2.ui_ipc.sidebar_mention_routing import (
+    bind_sidebar_mention_client,
     resolve_targeted_sidebar_mention,
 )
 from app.apps.code_te2.ui_ipc import sidebar_ws
@@ -53,6 +54,31 @@ def _presentations() -> dict[tuple[str, str], str]:
 
 
 class SidebarMentionRoutingTests(unittest.TestCase):
+    def test_caller_binding_rejects_another_live_clients_target(self) -> None:
+        payload = _payload()
+        with self.assertRaisesRegex(ValueError, "requesting client"):
+            bind_sidebar_mention_client(payload, "client-b")
+        self.assertEqual(bind_sidebar_mention_client(payload, "client-a")["target"],
+                         {"clientId": "client-a", "client_id": "client-a",
+                          "hostId": "agent-slot", "presentationId": "inline-agent-slot-1"})
+
+    def test_two_clients_keep_their_own_mru_slot_and_conversation(self) -> None:
+        a = _state(host_id="slot-a", conversation_id="conversation-a")
+        b = _state(host_id="slot-b", conversation_id="conversation-b")
+        a["slots"].update(b["slots"])
+        presentations = {("client-a", "slot-a"): "p-a", ("client-b", "slot-b"): "p-b"}
+        for client, host, presentation, conversation in [
+            ("client-a", "slot-a", "p-a", "conversation-a"),
+            ("client-b", "slot-b", "p-b", "conversation-b"),
+        ]:
+            payload = {"path": "/project/file.py", "conversation_id": "wrong-global",
+                       "target": {"clientId": client, "hostId": host, "presentationId": presentation}}
+            _, routed = resolve_targeted_sidebar_mention(
+                bind_sidebar_mention_client(payload, client), sidebar_state=a,
+                live_host_client_ids={"client-a", "client-b"}, registered_peer_app_ids={"als-rs"},
+                registered_presentations=presentations)
+            self.assertEqual(routed["conversation_id"], conversation)
+
     def test_resolves_conversation_from_authoritative_slot(self) -> None:
         app_id, routed = resolve_targeted_sidebar_mention(
             _payload(),
@@ -333,6 +359,35 @@ class SidebarMentionEmissionTests(unittest.IsolatedAsyncioTestCase):
         open_document.assert_awaited_once_with(
             payload, requester_app_id="als-rs", require_presentation=True,
         )
+
+    async def test_document_owner_allows_exact_presentation_without_relaxing_other_intents(self) -> None:
+        client = "client_123456789abc"
+        sidebar_ws._registered_hosts.add("host-sid")
+        sidebar_ws._client_ids_by_sid["host-sid"] = client
+        sidebar_ws._client_presentations[(client, "agent-slot")] = "inline-agent-slot-1"
+        payload = _payload()
+        target = payload["target"]
+        assert isinstance(target, dict)
+        target["clientId"] = client
+        open_host = AsyncMock(return_value={"ok": True, "surface": "sidebar"})
+        with patch(
+            "app.apps.code_te2.ui_ipc.sidebar_window_state.get_sidebar_window_state",
+            return_value=_state(),
+        ), patch(
+            "app.apps.code_te2.host.file_ops_backend.handle_host_open_request", new=open_host,
+        ):
+            for require_presentation in (False, True):
+                result = await sidebar_ws.handle_sidebar_document_open(
+                    payload, requester_app_id="als-rs", require_presentation=require_presentation,
+                )
+                self.assertEqual(result, {"ok": True})
+            with self.assertRaisesRegex(ValueError, "window is not active"):
+                sidebar_ws.resolve_sidebar_request_client(
+                    payload, requester_app_id="als-rs", require_presentation=True,
+                )
+        self.assertEqual(open_host.await_count, 2)
+        self.assertEqual(open_host.call_args.kwargs["source_name"], client)
+        self.assertEqual(sidebar_ws._client_active_windows, {})
 
 
 if __name__ == "__main__":

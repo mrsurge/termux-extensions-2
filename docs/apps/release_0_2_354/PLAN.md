@@ -27,6 +27,19 @@ The ALS framework-pipe/Sidebar IPC migration is explicitly next-version work.
 
 ## Ordered remaining work
 
+### Approved follow-up: mobile shortcuts after file switches
+
+Monaco setModel detaches/disposes its view and creates a new textarea while the
+editor widget can retain focus. The Ctrl adapter must bind to the new input on
+model change and actual text focus, not rely solely on widget focus transitions.
+Clear the prior input before replacement; unfocused/background attachment must
+not steal focus or another editor's ownership. Dispose listeners with the editor,
+deduplicate repeated focus events and fence late helper loads. Preserve the
+existing Gboard beforeinput transaction, modifier rules and terminal ownership.
+Validate focused/unfocused swaps, palette return, old-editor disposal and IME
+shortcuts; typecheck and rebuild the host. Frontend publication/live acceptance
+remain separate; no Python/mypyc, Android or runtime restart is needed for this fix.
+
 ### 1. Complete static app delivery, not another transport
 
 All eight built-in app entry templates/scripts are already represented by

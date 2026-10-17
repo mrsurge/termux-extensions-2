@@ -34,6 +34,7 @@ interface ProjectModalContext {
   renderDiffBlock(block: HTMLElement, text: string, filePath: string): void;
   makeCollapsible(row: HTMLElement | null, cardId: string, startExpanded: boolean, options?: Record<string, unknown>): void;
   confirmProjectAction(options: { title: string; body: string; confirmText: string }): Promise<boolean>;
+  chooseProjectFileAction(options: { title: string; body: string; confirmText: string }): Promise<'switch' | 'external' | 'cancel'>;
   showProjectModal(): void;
   closeConversationModal(): void;
   isProjectTabActive(): boolean;
@@ -613,7 +614,7 @@ export function bindProjectModal(ctx: ProjectModalContext): ProjectModalBinding 
     return currentTe2State;
   }
 
-  async function ensureTe2ProjectReady(projectRoot: string | null | undefined): Promise<boolean> {
+  async function ensureTe2ProjectReady(projectRoot: string | null | undefined, alreadyConfirmed = false): Promise<boolean> {
     const root = typeof projectRoot === 'string' && projectRoot.trim() ? projectRoot.trim() : '';
     if (!root) return false;
     let state = currentTe2State && currentTe2State.targetPath === root
@@ -627,7 +628,7 @@ export function bindProjectModal(ctx: ProjectModalContext): ProjectModalBinding 
       return true;
     }
     if (state.action === 'switch') {
-      const confirmed = await ctx.confirmProjectAction({
+      const confirmed = alreadyConfirmed || await ctx.confirmProjectAction({
         title: 'Switch TE2 project?',
         body: state.currentCwd
           ? `TE2 is currently open on ${state.currentCwd}. Switch it to ${root}?`
@@ -636,20 +637,67 @@ export function bindProjectModal(ctx: ProjectModalContext): ProjectModalBinding 
       });
       if (!confirmed) return false;
       const result = await ctx.uiRpc.openTe2Project({ path: root });
-      if (result.ok === false) return false;
+      if (result.ok !== true) return false;
       state = await refreshTe2ProjectState(root);
-      return state?.action === 'current';
+      // The switch RPC completes at the backend owner. Its successful reply,
+      // not a possibly delayed host-UI projection, admits the requested open.
+      return alreadyConfirmed || state?.action === 'current';
     }
-    const confirmed = await ctx.confirmProjectAction({
+    const confirmed = alreadyConfirmed || await ctx.confirmProjectAction({
       title: 'Create TE2 project?',
       body: `TE2 does not have ${root} in its project database. Create or adopt it and open it now?`,
       confirmText: 'Create',
     });
     if (!confirmed) return false;
     const result = await ctx.uiRpc.createTe2Project({ path: root, adoptExisting: true, open: true });
-    if (result.ok === false) return false;
+    if (result.ok !== true) return false;
     state = await refreshTe2ProjectState(root);
-    return state?.action === 'current';
+    return alreadyConfirmed || state?.action === 'current';
+  }
+
+  async function openProjectDocument(path: string, line: number): Promise<void> {
+    const root = currentSummary?.root;
+    const conversationId = ctx.getConversationId();
+    const cwd = ctx.getConversationCwd();
+    const stillCurrent = () => currentSummary?.root === root
+      && ctx.getConversationId() === conversationId && ctx.getConversationCwd() === cwd;
+    // Compare lexical path components, not a prefix such as /repo vs /repo-other.
+    // No filesystem/symlink resolution or project-membership authority moves here.
+    const normalize = (value: string): string => {
+      const parts: string[] = [];
+      for (const part of value.split('/')) {
+        if (part === '..') parts.pop();
+        else if (part && part !== '.') parts.push(part);
+      }
+      return `/${parts.join('/')}`;
+    };
+    const normalizedCwd = cwd ? normalize(cwd) : null;
+    const normalizedPath = normalize(path);
+    const inConversation = normalizedCwd !== null && (normalizedCwd === '/'
+      || normalizedPath === normalizedCwd || normalizedPath.startsWith(`${normalizedCwd}/`));
+    try {
+      if (inConversation && root) {
+        const state = await refreshTe2ProjectState(root);
+        if (!stillCurrent()) return;
+        if (!state?.connected || state.action === 'disabled') throw new Error('TE2 is unavailable.');
+        if (state.action !== 'current') {
+          const choice = await ctx.chooseProjectFileAction({
+            title: 'Open file in TE2',
+            body: `Would you like to switch TE2 to ${root} before opening this file? You can also open it without switching using TE2’s file handler.`,
+            confirmText: state.action === 'create' ? 'Create project and open' : 'Switch project and open',
+          });
+          if (!stillCurrent() || choice === 'cancel') return;
+          if (choice === 'switch') {
+            if (!await ensureTe2ProjectReady(root, true) || !stillCurrent()) return;
+          }
+        }
+      }
+      if (!stillCurrent()) return;
+      const result = await ctx.uiRpc.openFile({ path, line, column: 1 });
+      if (result.ok === false) throw new Error(stringValue(result.error) || 'File opening failed.');
+    } catch (error) {
+      if (stillCurrent()) showProjectActionError(errorMessage(error));
+    }
   }
 
   function renderAgentDiffCard(summary: ProjectSummary, diff: AgentDiff): HTMLElement {
@@ -1294,9 +1342,7 @@ export function bindProjectModal(ctx: ProjectModalContext): ProjectModalBinding 
       if (!path) return;
       evt.preventDefault();
       evt.stopPropagation();
-      const ready = await ensureTe2ProjectReady(currentSummary?.root);
-      if (!ready) return;
-      void ctx.uiRpc.openFile({ path, line: 1, column: 1 });
+      await openProjectDocument(path, 1);
     }
 
     projectBodyEl?.addEventListener('click', (evt) => {
@@ -1331,11 +1377,7 @@ export function bindProjectModal(ctx: ProjectModalContext): ProjectModalBinding 
         lineEl.classList.add('tap-flash');
         setTimeout(() => lineEl.classList.remove('tap-flash'), 180);
       } catch {}
-      void (async () => {
-        const ready = await ensureTe2ProjectReady(currentSummary?.root);
-        if (!ready) return;
-        await ctx.uiRpc.openFile({ path, line, column: 1 });
-      })();
+      void openProjectDocument(path, line);
     });
     projectBodyEl?.addEventListener('keydown', (evt) => {
       if (evt.key !== 'Enter' && evt.key !== ' ') return;

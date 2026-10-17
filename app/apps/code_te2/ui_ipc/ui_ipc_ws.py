@@ -197,6 +197,13 @@ class UIIPCNamespace(NativeNamespace):
             except FrontendRpcCodecError as exc:
                 raise ConnectionRefusedError(str(exc)) from exc
         await ns.enter_room(sid_text, room)
+        if room == "sidebar_ipc" and not native_source:
+            identity = client_presentation_identity_from_environ(environ, required=False)
+            if identity is not None:
+                await ns.save_session(sid_text, {
+                    "boundSidebarClientId": identity["clientInstanceId"],
+                    "boundSidebarWindowId": identity["windowId"],
+                })
         browser_identity = None
         if room == "ui_ipc" and not native_source:
             try:

@@ -320,6 +320,7 @@ class ExplorerDispatcher:
         return ExplorerIntegrationHandlerContext(
             emit_personal=self.emit_personal,
             broadcast=self.broadcast,
+            client_instance_id=self.client_instance_id,
         )
 
     def _build_prefs_context(self) -> ExplorerPrefsHandlerContext:

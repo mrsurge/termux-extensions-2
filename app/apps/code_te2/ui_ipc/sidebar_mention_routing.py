@@ -35,6 +35,16 @@ def _conversation_id(slot: JsonObject) -> str:
     return _id(query.get("conversation_id") or query.get("conversationId"))
 
 
+def bind_sidebar_mention_client(payload: JsonObject, source_client: str) -> JsonObject:
+    """Bind a browser mention to its own lane's registered client, not a label."""
+    client_id = str(source_client or "").strip()
+    target = _object(payload.get("target"))
+    supplied = str(target.get("clientId") or target.get("client_id") or "").strip()
+    if not client_id or supplied != client_id:
+        raise ValueError("mention target client does not match requesting client")
+    return {**payload, "target": {**target, "clientId": client_id, "client_id": client_id}}
+
+
 def resolve_targeted_sidebar_mention(
     payload: JsonObject,
     *,

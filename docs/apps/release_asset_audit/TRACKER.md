@@ -1,5 +1,10 @@
 # Release asset audit tracker
 
+2026-10-17: historical audit/artifact evidence only; the single current
+pre-release checklist is docs/apps/release_0_2_354/TRACKER.md. The latest ALS
+149-resource/445-file OTA seed verification is recorded there and in the
+Sidebar tracker evidence, not a claim that final release APKs were rebuilt.
+
 Current release scope: ../release_0_2_354/PLAN.md, R1 static dependency/mapping
 closure and R2 Gecko staging optimization. See its TRACKER.md for pending gates
 and GECKO_SIZE_AUDIT.md for the read-only old-APK baseline. Historical published

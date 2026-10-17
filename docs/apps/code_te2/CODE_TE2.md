@@ -2545,6 +2545,22 @@ The old worker-owned `/ui_ipc` console relay has been removed from the live sour
 
 Console eval wraps results with `Promise.resolve`, maps JavaScript `undefined` to `null`, and races the Python timeout plus two seconds. Disconnect rejects pending evaluations; teardown removes owned listeners/sockets and pending work.
 
+`app/libs/console_workers.py` owns live SID/address registrations. Code TE2's
+Sidebar backend persists collision-checked four-character references for each
+shared state and client+window main page. It registers `main_page:f0f0` and
+qualifies the actual Sidebar URL as `als:a1b2.f0f0`; another main page rendering
+the same state gets `als:a1b2.c3d4`. The URL carries `mainPageId`, `sidebarStateId`
+and `sidebarWindowId`, and console registration preserves that qualified name.
+Shared restore state strips parent-specific fields. These references are not
+credentials: opens/mentions still require live SID, original client/slot and
+incarnation validation. Generic unqualified producers retain compact random
+handles. Rediscover live workers before eval.
+Duplicate legacy names remain separate registrations and ambiguous eval names
+reject. Eval/cancellation targets one SID; replies must match its captured
+registration. Disconnect/matching-handle unregister removes only that page.
+Log/result worker IDs come from the registry, not supplied labels. Sidebar
+effects continue to use separately validated client/slot/presentation tuples.
+
 ### Architecture overview
 
 ```text
@@ -2560,7 +2576,7 @@ main_page bridge --console:log--> framework TE2 console --console:log/replay/eva
 |---|---|
 | `app/te2_console_runtime.py` | Framework-owned Socket.IO console runtime and transcript storage. |
 | `app/te2_runtime_mounts.py` | Mounts `/te2_console_ws/socket.io`. |
-| `app/te2_mcp/te2_console_client.py` | MCP in-process eval/list bridge to the framework console runtime. |
+| `app/libs/native_console_owner.py` | Private console owner API used by native MCP. |
 | `app/cli/console_cli.py` | `te2 console` CLI implementation. |
 | `app/apps/code_te2/main_page/frontend/console_bridge.js` | Code TE2 browser console monkey-patcher; emits `console:log` and handles `console:eval` / `console:evalCancel`. |
 | `app/apps/code_te2/main_page/frontend/host-console-drawer.ts` | vConsole drawer client; registers as `role: "drawer"` on `/te2_console`. |
@@ -2569,11 +2585,12 @@ main_page bridge --console:log--> framework TE2 console --console:log/replay/eva
 
 | Event | Direction | Payload | Notes |
 |---|---|---|---|
-| `console:register` | client -> server | `{ role: "drawer" | "worker", workerId?, workerLabel?, tail_lines? }` | Drawers join `console:drawers`; workers join `console:<workerId>`. |
+| `console:register` | client -> server | `{ role: "drawer" | "worker", workerId?, workerLabel?, compactIdentity?, qualifiedIdentity?, clientInstanceId?, presentationId?, tail_lines? }` | Drawers join `console:drawers`; workers receive a SID-owned address. |
+| `console:registered` | server -> worker | `{ workerId, requestedWorkerId }` | Assigned handle; reconnect still sends original identity. |
 | `console:log` | worker -> server -> drawers | `{ workerId, workerLabel?, level, ts, args[] }` | Appended to the framework transcript and fanned out to drawers. |
-| `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code, timeoutSeconds }` | Routed only to `console:<workerId>`. |
+| `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code, timeoutSeconds }` | Routed to one resolved SID, never a shared worker-name room. |
 | `console:evalCancel` | server -> worker | `{ reqId, targetWorkerId }` | Sent when Python-side eval times out so the Code TE2 bridge can reject the pending Promise. |
-| `console:evalResult` | worker -> server -> drawers/MCP waiter | `{ workerId, reqId, ok, value|error, errorType? }` | Resolves pending evals and fans out to drawers. |
+| `console:evalResult` | worker -> server -> requester | `{ workerId, reqId, ok, value|error, errorType? }` | Owner-checked; resolves only the matching requester/waiter. |
 | `console:replay` | drawer -> server | `{ tail_lines? }` | Replays transcript entries from `$TE2_CACHE_HOME/console/te2_console_log.jsonl` after canonical root resolution. |
 | `console:clear` | drawer -> server -> drawers | `{}` | Clears transcript and drawer state. |
 
@@ -2593,7 +2610,7 @@ te2 console search "query" --worker <worker-id> --limit 100
 
 - vConsole is drawer-only. The producer bridge just patches browser `console.*`, serializes args, and ships events.
 - The drawer writes TE2 console rows through vConsole's `model.addLog(..., { noOrig: true })` path so replayed rows do not feed back into the framework console bridge.
-- The Code TE2 main-page bridge uses `workerLabel: "main_page"` plus `uniquePerWindow: true`; runtime inspection should target the exact generated worker id.
+- Code TE2 sends its original main-page identity plus parent-client context; inspection targets the server-assigned live handle.
 - The shared static bridge at `app/static/js/te2_console_bridge.js` is not necessarily at the same feature level as the Code TE2 main-page bridge. Do not document Code TE2-only timeout/cancel behavior as a shared bridge guarantee unless the shared bridge is updated too.
 
 ---
@@ -2983,12 +3000,21 @@ There are three distinct layers:
      keyboard Explorer click semantics pass focus=true, mobile touch passes false.
      When the Terminal drawer owns focus, navigation keys still use its established request bridge rather than another input path.
    - The four arrow buttons repeat after a 420 ms hold delay at a 55 ms cadence.
+     The editor dock replaces PgUp/PgDn with one Jmp button, invoking the existing
+     editor.action.gotoLine (`:` Quick Access) in the owning primary/secondary
+     editor. It consumes one-shot modifiers without inserting a literal colon
+     or changing terminal keys.
      Pointer capture preserves the gesture if the finger drifts outside the
      button, while release, cancellation, lost capture, window blur, document
      hiding, or runtime disposal stops it synchronously. The focused target and
      Ctrl/Alt/Shift state are snapshotted at pointer-down. One-shot modifiers
      apply to the complete hold gesture and are consumed once at its end;
      locked Ctrl and persistent Select/Shift retain their established behavior.
+   - The Ctrl adapter follows model/view replacement and
+     text focus as well as widget focus: setModel recreates the textarea without
+     necessarily changing widget focus. Pre-model-change, blur and disposal
+     remove the prior input listeners; unfocused attachment never claims another
+     editor, and old-editor cleanup cannot clear a replacement owner.
    - The host owns one viewport-wide dock across the primary and mobile
      secondary editors. Positive Monaco focus or pointer ownership selects the
      target; collapse, close, or hiding the secondary surface returns ownership

@@ -1,5 +1,8 @@
 # Desktop build startup tracker
 
+Historical implementation/test evidence. Current pre-release status is maintained
+once in docs/apps/release_0_2_354/TRACKER.md (2026-10-17 consolidation).
+
 - [x] Locate original Desktop deferral and mobile compatibility behavior.
 - [x] Confirm five-second Desktop hello timeout precedes bootstrap build finish.
 - [x] User approved build progress/cancel and exit-driven failure semantics.

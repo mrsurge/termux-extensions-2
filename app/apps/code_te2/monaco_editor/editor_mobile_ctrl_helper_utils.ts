@@ -253,24 +253,49 @@ export function bindVendoredCtrlHelperFocus(
   const editor = ed as MonacoRuntimeEditorLike | null;
   if (!editor || !editor.onDidFocusEditorWidget || !editor.onDidBlurEditorWidget) return null;
   const disposables: MonacoRuntimeDisposableLike[] = [];
+  let disposed = false;
+  let bindingInput: HTMLTextAreaElement | null = null;
 
   const bindNow = (): void => {
-    rebindVendoredCtrlHelper(editor, monacoRef).catch((error: unknown) => {
+    if (disposed) return;
+    const input = getEditorInputArea(editor);
+    if (!input) return;
+    if (state.editor === editor && state.input === input
+      && (state.disposeHandler || bindingInput === input)) return;
+    bindingInput = input;
+    void rebindVendoredCtrlHelper(editor, monacoRef).catch((error: unknown) => {
       console.warn('[editor_ctrl_helper] failed to bind vendored ctrl helper', error);
+    }).finally(() => {
+      if (bindingInput === input) bindingInput = null;
     });
+  };
+  const clear = (): void => {
+    bindingInput = null;
+    clearVendoredCtrlHelper(editor);
+  };
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    disposables.forEach((disposable) => { disposable.dispose?.(); });
+    clear();
   };
 
   disposables.push(editor.onDidFocusEditorWidget(() => { bindNow(); }));
-  disposables.push(editor.onDidBlurEditorWidget(() => { clearVendoredCtrlHelper(editor); }));
+  if (editor.onDidFocusEditorText) disposables.push(editor.onDidFocusEditorText(bindNow));
+  disposables.push(editor.onDidBlurEditorWidget(clear));
+  // setModel replaces Monaco's view/textarea without necessarily changing
+  // widget focus. Never leave the adapter on that detached input, and do not
+  // steal ownership from a secondary editor or a focused palette on restore.
+  if (editor.onWillChangeModel) disposables.push(editor.onWillChangeModel(clear));
+  if (editor.onDidChangeModel) disposables.push(editor.onDidChangeModel(() => {
+    if (editor.hasTextFocus?.()) bindNow();
+    else clear();
+  }));
+  if (editor.onDidDispose) disposables.push(editor.onDidDispose(dispose));
 
   try {
     if (editor.hasTextFocus && editor.hasTextFocus()) bindNow();
   } catch (_) {}
 
-  return {
-    dispose() {
-      disposables.forEach((disposable) => { disposable.dispose?.(); });
-      clearVendoredCtrlHelper(editor);
-    },
-  };
+  return { dispose };
 }

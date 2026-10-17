@@ -21,8 +21,8 @@ function electron(path) {
 test('every pinned ALS static resource is packaged and mapped for Gecko/Electron', () => {
   const entry = bundle.entries.find(e => e.kind === 'tree' && e.dest === 'apps/als_rs/frontend');
   assert.equal(entry.src, 'app/apps/als_rs/vendor/frontend');
-  assert.equal(manifest.version, '0.2.132');
-  assert.equal(Object.keys(manifest.files).length, 148);
+  assert.equal(manifest.version, '0.2.138');
+  assert.equal(Object.keys(manifest.files).length, 149);
   for (const [path, info] of Object.entries(manifest.files)) {
     const local = `/apps/als_rs/frontend/static/${path}`;
     const proxy = `/api/app/als-rs/proxy/static/${path}`;

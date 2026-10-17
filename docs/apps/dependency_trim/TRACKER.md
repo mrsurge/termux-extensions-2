@@ -1,5 +1,9 @@
 # Dependency reduction tracker
 
+2026-10-17: this is historical workstream evidence. The single current pre-release
+checklist is docs/apps/release_0_2_354/TRACKER.md; compatible ALS pins/locks and
+final clean-install/artifact gates remain open there. Older backlog is unchanged.
+
 2026-10-15 consolidation: ../release_0_2_354/PLAN.md and TRACKER.md govern
 current release gating. Preserve source/acceptance history below; old unchecked
 steps are not automatically unfinished release tasks. FWS 0.2.65 is already

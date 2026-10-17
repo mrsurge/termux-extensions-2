@@ -89,6 +89,15 @@ export function fileOpenCallerTarget(windowRef: RpcWindowRef): JsonObject {
       [clientId, hostId, presentationId].some(value => value.length > 512)) {
     throw new Error('Opening in Code TE2 requires a current sidebar presentation');
   }
+  const sidebarWindowId = query.get('sidebarWindowId')?.trim();
+  const mainPageId = query.get('mainPageId')?.trim();
+  if (sidebarWindowId || mainPageId) {
+    if (!sidebarWindowId || !mainPageId || !/^[A-Za-z0-9]{4}$/.test(mainPageId)
+        || !sidebarWindowId.endsWith(`.${mainPageId}`)) {
+      throw new Error('Opening in Code TE2 requires a matching sidebar/main-page identity');
+    }
+    return { clientId, hostId, presentationId, sidebarWindowId, mainPageId };
+  }
   return { clientId, hostId, presentationId };
 }
 

@@ -280,7 +280,9 @@ async def dispatch_editor_rpc_request(
         )
 
     if method == EDITOR_RPC_METHOD_MENTION_REQUEST:
-        return await handle_editor_mention_request(params)
+        from ..ui_ipc.sidebar_mention_routing import bind_sidebar_mention_client
+
+        return await handle_editor_mention_request(bind_sidebar_mention_client(params, source_client))
 
     if method == EDITOR_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET:
         from ..host.agent_edit_review_backend import hydrate_agent_edit_document_state

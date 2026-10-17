@@ -1,5 +1,9 @@
 # Monaco core and quick-fix tracker
 
+Historical implementation/test evidence. Current pre-release status is maintained
+once in docs/apps/release_0_2_354/TRACKER.md (2026-10-17 consolidation). Deferred
+GPU/graph work remains deferred; old unchecked tests are not new release tasks.
+
 ## Based Ayu reload / watcher follow-up
 
 - [x] Approved read-only comparison without client reload/runtime restart.

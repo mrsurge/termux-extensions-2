@@ -1346,6 +1346,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     setMenuChecked,
     emitSidebarUiRequest: _requestSidebarUiControl,
     requestSidebarUi: (method, payload) => uiIpcConnections.requestUiIpc(method, asUnknownRecord(payload)),
+    requestSidebarRpc: (method, payload) => uiIpcConnections.requestSidebarRpc(method, asUnknownRecord(payload)),
     emitSidebarRpcRequest: (method, payload) => {
       uiIpcConnections.emitSidebarRpcRequest(method, asUnknownRecord(payload));
     },

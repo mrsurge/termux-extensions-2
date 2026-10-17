@@ -1,7 +1,238 @@
 # 0.2.354 consolidated release tracker
 
-Updated 2026-10-15; planning checkpoint `2e77c843`. See PLAN.md for the cut line.
+Updated 2026-10-17; recent-work consolidation at TE2 `38b6fb26` / ALS `fcc716b`.
+This is the single current pre-release status/acceptance tracker. See PLAN.md
+for the cut line. Workstream plans/contracts retain technical detail; their
+trackers retain historical evidence, not independent current release gates.
 Old unchecked boxes are evidence to reconcile, not automatic release tasks.
+
+## Recent work — 2026-10-15 through 2026-10-17
+
+Only recent work is consolidated here; older backlog is not reclassified or
+silently accepted. User notes below are preserved verbatim, not inferred approvals
+to implement every item. No version change, commit or push accompanies this
+documentation consolidation.
+
+### Accepted implementations and publication
+
+- [x] Desktop editable startup/progress/cancel, theme restoration/watch exclusions,
+  trusted hover links, diagnostic Quick Fix and draft projection/context/checkbox/
+  selective Save: implemented and user accepted. Preserve bounded evidence in
+  their historical trackers; Monaco GPU/graph reduction remains deferred.
+- [x] Keyboard relative gutters/jumps, preview guard, cursor restoration and
+  Cefrium Ctrl-input correction: implemented and user accepted. R3 below retains
+  exact scope, evidence and test limits.
+- [x] ALS exact-caller file-open/reconnect routing: implemented, tested, live
+  accepted and pushed (TE2 ca5a5805; ALS fb2112b). Shared Sidebar state remains
+  distinct from per-client presentation/focus.
+- [x] ALS explicit --stdio pipe-only readiness: implemented, tested, live accepted
+  and pushed (TE2 38b6fb26; ALS 91bc1a8). No HTTP readiness callback or wrapper
+  health-poll prerequisite; stdout protocol-only, diagnostics stderr.
+- [x] ALS composer canonical newline/caret projection and armed Escape; Project
+  dialog outside-CWD direct open and switch/external/cancel choice: implemented
+  in local ALS checkpoint fcc716b without version bump or push. Focused composer/
+  navigation/modal/routing suite: 63 passed; typecheck/build pass.
+- [x] Matching ALS snapshot (149 resources), OTA ZIP and Android seed refreshed.
+  All 445 OTA/seed entries byte-identical; source/projection/provenance verified;
+  12 asset mapping tests pass. ALS remains 0.2.138; TE2 assets remain 0.2.353.
+  No new APK/install/restart performed. Inspection ZIP/hash evidence is retained
+  in sidebar_app_intents/TRACKER.md, not a second active checklist.
+- [x] User reports the refreshed current slice seems to be working. This is live
+  smoke acceptance for composer/navigation/assets, not a separately enumerated
+  mobile reconnect, multi-client or every-client artifact matrix.
+
+### ALS View-card range ribbons — source complete, activation pending
+
+- [x] Preserve known same-file command ranges in the existing generic
+  `view_range` DTO for semantic Codex reads; live and transcript fields match.
+- [x] Always include known ranges in View title ribbons, independently of custom
+  titles, collapsed state or body gutters. Real structured line bounds are a
+  fallback; requested ranges survive display truncation without duplicate labels.
+- [x] Router/protocol/resume/compaction regressions: 49 tests and 50 subtests
+  passed; four actual-renderer regressions passed. ALS ty, frontend typecheck
+  and build pass. Technical contracts: ALS TRANSCRIPT_CARD_CONTRACTS.md and
+  CODEX_COMMAND_ACTIONS.md.
+- [ ] Separately approve matching ALS runtime/client asset activation and obtain
+  live acceptance. ALS local checkpoint 7b5e551 contains this correction; no
+  restart, OTA/seed publication, version change or push performed.
+
+### Deferred — ALS composer dot ligatures on Chromium
+
+- [x] User reports manually typed `...` renders incorrectly in Chromium/Cefrium,
+  but not GeckoView. Live DOM inspection confirms ordinary U+002E periods, not
+  replacement characters or text corruption.
+- [x] Temporarily disabling composer ligatures corrects the dots, but also
+  disables other wanted ligatures. Bundled JetBrains Mono identifies as 2.211;
+  its dot ligature/components are present. A temporary full upstream 2.305 font
+  with ligatures enabled reproduces the same issue (user verified).
+- [ ] Possible follow-up: disable composer ligatures only for Chromium clients
+  if no narrower shaping workaround is found. Preserve Gecko behavior and
+  composer text/caret/IME; do not insert invisible text or change stored drafts.
+  Exact Chromium cause remains unproven. User explicitly deferred this issue;
+  no permanent font, user-agent policy or source workaround implemented.
+
+### Multi-client console identity and Sidebar routing — source slice
+
+- [x] Confirm console source defect: ID set has no SID ownership, duplicate labels
+  share an eval room and a disconnect can remove a still-live identity.
+- [x] Add per-SID registry and collision-checked four-character alphanumeric
+  console handles with parent-client suffixes. Preserve durable client/slot/
+  presentation identities; ambiguous legacy evals reject rather than broadcast.
+  Pin results/cancellation/disconnect/unregister to exact registration ownership.
+- [x] Update TE2 main/shared and ALS bridges to adopt handles and retain original
+  registration context on reconnect. Bind mention entry lanes to their own
+  registered caller; retain exact URL-bound ALS file opens and client-local MRU.
+- [x] Focused Python regressions: 74 console/Sidebar/native-owner tests plus
+  8 editor RPC boundary tests passed, under disposable cache roots. TE2 console
+  bridge: 10 passed; ALS bridge/file-open routing: 3 passed (plus 4 retained View
+  ribbon tests passed). Both frontend typechecks/builds and changed Python `ty`
+  checks pass. Existing Node module-type warning remains; no failure.
+- [ ] Separately approve bridge refresh, matching Code TE2 domain/mypyc and client/
+  ALS asset activation. Obtain simultaneous multi-client/window/conversation
+  acceptance, including both disconnect orders. No restart, APK, OTA/seed,
+  version bump, commit or push performed. Technical plan: sidebar_app_intents/PLAN.md.
+
+### Qualified Sidebar windows — corrected requirement, source slice
+
+- [x] Retain console ownership fixes, but correct the scope: the actual Sidebar
+  presentation/query identity is state.main-page, not a random console handle.
+- [x] Add backend-persisted collision-checked short references for shared states
+  and client+window main pages, with live SID/incarnation registration. Pair
+  `main_page:f0f0` with `als:a1b2.f0f0`; another parent gets `als:a1b2.c3d4`.
+- [x] Carry the qualified identity through launch/restore/detached/native URL
+  preparation, console registration and ALS frontend/Rust file-open DTOs;
+  validate exact owner/slot/incarnation on incoming opens and mentions. Keep
+  shared membership and restore state free of client-specific suffixes.
+- [x] Focused ALS Rust gateway tests: 3 passed; existing unexpected-cfg warning
+  for embedded-python-adapter remains visible, unrelated to this change.
+- [x] Focused Python regressions: 86 tests and 5 subtests passed. Changed Python
+  modules pass ty. Code TE2 typecheck/build pass; qualified identity, presentation
+  and bridge tests: 30 passed; focused Sidebar transport tests: 3 passed. ALS
+  typecheck/build and bridge/file-open tests: 5 passed.
+  A broader transport/devtools run passed 44 but failed 4 existing TextMate
+  fixtures (`usesHttpGrammarResources` reads undefined location.search); these
+  unrelated fixture failures are not claimed fixed or counted as a full pass.
+- [ ] Separately approve matching Code TE2 mypyc/domain, ALS native install,
+  framework console bridge and client asset activation; then live-test multiple
+  main pages, shared/different Sidebar states, conversations and reconnects.
+  No docks need clearing. No restart, APK, OTA/seed, install, commit/push or
+  version change performed. Prior console-only acceptance is not acceptance of
+  this corrected model. Technical contract: sidebar_app_intents/PLAN.md.
+- [x] User-approved local ALS checkpoint `570deb5` pins identity source/tests/docs
+  without a version bump or push. Refreshed TE2's vendored ALS frontend from that
+  revision: all 149 static resources and source/served/license inventories pass
+  vendor checks; 3 asset-mapping tests and 5 ALS bridge/file-open tests pass.
+  This updates the source snapshot only: OTA ZIP/APK seed publication, native
+  installation and runtime/client activation remain pending.
+
+### Mobile shortcut binding after file switches — source fix
+
+- [x] Read-only current Cefrium main-page inspection and source trace: the Ctrl
+  adapter retained a textarea binding while Monaco setModel disposes/replaces
+  the view. Its widget-focus-only lifecycle did not cover every model switch.
+  Live inspection identifies the client; it does not prove private adapter state
+  or reproduce every gesture. Regression tests reproduce the missing lifecycle.
+- [x] Bind on model replacement/text focus, clear on pre-model change/blur and
+  disposal, deduplicate unchanged-input focus, and protect replacement owners
+  from old-editor cleanup. No background autofocus or change to IME transactions.
+- [x] 19 focused lifecycle/mobile special-key/palette regressions passed.
+- [x] Approved follow-up replaces editor PgUp/PgDn with Jmp using the existing
+  Go to Line (`:`) action, including secondary-editor forwarding without typing
+  a character. Terminal keys unchanged; primary/secondary regressions included
+  in the same 19-test suite. Matching client assets still require publication.
+- [x] Correct the navigation grid from eight columns to seven after Jmp replaced
+  two page keys; add a source regression alongside the seven-button DOM check.
+- [x] User live acceptance: mobile file-switch shortcut correction, Jmp control
+  and corrected seven-column layout work wonderfully. Final focused suite:
+  20 tests passed; frontend typecheck/build passed. This does not imply blanket
+  acceptance of the separate qualified Sidebar routing work.
+- [x] Final frontend typecheck/build and source whitespace checks passed.
+- [ ] Publish matching assets separately and obtain mobile file-switch/shortcut
+  acceptance. No publication, restart,
+  mypyc rebuild, commit/push or version bump for this slice.
+
+### Pending — multiline search recovery and desktop query input
+
+See the separate current ALS slice below; its implementation does not close the
+multiline-search or other user-note work.
+
+- [x] Record user regression report and preliminary read-only trace; Rust's
+  multiline matcher still exists, but the failing layer is not yet established.
+- [ ] Trace a failing multiline case through input, request, enumeration, bounded
+  DTOs, Python retained results and rendering; approve the concrete correction.
+- [ ] Restore multiline behavior without weakening preview/batch/pipe memory
+  bounds, per-file reuse, cancellation or guarded replacement identity.
+- [ ] Add Shift+Enter newline entry through the existing flexible-height query
+  widget; preserve caret/selection, IME, Enter/Escape and multiline paste.
+- [ ] Regress LF/CRLF, literal/regex, Unicode, clipping, multiple/progressive hits,
+  highlights/navigation and exact replacement coordinates across affected layers.
+- [ ] Re-run huge-line memory/size and rejected-delivery regressions, frontend
+  typecheck/build; separately approve activation and obtain live acceptance.
+
+The bounded-search OOM correction remains accepted; that is not proof that the
+new multiline regression is fixed. Technical plan: docs/apps/search_memory/PLAN.md.
+No search implementation was made in this pass.
+
+### Current ALS three-issue pre-release slice
+
+- [x] Read user research_handoff.md, verify local commandActions schema and
+  upstream Codex TUI use, and obtain concrete source/test/build approval.
+- [x] Composer pairing/deletion window 800 -> 1,100 ms (+37.5%); regression
+  covers slow deletion, exact expiry and post-delete single-entry suppression.
+- [x] Codex read/search/list DTOs drive single-action View/Search cards. Unknown,
+  malformed/empty or mixed/multiple actions stay Run; no fabricated per-file
+  output, shell writes or line ranges. Peers without metadata retain compatibility.
+  Actual router tests cover live/transcript parity, deltas, sparse/completion-only
+  delivery and failures; explicit FileChange behavior remains unchanged.
+- [x] Document-open-only admission accepts exact registered presentations despite
+  lagging/missing active-window state. Keep live client, presentation incarnation,
+  shared slot and app ownership; other intents retain active-window admission.
+- [x] 47 ALS command/shell/fileChange/protocol/resume/compaction tests and 48
+  subtests pass; 52 TE2 Sidebar/routing regressions pass, including real
+  document-open composition and unchanged other-intent admission.
+- [x] 44 composer tests, ALS frontend typecheck/build, focused ALS/TE2 Python
+  type checks and authored source diff checks pass. ALS ty requires its checkout
+  explicitly first in --extra-search-path to avoid the harness's TE2 import roots.
+- [ ] Matching Code TE2 mypyc activation/worker refresh and fresh ALS extension
+  adapter loading; source tests do not activate either runtime.
+- [ ] Checkpoint/publish updated cooldown assets when authorized. Current TE2
+  pinned ALS snapshot still points to fcc716b, before this three-issue slice.
+- [ ] Live slow-delete/read-card and actual project-switch/intermittent file-open
+  verification. Do not mark user note 6 fixed solely from source regressions.
+
+Technical contracts: sibling ALS CODEX_COMMAND_ACTIONS.md / COMPOSER_INPUT_PLAN.md,
+and docs/apps/sidebar_app_intents/PLAN.md. No version bump, commit/push, runtime
+restart, native/mypyc build, OTA refresh or client deployment in this slice.
+
+### User notes transferred verbatim from search_memory/TRACKER.md
+
+The following 673-character block is preserved unchanged. Its original request
+to commit remains text; the current instruction is still **no commits**.
+
+User notes (commit this): 
+
+1. blank iframes in sidebar for desktop detached iframes (lets get rid of them)
+2. deleted draft line marker
+3. draft models loading into opened model list instead of the actual models when opening a project with mru's (change many?)
+4. unique cross client main page/client id derived sidebar window id extensions (console id)
+5. in document mention bubble (in the problem widget.. I forget what it's called... the inline widget for issues)
+6. project switches cause file links to stop working in als.
+7. use the same window launch mechanism as als for the terminal. instant window opening in the sidrbar based on state, no transition animation.
+
+### Triage of user notes — not implementation claims
+
+- [ ] Investigate/prioritize notes 1–7 with the user before implementation; no
+  release/defer decision is silently assigned by this consolidation.
+- [ ] Verify note 6 across an actual project switch after activating the current
+  exact-presentation correction. Earlier routing/dialog acceptance and new source
+  tests do not close the newly listed regression without live evidence.
+
+### Still-open pre-release gates
+
+Retain R4/R5 and bounded acceptance below as the canonical remaining checklist.
+No old test failure, dependency/pin issue, missing selected artifact or final
+wheel/APK validation is closed merely by moving documentation. No duplicate
+mandatory full-device matrix is added for the latest smoke acceptance.
 
 ## First after release
 
@@ -218,7 +449,7 @@ technical history there; this checklist determines current release gating.
 | --- | --- |
 | draft_overlay | Accepted; separate pre-existing MRU test triage only |
 | monaco_core | Quick Fix/theme/hover accepted; GPU/reduction deferred |
-| search_memory | Accepted OOM correction |
+| search_memory | Accepted OOM correction; multiline follow-up tracked above |
 | editable_worker_runtime | Startup/build accepted except new missing-artifact case |
 | desktop_build_startup | User confirms startup group; implementation complete |
 | dependency_trim | Source migration largely complete; compatible pins/clean install remain |
@@ -226,7 +457,7 @@ technical history there; this checklist determines current release gating.
 | desktop_deb_packaging | Historical releases; R5 governs new artifacts |
 | client_runtime_polish | Historical implementation/acceptance; R5 new package validation |
 | editor_loading | Accepted maintenance features; remaining audits/benchmarks deferred |
-| sidebar_app_intents | Existing acceptance matrix complete; new archive/ALS work deferred |
+| sidebar_app_intents | Routing/readiness accepted; ALS composer/navigation smoke accepted; archive/pipe-intent migration deferred |
 | terminal_directory_sync | Implemented/committed; specific live erasure case to confirm |
 | terminal | Earlier phase acceptance retained; broader multi-client cases verify/defer |
 | vsix_explorer_changes | Marketplace accepted in user history; no blanket retry/failure proof |
@@ -250,3 +481,7 @@ technical history there; this checklist determines current release gating.
 docs/planning is retained design history, including stateful-window and old CM6
 plans. Current app/state authority and the accepted Sidebar matrix supersede old
 unchecked design steps. No user tracker is rewritten or cleared by consolidation.
+
+user: for next version tracker:
+
+markdown link syntax ready mentions in te2 and als.  

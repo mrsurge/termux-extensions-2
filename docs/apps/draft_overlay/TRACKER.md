@@ -1,5 +1,9 @@
 # Draft overlay tracker
 
+Historical implementation/test evidence. Current pre-release status is maintained
+once in docs/apps/release_0_2_354/TRACKER.md (2026-10-17 consolidation). The newly
+transferred user notes about drafts are not closed by earlier draft acceptance.
+
 - [x] User clarified drafts remain stored; only the overlay loses its contents.
 - [x] Inspect lightweight/full entry replacement and acknowledgement contract.
 - [x] User approved backend projection, item eviction, stale-update guards,

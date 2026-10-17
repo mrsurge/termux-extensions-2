@@ -9,6 +9,7 @@
 
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import { generateUuid } from '../uuid.ts';
+import { applySidebarWindowIdentity, readSidebarWindowIdentity, type SidebarWindowIdentity } from './qualified-identity.ts';
 import { bindDockOverflowScroll } from "./dock-scroll.ts";
 import {
   notifyExplorerRpc,
@@ -284,6 +285,7 @@ export function initSidebarShortcuts(
       ? options.emitSidebarUiRequest
       : null;
   const requestSidebarUi = options.requestSidebarUi;
+  const requestSidebarRpc = options.requestSidebarRpc;
   const emitSidebarRpcRequest =
     typeof options.emitSidebarRpcRequest === "function"
       ? options.emitSidebarRpcRequest
@@ -388,6 +390,8 @@ export function initSidebarShortcuts(
   let _presentationProjectGeneration = 0;
   let _pendingPresentationSlots: SidebarAppDockSlot[] | null = null;
   let _detachedPresentationIds = new Map<string, string>();
+  const _qualifiedPresentations = new Map<string, SidebarWindowIdentity>();
+  const _presentationRegistrations = new Map<string, Promise<void>>();
   let _detachPromises = new Map<string, Promise<boolean>>();
   let _electronSurfaceEventsUnsubscribe: (() => void) | null = null;
   let _lastShortcutUsageKey = "";
@@ -1532,12 +1536,12 @@ export function initSidebarShortcuts(
     return _normStr(surface.surfaceId) || `sidebar:${hostId}`;
   }
 
-  function _extensionWebviewPresentationUrl(
+  async function _extensionWebviewPresentationUrl(
     sc: SidebarShortcut,
     rawUrl: string,
     presentationId: string,
     includeWindowId: boolean,
-  ): string {
+  ): Promise<string> {
     const surface = _extensionWebviewSurface(sc);
     if (_normStr(surface.dto) !== "ExtensionWebviewSurface" && !_isAppDockEntry(sc)) return rawUrl;
     const clientInstanceId = _normStr(getClientId());
@@ -1548,6 +1552,12 @@ export function initSidebarShortcuts(
     const parsed = new URL(rawUrl, window.location.href);
     parsed.searchParams.set("clientInstanceId", clientInstanceId);
     parsed.searchParams.set("presentationId", normalizedPresentationId);
+    if (_isAppDockEntry(sc)) {
+      await _registerPresentationIdentity(_normStr(sc.host_id) || sc.key, normalizedPresentationId);
+      const identity = _qualifiedPresentations.get(normalizedPresentationId);
+      if (!identity) throw new Error('Sidebar window identity is not registered');
+      applySidebarWindowIdentity(parsed, identity);
+    }
     const windowId = includeWindowId ? _normStr(getWindowId()) : "";
     if (windowId) parsed.searchParams.set("windowId", windowId);
     else parsed.searchParams.delete("windowId");
@@ -1595,7 +1605,8 @@ export function initSidebarShortcuts(
       devRuntime: runtime?.devRuntime === true,
       devTools: runtime?.devTools === true,
       consoleWorkerId: _normStr(
-        slot?.console_worker_id ||
+        _qualifiedPresentations.get(presentationId)?.sidebarWindowId ||
+          slot?.console_worker_id ||
           slot?.consoleWorkerId ||
           readiness.console_worker_id ||
           readiness.consoleWorkerId,
@@ -1645,7 +1656,7 @@ export function initSidebarShortcuts(
       if (!entry.url) {
         const rawUrl = _shortcutFrameUrl(sc, null);
         if (!rawUrl) return false;
-        entry.url = _extensionWebviewPresentationUrl(
+        entry.url = await _extensionWebviewPresentationUrl(
           sc,
           rawUrl,
           entry.presentationId,
@@ -1735,7 +1746,7 @@ export function initSidebarShortcuts(
       const runtime = runProfileRuntimeMetadata(sc);
       const presentationUrl = nativeEntry
         ? nativeEntry.url
-        : _extensionWebviewPresentationUrl(
+        : await _extensionWebviewPresentationUrl(
             sc,
             fallbackUrl,
             presentationId,
@@ -1905,6 +1916,12 @@ export function initSidebarShortcuts(
     hostId: string,
     presentationId: string,
   ): void {
+    if (requestSidebarRpc && presentationId) {
+      void _registerPresentationIdentity(hostId, presentationId).catch((error: unknown) => {
+        console.warn('[Sidebar] identity registration failed', error);
+      });
+      return;
+    }
     if (!hostId || !emitSidebarRpcRequest) return;
     emitSidebarRpcRequest(
       SIDEBAR_IPC_RPC_METHODS.windowPresentationUpdate,
@@ -1919,7 +1936,27 @@ export function initSidebarShortcuts(
     );
   }
 
+  function _registerPresentationIdentity(hostId: string, presentationId: string): Promise<void> {
+    const current = _presentationRegistrations.get(presentationId);
+    if (current) return current;
+    if (!requestSidebarRpc) return Promise.reject(new Error('Sidebar identity registration is unavailable'));
+    const pending = requestSidebarRpc(SIDEBAR_IPC_RPC_METHODS.windowPresentationUpdate, {
+      hostId, presentationId,
+      active: _presentationState.foregroundHostId === hostId,
+      source: 'sidebar_presentation',
+    }).then((result) => {
+      _qualifiedPresentations.set(presentationId, readSidebarWindowIdentity(result));
+    }).catch((error: unknown) => {
+      if (_presentationRegistrations.get(presentationId) === pending) _presentationRegistrations.delete(presentationId);
+      throw error;
+    });
+    _presentationRegistrations.set(presentationId, pending);
+    return pending;
+  }
+
   function publishPresentationIdentities(): void {
+    _presentationRegistrations.clear();
+    _qualifiedPresentations.clear();
     _iframeMap.forEach((entry, key) => {
       if (!key.startsWith("dock:")) return;
       _publishPresentationIdentity(key.slice("dock:".length), entry.presentationId);
@@ -1960,7 +1997,9 @@ export function initSidebarShortcuts(
         }),
       );
     }
-    return target;
+    if (!target) return null;
+    const identity = _qualifiedPresentations.get(target.presentationId);
+    return identity ? { ...target, ...identity } : null;
   }
 
   function _bindAgentPresentationIfCurrent(
@@ -3872,7 +3911,7 @@ export function initSidebarShortcuts(
     const url = _shortcutFrameUrl(sc, entry, options);
     if (!url) return false;
     const forceReload = !!options.forceReload;
-    let loadUrl = _extensionWebviewPresentationUrl(
+    let loadUrl = await _extensionWebviewPresentationUrl(
       sc,
       url,
       entry.presentationId,

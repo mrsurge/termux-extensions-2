@@ -67,6 +67,7 @@ DEFAULT_UI_PREFS: JsonDict = {
     # Stateful sidebar app-window ledger. Slots are keyed by host_id.
     # This is intentionally separate from user-authored shortcuts.
     "sidebarWindowState": {"version": 2, "slots": {}},
+    "sidebarIdentityReferences": {"version": 1, "mainPages": {}, "states": {}},
     # Monaco web workers (JSON, CSS, HTML, TS language services).
     # OFF by default — the workbench adapter extension host handles everything.
     "webWorkersEnabled": False,

@@ -104,7 +104,7 @@ type TranscriptCardsContext = {
   detectLangFromPath: (path: string) => string | null;
   toRelativePath: (path: string) => string;
   postTe2OpenRequest: (target: { path: string; line: number; column: number }) => unknown;
-  buildViewCardTitle: (path: string, viewRange: number[] | null, fallback: string) => string;
+  buildViewCardTitle: (path: string, viewRange: number[] | null, fallback: string, title?: string) => string;
   normalizeStructuredViewLines: (lines: unknown) => StructuredViewLine[] | null;
   synthesizeStructuredViewLines: (content: string, viewRange: number[] | null) => StructuredViewLine[] | null;
   renderStructuredViewLineTable: (lines: StructuredViewLine[], path: string) => HTMLDivElement;
@@ -344,7 +344,10 @@ export function bindTranscriptCards(ctx: TranscriptCardsContext) {
     const path = typeof evt.path === 'string' ? evt.path : '';
     const viewRange = normalizeViewRange(evt.view_range) ?? normalizeViewRange(evt.viewRange);
     const structuredLines = normalizeStructuredViewLines(evt.lines) ?? synthesizeStructuredViewLines(String(content ?? ''), viewRange);
-    const title = typeof evt.title === 'string' && evt.title ? evt.title : buildViewCardTitle(path, viewRange, 'view');
+    const numberedRange = structuredLines?.length
+      ? [structuredLines[0].line_no, structuredLines[structuredLines.length - 1].line_no]
+      : null;
+    const title = buildViewCardTitle(path, viewRange ?? numberedRange, 'view', typeof evt.title === 'string' ? evt.title : '');
     const truncateLines = getCommandOutputLineLimit();
 
     let displayContent = typeof content === 'string' ? content : String(content ?? '');

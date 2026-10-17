@@ -13,6 +13,7 @@
   },
   "readiness_support": "pipe",
   "sidebar_state": {
+    "presentation_prefix": "als",
     "enabled": true,
     "kind": "conversation",
     "launcher": true,

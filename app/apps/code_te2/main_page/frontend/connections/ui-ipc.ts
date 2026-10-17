@@ -8,6 +8,8 @@ import { SIDEBAR_IPC_RPC_METHODS, SIDEBAR_IPC_RPC_NOTIFICATIONS, parseSidebarIpc
 import { APP_WORKER_SOCKET_IO_TRANSPORTS, SOCKET_IO_NAMESPACES, SOCKET_IO_PATHS, fileEditorSocketQuery } from '../../../src/rpc/socketio-topology.ts';
 
 interface ConsoleBridgeOptions {
+  qualifiedIdentity?: boolean;
+  clientInstanceId?: string;
   workerId?: string;
   workerLabel?: string;
   uniquePerWindow?: boolean;
@@ -53,6 +55,11 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   let uiIpcConnectPromise: Promise<UiIpcRpcConnection> | null = null;
   let consoleBridgePromise: Promise<void> | null = null;
   let consoleBridgeStarted = false;
+  let mainPageId = '';
+  let sidebarReady = false;
+  let sidebarEpoch = 0;
+  const sidebarReadyWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void; timer: number }>();
+  const sidebarPendingRequests = new Set<{ reject: (error: Error) => void; timer: number }>();
   let uiIpcHasConnected = false;
 
   function consoleWorkerLabel(): string {
@@ -68,6 +75,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   }
 
   function startMainPageConsoleBridge(): Promise<void> {
+    if (!mainPageId) return Promise.resolve();
     if (consoleBridgeStarted) return Promise.resolve();
     if (consoleBridgePromise) return consoleBridgePromise;
     consoleBridgePromise = deps
@@ -75,7 +83,9 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       .then((io: IoFactory | null | undefined) => {
         if (!io) throw new Error('Socket.IO client is not available');
         const bridge = deps.initConsoleBridge({
-          workerId: deps.getConsoleWorkerId(),
+          workerId: `main_page:${mainPageId}`,
+          qualifiedIdentity: true,
+          clientInstanceId: deps.getClientId(),
           workerLabel: consoleWorkerLabel(),
           socketPath: SOCKET_IO_PATHS.te2Console,
           namespace: '/te2_console',
@@ -145,6 +155,35 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         }
       },
     );
+  }
+
+  async function requestSidebarRpc(method: SidebarIpcRpcMethod, params: JsonObject = {}): Promise<JsonObject> {
+    if (!sidebarReady || !sidebarIpcSocket?.connected) {
+      connectSidebarIPC();
+      await new Promise<void>((resolve, reject) => {
+        const waiter = { resolve, reject, timer: 0 };
+        waiter.timer = window.setTimeout(() => {
+          sidebarReadyWaiters.delete(waiter);
+          reject(new Error('Sidebar host registration timed out'));
+        }, 8000);
+        sidebarReadyWaiters.add(waiter);
+      });
+    }
+    const epoch = sidebarEpoch;
+    return new Promise((resolve, reject) => {
+      const pending = { reject, timer: 0 };
+      pending.timer = window.setTimeout(() => {
+        sidebarPendingRequests.delete(pending);
+        reject(new Error('Sidebar identity registration timed out'));
+      }, 8000);
+      sidebarPendingRequests.add(pending);
+      emitSidebarRpcRequest(method, params, (result) => {
+        if (!sidebarPendingRequests.delete(pending)) return;
+        window.clearTimeout(pending.timer);
+        if (epoch !== sidebarEpoch) reject(new Error('Sidebar identity connection changed'));
+        else resolve(result);
+      });
+    });
   }
 
   function requestSidebarUiControl(method: UiIpcRpcMethod, params: JsonObject = {}): void {
@@ -238,7 +277,24 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
           query: getSocketQuery(),
         });
         sidebarIpcSocket = socket;
+        socket.on('disconnect', () => {
+          sidebarReady = false;
+          sidebarEpoch += 1;
+          for (const waiter of sidebarReadyWaiters) {
+            window.clearTimeout(waiter.timer);
+            waiter.reject(new Error('Sidebar disconnected during registration'));
+          }
+          sidebarReadyWaiters.clear();
+          for (const pending of sidebarPendingRequests) {
+            window.clearTimeout(pending.timer);
+            pending.reject(new Error('Sidebar disconnected during identity request'));
+          }
+          sidebarPendingRequests.clear();
+        });
         socket.on('connect', () => {
+          sidebarReady = false;
+          sidebarEpoch += 1;
+          const epoch = sidebarEpoch;
           try {
             emitSidebarRpcRequest(
               SIDEBAR_IPC_RPC_METHODS.register,
@@ -246,8 +302,20 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
                 role: 'host',
                 app: 'code_te2',
                 client_id: deps.getClientId(),
+                window_id: getSocketQuery().window_id,
               },
-              () => deps.onSidebarConnected?.(),
+              (result) => {
+                if (epoch !== sidebarEpoch) return;
+                mainPageId = typeof result.mainPageId === 'string' ? result.mainPageId : '';
+                sidebarReady = true;
+                for (const waiter of sidebarReadyWaiters) {
+                  window.clearTimeout(waiter.timer);
+                  waiter.resolve();
+                }
+                sidebarReadyWaiters.clear();
+                void startMainPageConsoleBridge();
+                deps.onSidebarConnected?.();
+              },
             );
             emitSidebarRpcRequest(
               SIDEBAR_IPC_RPC_METHODS.windowsList,
@@ -513,6 +581,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   }
 
   return {
+    requestSidebarRpc,
     emitSidebarRpcRequest,
     emitSidebarRpcNotification,
     emitUiIpcNotification,

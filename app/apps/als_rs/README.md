@@ -28,7 +28,7 @@ the actual ALS static frontend, not just that wrapper.
 ## Pinned frontend snapshot
 
 `vendor/frontend/manifest.json` pins the ALS version, source commit, source/served
-SHA-256 inventories and license. `vendor/frontend/static/` contains all 148 static
+SHA-256 inventories and license. `vendor/frontend/static/` contains all 149 static
 resources (~4.82 MiB raw), excluding the existing map/backup policy. No backend,
 templates, installed-extension assets or mutable runtime data are vendored.
 Reproduce/update explicitly from a clean ALS checkout:

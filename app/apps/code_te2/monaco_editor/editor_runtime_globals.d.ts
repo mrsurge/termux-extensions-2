@@ -50,7 +50,11 @@ interface MonacoRuntimeEditorLike {
   _instantiationService?: unknown;
   addCommand?(keybinding: number, handler: () => void): void;
   onDidFocusEditorWidget?(handler: () => void): MonacoRuntimeDisposableLike;
+  onDidFocusEditorText?(handler: () => void): MonacoRuntimeDisposableLike;
   onDidBlurEditorWidget?(handler: () => void): MonacoRuntimeDisposableLike;
+  onWillChangeModel?(handler: () => void): MonacoRuntimeDisposableLike;
+  onDidChangeModel?(handler: () => void): MonacoRuntimeDisposableLike;
+  onDidDispose?(handler: () => void): MonacoRuntimeDisposableLike;
   onDidScrollChange?(handler: () => void): MonacoRuntimeDisposableLike;
   onDidChangeCursorPosition?(handler: () => void): MonacoRuntimeDisposableLike;
   getPosition?(): MonacoRuntimePositionLike | null;

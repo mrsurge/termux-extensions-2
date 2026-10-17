@@ -10,6 +10,7 @@ import type {
   UnknownRecord,
 } from '../shared_types.ts';
 import { getPageClientId } from '../client_identity.ts';
+import { projectComposerText } from './text_projection.ts';
 
 declare const Tribute: TributeConstructor | undefined;
 
@@ -72,7 +73,7 @@ interface ComposerRuntimeContext {
 
 const DRAFT_MENTION_ENVELOPE_START = '\x1eCODEX_MENTION ';
 const DRAFT_MENTION_ENVELOPE_END = '\x1f';
-export const COMPOSER_PAIR_GESTURE_TIMEOUT_MS = 800;
+export const COMPOSER_PAIR_GESTURE_TIMEOUT_MS = 1_100;
 const COMPOSER_AUTO_PAIRS: Readonly<Record<string, string>> = {
   '(': ')',
   '[': ']',
@@ -427,11 +428,7 @@ export function bindComposerRuntime(ctx: ComposerRuntimeContext) {
 
   function appendTextWithBreaks(parent: HTMLElement, text: unknown) {
     if (!parent || text === null || text === undefined) return;
-    const parts = String(text).split('\n');
-    parts.forEach((part, idx) => {
-      if (part) parent.appendChild(documentRef.createTextNode(part));
-      if (idx < parts.length - 1) parent.appendChild(documentRef.createElement('br'));
-    });
+    parent.appendChild(documentRef.createTextNode(String(text)));
   }
 
   function buildDraftMentionPayload(rawPath: unknown, opts: DraftMentionOptions = {}) {
@@ -518,19 +515,7 @@ export function bindComposerRuntime(ctx: ComposerRuntimeContext) {
 
   function draftOffsetForPoint(node: Node | null, offset: number): number | null {
     if (!promptEl || !node || !isPromptRangeNode(node)) return null;
-    try {
-      const prefix = documentRef.createRange();
-      prefix.setStart(promptEl, 0);
-      prefix.setEnd(node, offset);
-      const fragment = prefix.cloneContents();
-      let serialized = '';
-      fragment.childNodes.forEach((child) => {
-        serialized += serializePromptNodeForDraft(child);
-      });
-      return serialized.length;
-    } catch {
-      return null;
-    }
+    return projectComposerText(promptEl, serializePromptNodeForDraft).offsetForPoint(node, offset);
   }
 
   function getComposerSelectionState(): ComposerSelectionState | null {
@@ -731,6 +716,9 @@ export function bindComposerRuntime(ctx: ComposerRuntimeContext) {
         }
         cursor = endIdx + DRAFT_MENTION_ENVELOPE_END.length;
       }
+      // A browser caret needs a final line box after a literal trailing newline.
+      // The projection recognizes this as a placeholder, not another newline.
+      if (resolvedText.endsWith('\n')) promptEl.appendChild(documentRef.createElement('br'));
     } finally {
       setState({ applyingDraft: false });
     }
@@ -766,13 +754,7 @@ export function bindComposerRuntime(ctx: ComposerRuntimeContext) {
       }
       return '`' + pathStr + '`';
     }
-    if (el.tagName === 'BR') return '\n';
-    let out = '';
-    el.childNodes.forEach((child) => {
-      out += serializePromptNode(child);
-    });
-    if (el.tagName === 'DIV' || el.tagName === 'P') out += '\n';
-    return out;
+    return '';
   }
 
   function serializePromptNodeForDraft(node: Node | null): string {
@@ -789,66 +771,21 @@ export function bindComposerRuntime(ctx: ComposerRuntimeContext) {
         content: el.dataset.content || '',
       });
     }
-    if (el.tagName === 'BR') return '\n';
-    let out = '';
-    el.childNodes.forEach((child) => {
-      out += serializePromptNodeForDraft(child);
-    });
-    if (el.tagName === 'DIV' || el.tagName === 'P') out += '\n';
-    return out;
+    return '';
   }
 
   function getPromptText(): string {
     if (!promptEl) return '';
-    let text = '';
-    promptEl.childNodes.forEach((child) => {
-      text += serializePromptNode(child);
-    });
-    return text;
+    return projectComposerText(promptEl, serializePromptNode).text;
   }
 
   function getPromptDraftText(): string {
     if (!promptEl) return '';
-    let text = '';
-    promptEl.childNodes.forEach((child) => {
-      text += serializePromptNodeForDraft(child);
-    });
-    return text;
+    return projectComposerText(promptEl, serializePromptNodeForDraft).text;
   }
 
   function locateDraftPoint(parent: Node, targetOffset: number): { node: Node; offset: number } {
-    const children = Array.from(parent.childNodes);
-    let consumed = 0;
-    for (let index = 0; index < children.length; index += 1) {
-      const child = children[index];
-      const serialized = serializePromptNodeForDraft(child);
-      const end = consumed + serialized.length;
-      if (targetOffset > end) {
-        consumed = end;
-        continue;
-      }
-      const localOffset = Math.max(0, targetOffset - consumed);
-      if (child.nodeType === Node.TEXT_NODE) {
-        return {
-          node: child,
-          offset: Math.min(localOffset, child.textContent?.length ?? 0),
-        };
-      }
-      if (child.nodeType === Node.ELEMENT_NODE) {
-        const element = child as HTMLElement;
-        if (element.classList.contains('mention-token') || element.tagName === 'BR') {
-          return { node: parent, offset: localOffset === 0 ? index : index + 1 };
-        }
-        const trailingLength = element.tagName === 'DIV' || element.tagName === 'P' ? 1 : 0;
-        const contentLength = Math.max(0, serialized.length - trailingLength);
-        if (localOffset <= contentLength) {
-          return locateDraftPoint(child, localOffset);
-        }
-        return { node: parent, offset: index + 1 };
-      }
-      return { node: parent, offset: localOffset === 0 ? index : index + 1 };
-    }
-    return { node: parent, offset: children.length };
+    return projectComposerText(parent, serializePromptNodeForDraft).pointAt(targetOffset);
   }
 
   function parseComposerSelection(value: unknown): ComposerSelectionState | null {
@@ -1160,7 +1097,7 @@ export function bindComposerRuntime(ctx: ComposerRuntimeContext) {
     authorClientId = null;
     authorClaimPromise = null;
     cancelSelectionSync();
-    if (typeof draft === 'string' && draft.trim()) {
+    if (typeof draft === 'string' && draft.length > 0) {
       renderPromptFromText(draft);
       setState({
         draftDirty: false,

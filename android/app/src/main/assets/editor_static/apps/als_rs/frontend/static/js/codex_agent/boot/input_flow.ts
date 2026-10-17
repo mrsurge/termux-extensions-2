@@ -170,6 +170,8 @@ export function bindInputFlow(ctx: InputFlowContext) {
   });
   let interruptArmed = false;
   let interruptArmTimeout: number | null = null;
+  let interruptConversationId: string | null = null;
+  const dismissedEscapeEvents = new WeakSet<KeyboardEvent>();
 
   const {
     sendBtn,
@@ -516,30 +518,62 @@ export function bindInputFlow(ctx: InputFlowContext) {
     interruptBtn.classList.toggle('interrupt-armed', interruptArmed);
     interruptBtn.setAttribute('aria-pressed', interruptArmed ? 'true' : 'false');
     interruptBtn.title = interruptArmed
-      ? 'Click again within 10 seconds to interrupt'
-      : 'Click once to arm interrupt';
+      ? 'Click or press Escape again within 10 seconds to interrupt'
+      : 'Click or press Escape once to arm interrupt';
   }
 
   function resetInterruptArm() {
     interruptArmed = false;
+    interruptConversationId = null;
     clearInterruptArmTimeout();
     renderInterruptArmState();
   }
 
   function armInterrupt() {
     interruptArmed = true;
+    interruptConversationId = scopedConversationId(getState());
     clearInterruptArmTimeout();
     renderInterruptArmState();
     interruptArmTimeout = windowRef.setTimeout(resetInterruptArm, INTERRUPT_ARM_TIMEOUT_MS);
   }
 
   async function handleInterruptClick() {
+    const conversationId = scopedConversationId(getState());
+    if (!conversationId) {
+      resetInterruptArm();
+      return;
+    }
+    if (interruptConversationId !== conversationId) resetInterruptArm();
     if (!interruptArmed) {
       armInterrupt();
       return;
     }
     resetInterruptArm();
     await interruptTurn();
+  }
+
+  // Capture dismissal ownership before a modal/menu handler hides its surface.
+  // Act only on bubble, after controls have had the chance to consume Escape.
+  function captureEscapeOwner(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    const overlays = documentRef.querySelectorAll(
+      '.settings-overlay:not(.hidden), .picker-overlay:not(.hidden), '
+      + '[role="dialog"], [role="menu"], .tribute-container, .dropdown-list',
+    );
+    if (Array.from(overlays).some((element) => !element.closest('.hidden, [hidden]')
+      && element.getClientRects().length > 0)) dismissedEscapeEvents.add(event);
+  }
+
+  async function handleInterruptKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing
+      || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+      || dismissedEscapeEvents.has(event) || !scopedConversationId(getState())) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('.xterm, [role="dialog"], [role="menu"]')) return;
+    if (!interruptBtn || interruptBtn.closest('.hidden, [hidden]')
+      || interruptBtn.matches(':disabled, [aria-disabled="true"]')) return;
+    event.preventDefault();
+    await handleInterruptClick();
   }
 
   function syncMarkdownFromSettings() {
@@ -590,6 +624,8 @@ export function bindInputFlow(ctx: InputFlowContext) {
 
     renderInterruptArmState();
     interruptBtn?.addEventListener('click', handleInterruptClick);
+    windowRef.addEventListener('keydown', captureEscapeOwner, true);
+    windowRef.addEventListener('keydown', handleInterruptKeydown);
 
     scrollContainer?.addEventListener('scroll', handleScroll);
     scrollBtn?.addEventListener('click', handleScrollToggle);
