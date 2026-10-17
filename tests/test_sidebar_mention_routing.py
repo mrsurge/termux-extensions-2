@@ -189,6 +189,8 @@ class SidebarMentionEmissionTests(unittest.IsolatedAsyncioTestCase):
         sidebar_ws._client_ids_by_sid.clear()
         sidebar_ws._app_ids_by_sid.clear()
         sidebar_ws._client_presentations.clear()
+        sidebar_ws._client_active_windows.clear()
+        sidebar_ws._client_active_shortcuts.clear()
 
     async def asyncTearDown(self) -> None:
         sidebar_ws._registered_hosts.clear()
@@ -196,6 +198,8 @@ class SidebarMentionEmissionTests(unittest.IsolatedAsyncioTestCase):
         sidebar_ws._client_ids_by_sid.clear()
         sidebar_ws._app_ids_by_sid.clear()
         sidebar_ws._client_presentations.clear()
+        sidebar_ws._client_active_windows.clear()
+        sidebar_ws._client_active_shortcuts.clear()
 
     async def test_emits_only_to_target_app_room(self) -> None:
         fake_server = _FakeSidebarServer()
@@ -281,6 +285,53 @@ class SidebarMentionEmissionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn(
             ("client-a", "agent-slot"), sidebar_ws._client_presentations
+        )
+
+    async def test_reconnect_restores_only_own_foreground_without_shared_mutation(self) -> None:
+        fake_server = _FakeSidebarServer()
+        sidebar_ws._registered_hosts.update({"host-a", "host-b"})
+        sidebar_ws._client_ids_by_sid.update({"host-a": "client-a", "host-b": "client-b"})
+        sidebar_ws._client_active_windows["client-b"] = "other-slot"
+        with patch(
+            "app.apps.code_te2.ui_ipc.sidebar_window_state.activate_sidebar_window",
+            return_value={"ok": True},
+        ):
+            await sidebar_ws.handle_sidebar_window_presentation_update_request(
+                fake_server, "host-a", {"clientId": "spoofed", "hostId": "agent-slot",
+                                        "presentationId": "p-a", "active": True},
+            )
+            await sidebar_ws.handle_sidebar_window_presentation_update_request(
+                fake_server, "host-a", {"hostId": "inactive-slot",
+                                        "presentationId": "p-inactive", "active": False},
+            )
+        self.assertEqual(sidebar_ws._client_active_windows,
+                         {"client-a": "agent-slot", "client-b": "other-slot"})
+        self.assertEqual(fake_server.emissions, [])
+
+    async def test_old_sid_disconnect_keeps_reconnected_host_then_last_disconnect_clears(self) -> None:
+        fake_server = _FakeSidebarServer()
+        sidebar_ws._registered_hosts.update({"old-host", "new-host"})
+        sidebar_ws._client_ids_by_sid.update({"old-host": "client-a", "new-host": "client-a"})
+        sidebar_ws._client_presentations[("client-a", "agent-slot")] = "new-presentation"
+        sidebar_ws._client_active_windows["client-a"] = "agent-slot"
+        await sidebar_ws.on_sidebar_disconnect(fake_server, "old-host")
+        self.assertEqual(sidebar_ws._client_presentations[("client-a", "agent-slot")],
+                         "new-presentation")
+        self.assertEqual(sidebar_ws._client_active_windows["client-a"], "agent-slot")
+        await sidebar_ws.on_sidebar_disconnect(fake_server, "new-host")
+        self.assertNotIn(("client-a", "agent-slot"), sidebar_ws._client_presentations)
+        self.assertNotIn("client-a", sidebar_ws._client_active_windows)
+
+    async def test_socket_file_open_requires_supplied_presentation(self) -> None:
+        fake_server = _FakeSidebarServer()
+        sidebar_ws._app_ids_by_sid["als-sid"] = "als-rs"
+        payload = _payload()
+        with patch.object(sidebar_ws, "handle_sidebar_document_open", return_value={"ok": True}) as open_document:
+            await sidebar_ws._dispatch_sidebar_rpc_request(
+                fake_server, "als-sid", "sidebar.file.open", payload,
+            )
+        open_document.assert_awaited_once_with(
+            payload, requester_app_id="als-rs", require_presentation=True,
         )
 
 

@@ -4618,6 +4618,20 @@ the extension-webview runtime and lifetime rules.
 
 ### Per-host presentation
 
+Embedded app file opens name the originating URL's `clientInstanceId`, shared
+`te2_host_id` and ephemeral `presentationId`. ALS preserves this target through
+its own frontend/Rust RPC; it must not select a client from global last-focus
+state. Code TE2 admits only a live registered host, matching app slot, active
+client-local window and exact presentation. Shared document membership updates
+remain independent of the initiating client's foreground notification.
+
+Presentation registration republishes `active: true` for the locally foreground
+slot on reconnect. The backend restores only that client's transient active
+window, without changing shared slots. A delayed disconnect from an old SID
+cannot remove presentations while a replacement host SID for that client exists.
+Console worker labels identify observability, not delivery authority. See
+`docs/apps/sidebar_app_intents/PLAN.md` for matching activation requirements.
+
 Each host stores versioned local presentation state: dock order, foreground host,
 stable last-agent host, and embedded/hidden/detached mode. It retains a bounded
 most-recent project map. Ordinary browsers use stable origin-local storage, and

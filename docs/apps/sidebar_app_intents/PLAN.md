@@ -767,3 +767,25 @@ a breaking frontend/native contract; APK publication remains separately approved
 
 No release/tag/version/build is part of this documentation pass. Record actual
 test results and user acceptance in the tracker, never inferred completion.
+
+## ALS file-open presentation routing correction — 2026-10-17
+
+Approved maintenance scope: retain Sidebar IPC while removing global last-focus
+as authority for a user file click. Backend-persisted slots, conversation/query
+state and console labels stay shared. Order, foreground and rendered presentation
+are client-specific; document membership is shared, only the caller moves foreground.
+
+1. The ALS common file-open frontend boundary reads clientInstanceId, te2_host_id
+   and presentationId from its iframe URL. Rust validates and preserves that
+   target rather than substituting FocusedWindowStore.
+2. Code TE2 validates the exact registered live client/slot/presentation. No
+   other-client fallback, shared-slot recreation or automatic mutation retry.
+3. Reconnection republishes existing presentation identities and the local
+   foreground slot. Delayed old-connection disconnect must not erase replacement
+   registrations. This must not change shared membership or another client.
+4. Test two clients sharing one slot, missing/stale targets and reconnect races;
+   typecheck/build both frontends and validate Rust/Python boundaries.
+
+Matching ALS native build, Code TE2 mypyc/source activation and frontend publication
+remain separate gates. No runtime restart, APK, release, console-ID migration or
+framework-pipe cutover is authorized here.

@@ -543,6 +543,8 @@ async def handle_sidebar_window_presentation_update_request(
     key = (client_id, host_id)
     if not presentation_id:
         _client_presentations.pop(key, None)
+        if _client_active_windows.get(client_id) == host_id:
+            _client_active_windows.pop(client_id, None)
         return {
             "ok": True,
             "client_id": client_id,
@@ -551,6 +553,11 @@ async def handle_sidebar_window_presentation_update_request(
         }
     _ = activate_sidebar_window({"host_id": host_id})
     _client_presentations[key] = presentation_id
+    # Rehydrate client-local foreground after a worker/transport restart. Slot
+    # existence was checked above; this never creates/activates shared membership.
+    if body.get("active") is True:
+        _client_active_windows[client_id] = host_id
+        _client_active_shortcuts[client_id] = ""
     return {
         "ok": True,
         "client_id": client_id,
@@ -653,7 +660,7 @@ async def on_sidebar_register(ns: SidebarNamespace, sid: str, data: object) -> N
         await ns.enter_room(sid, "sidebar:agent_edits")
 
     print(
-        f"[sidebar_ipc] register sid={sid} role={role} app={app_id or '-'} ts={int(time.time() * 1000)}",
+        f"[sidebar_ipc] register sid={sid} client={client_id} role={role} app={app_id or '-'} ts={int(time.time() * 1000)}",
         flush=True,
     )
     await _emit_presence(ns)
@@ -673,9 +680,13 @@ async def on_sidebar_disconnect(ns: SidebarNamespace, sid: str) -> None:
         removed = True
     _agent_edit_peer_sids.discard(sid)
     client_id = _client_ids_by_sid.get(sid)
-    if was_host and client_id:
+    if was_host and client_id and not any(
+        other_sid in _registered_hosts and bound_client == client_id
+        for other_sid, bound_client in _client_ids_by_sid.items()
+    ):
         for key in [key for key in _client_presentations if key[0] == client_id]:
             _client_presentations.pop(key, None)
+        _client_active_windows.pop(client_id, None)
     _client_ids_by_sid.pop(sid, None)
     _app_ids_by_sid.pop(sid, None)
     if removed:
@@ -801,7 +812,10 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
         await emit_sidebar_cwd_set(ns, reason=reason or "authoritative")
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_OPEN:
-        return await handle_sidebar_document_open(params, requester_app_id=_norm(_app_ids_by_sid.get(sid)))
+        return await handle_sidebar_document_open(
+            params, requester_app_id=_norm(_app_ids_by_sid.get(sid)),
+            require_presentation=True,
+        )
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_EDIT:
         from ..host.agent_edit_review_backend import handle_sidebar_file_edit_review_signal
 

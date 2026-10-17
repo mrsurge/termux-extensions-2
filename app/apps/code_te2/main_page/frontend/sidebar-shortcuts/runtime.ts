@@ -1913,6 +1913,7 @@ export function initSidebarShortcuts(
         host_id: hostId,
         presentationId,
         presentation_id: presentationId,
+        active: !!presentationId && _presentationState.foregroundHostId === hostId,
         source: "sidebar_presentation",
       },
     );

@@ -79,6 +79,19 @@ function getWindowRef(windowRef?: RpcWindowRef): RpcWindowRef {
   return windowRef ?? (typeof window !== 'undefined' ? window : null);
 }
 
+/** The shared slot is rendered independently in each host client. */
+export function fileOpenCallerTarget(windowRef: RpcWindowRef): JsonObject {
+  const query = new URLSearchParams(windowRef?.location.search ?? '');
+  const clientId = query.get('clientInstanceId')?.trim();
+  const hostId = query.get('te2_host_id')?.trim();
+  const presentationId = query.get('presentationId')?.trim();
+  if (!clientId || !hostId || !presentationId ||
+      [clientId, hostId, presentationId].some(value => value.length > 512)) {
+    throw new Error('Opening in Code TE2 requires a current sidebar presentation');
+  }
+  return { clientId, hostId, presentationId };
+}
+
 function normalizeNotificationMethod(method: unknown): typeof UI_RPC_NOTIFICATION_METHODS[number] | null {
   if (typeof method !== 'string') return null;
   return UI_RPC_NOTIFICATION_METHODS.find((candidate) => candidate === method) ?? null;
@@ -517,7 +530,7 @@ export function createUiRpcClient(deps: UiRpcClientDeps) {
     const result = await callRpcNamespace<JsonObject>({
       namespace: UI_RPC_NAMESPACE,
       method: UI_RPC_METHODS.fileOpen,
-      params: payload,
+      params: { ...payload, target: fileOpenCallerTarget(getWindowRef(deps.windowRef)) },
       windowRef: getWindowRef(deps.windowRef),
     });
     const response = normalizeTransport(asObject(result) ?? {}, 'rpc');

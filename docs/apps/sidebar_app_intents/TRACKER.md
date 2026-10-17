@@ -259,8 +259,55 @@ These checks record user acceptance, not a newly executed agent/device test run.
 
 ## New follow-up — Archive Manager intent integration
 
+See also the independent ALS maintenance follow-up below; prior acceptance does
+not cover that work.
+
 - [x] Record desired Archive Manager minimal-query Sidebar opening and background
   job extraction integration, plus archive-only Code TE2 Explorer context actions.
 - [ ] Investigate/approve/implement and validate; authoritative pending gates are
   in docs/apps/dependency_trim/TRACKER.md. Prior acceptance above does not cover
   this new work; no implementation or version/release assignment is implied.
+
+## ALS file-open presentation routing — 2026-10-17
+
+- [x] Trace global last-focus substitution and incomplete reconnect restoration;
+  user approves preserving shared state while fixing per-client click routing.
+- [x] Record intended direction in PLAN.md before implementation.
+- [x] Preserve originating client/slot/presentation through ALS frontend/Rust.
+- [x] Restore foreground registration on reconnect and fence delayed disconnects.
+- [x] Regression tests, typechecks/builds and Rust validation.
+- [x] User explicitly approves ALS checkpoint/version bump and pinned asset refresh:
+  sibling ALS commit `fb2112b`, package metadata 0.2.137; no push authorized.
+- [x] Refresh TE2's clean-source ALS snapshot: 148 resources pass hash/inventory
+  verification; only manifest, compiled main JS and its source client changed.
+- [x] User reports updated installation working and grants live acceptance
+  (2026-10-17), then requests commit/push. Activation was user-operated; no
+  additional agent-run restart/reconnect matrix is claimed.
+
+Registration logs omit client IDs: they cannot reconstruct the exact registry
+at the failed click. Console IDs/counts do not establish unique presentations.
+Future host registration logs now include client identity alongside SID.
+
+Validation: 45 Python tests (routing, mentions/registration, projection, membership,
+app backend); 35 Code TE2 frontend tests (presentation, drawer, tabs); four ALS
+frontend tests (common file-open boundary and project controls); nine native asset
+coverage tests. Both frontend typechecks and builds pass. Rust file-open tests
+(two scenarios) and sidebar tests (ten scenarios) pass in both lib/bin targets.
+Touched Rust files pass rustfmt; workspace-wide fmt finds unrelated existing
+drift, which was not reformatted. Existing unused-method/embedded-feature warnings
+remain. Code TE2 mypyc status is stale, as expected after this backend edit.
+ALS production executable also builds successfully with Cargo release, four jobs;
+this updates the Cargo output, not bootstrap selection or the running worker.
+
+Activation order: rebuild/activate Code TE2 mypyc, prepare/start the updated ALS
+binary, then publish/force OTA current Code TE2 plus pinned ALS assets and reload
+clients. These are not performed by source builds or the ALS checkpoint. No
+runtime was restarted, no APK assembled, no assets published, no push performed.
+
+## Next investigation — ALS pipe readiness parity
+
+- [ ] Compare ALS worker launch/readiness against Code TE2 after this checkpoint.
+  User requires a pipe-backed ALS launch with --stdio when pipe readiness is
+  expected, protocol-only stdout and all other output on stderr. Determine current
+  ownership and propose the concrete correction before implementation; do not
+  substitute HTTP readiness or change shared app state.
