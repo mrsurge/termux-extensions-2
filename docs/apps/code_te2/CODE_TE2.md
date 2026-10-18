@@ -5316,6 +5316,25 @@ te2 framework eval --app code_te2 --shell SHELL_ID --instance INSTANCE_ID --code
 
 ## 48) Standalone Terminal Contracts
 
+An explicit `shell_id` or `new_session` query selects the initial terminal loading
+layout immediately, instead of rendering the session list until the first
+lifecycle snapshot arrives. Query state is presentation intent only: existing
+shell IDs still require a ready/live backend snapshot, and explicit creation
+retains its single-use launch ID and existing backend acknowledgement. No-query
+launches remain in list mode. Missing/exited shells, creation failure or lifecycle
+startup failure return to the list; no automatic creation/retry compensates for
+an invalid restored identity. This frontend change requires Terminal assets and
+client reload, not a Code TE2 mypyc build or worker restart.
+
+Terminal session-list drawer motion is opt-in per user interaction:
+`drawer-motion-enabled` is added by `openDrawer`, retained for manual closing,
+and cleared by every mode/session layout handoff. The base terminal-layout drawer
+has no transition. Otherwise app-shell template insertion can paint the list
+before initialization and animate it offscreen on full-page restoration, even
+when frame-only reload timing conceals that sequence. Both Terminal template and
+generated frontend must be updated together; no global shell transition policy
+or deliberate drawer animation is removed.
+
 The standalone Terminal is a separate app from Code TE2's Python/Pyte drawer (section 46). Its Node/headless-xterm ownership and local UI controls are preserved here for shared-input maintenance.
 
 Its Python `backend.py` exports `TE2_ASGI_APP`; app-owned `http_app.py` composes

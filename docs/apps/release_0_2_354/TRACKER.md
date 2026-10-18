@@ -485,8 +485,31 @@ plans are retained as references; they do not replace this current checklist.
     backend/mypyc or agent-performed runtime restart was required.
 - [x] Original note 6 — User confirms ALS file links after project switches are
   fixed by the completed routing work; do not reopen as missing acceptance.
-- [ ] U5 / original note 7 — Terminal Sidebar opening uses ALS-style immediate
+- [x] U5 / original note 7 — Terminal Sidebar opening uses ALS-style immediate
   state-based window launch with no transition animation.
+  - [x] Source-backed correction approved: Terminal unconditionally entered list
+    mode before the lifecycle snapshot, even with an explicit restored shell.
+    Initial query state now selects terminal loading layout without waiting;
+    no-query launches retain list mode. Shell attach/create still waits for the
+    existing backend authority; missing/exited targets and failed launch/startup
+    return to list. No new animation, shell/session identity or creation retry.
+  - [x] All 27 Terminal frontend/protocol/broker tests pass, including three new
+    actual-source initialization/restoration/one-shot creation tests. Terminal
+    TypeScript check/build and diff whitespace check pass.
+  - [x] Matching Terminal assets/reload and user live launch acceptance. No
+    worker/framework restart, mypyc build, Android publication or commit performed.
+  - [x] User confirms frame-only reload works but full-page restoration still
+    slides the session drawer. Read-only live inspection confirms explicit shell
+    queries and the Terminal drawer's transform transition in both clients.
+    App shell inserts the template before importing/initializing the app, so the
+    unconditional 160 ms transition can animate initial layout. Approved fix:
+    base drawer has no transition; deliberate open enables motion, closing keeps
+    it, and mode changes clear it. Actual-source class/CSS regression added.
+    All 28 Terminal tests, typecheck and frontend build pass. Both template and
+    generated script need matching asset update.
+  - [x] 2026-10-18 user live accepts the full-page restoration correction
+    ("Yep thats it") and authorizes commit/push. Frame-only and full-page launch
+    now have user acceptance; no agent-performed runtime restart or publication.
 
 ### Terminal touch sensitivity — 2026-10-18
 

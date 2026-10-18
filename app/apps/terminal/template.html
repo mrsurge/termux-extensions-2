@@ -112,8 +112,12 @@
     border-right: 1px solid var(--border);
     padding: 8px;
     transform: translateX(-100%);
-    transition: transform 160ms ease;
+    /* Template insertion/restoration is layout, not a drawer gesture. */
+    transition: none;
     z-index: 300;
+  }
+  .mode-terminal.drawer-motion-enabled #ta-list-container {
+    transition: transform 160ms ease;
   }
   .drawer-open #ta-list-container { transform: translateX(0); }
   #ta-drawer-overlay {

@@ -1001,12 +1001,20 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   function setMode(mode: 'list' | 'terminal'): void {
     state.mode = mode;
-    root.classList.remove('mode-list', 'mode-terminal', 'drawer-open');
+    root.classList.remove('mode-list', 'mode-terminal', 'drawer-open', 'drawer-motion-enabled');
     root.classList.add(mode === 'terminal' ? 'mode-terminal' : 'mode-list');
   }
 
+  function initializePresentation(): void {
+    // Query state selects presentation only. The lifecycle owner must still
+    // validate an existing shell or acknowledge explicit new-session creation.
+    const pending = Boolean(sidebarState.initialShellId || sidebarState.initialNewSession);
+    setMode(pending ? 'terminal' : 'list');
+    if (pending) ui.title.textContent = 'Loading terminal…';
+  }
+
   function openDrawer(): void {
-    root.classList.add('drawer-open');
+    root.classList.add('drawer-motion-enabled', 'drawer-open');
   }
 
   function closeDrawer(): void {
@@ -1459,6 +1467,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         await selectShell(data.shell_id);
       } catch (error) {
         console.error('[terminal] launch session failed (not replayed)', error);
+        setMode('list');
         setStatus(`Session launch failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       return;
@@ -1746,9 +1755,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }, { once: true });
 
   syncSpecialKeysUi();
-  setMode('list');
+  initializePresentation();
   void startLifecycleClient().catch((error) => {
     console.error('[terminal] lifecycle startup failed', error);
+    setMode('list');
     setStatus('lifecycle unavailable');
   });
 }

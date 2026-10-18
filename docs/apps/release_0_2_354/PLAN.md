@@ -117,6 +117,16 @@ original user notes verbatim in the tracker.
    builds. Client publication/reload and live acceptance remain separate.
 5. Terminal Sidebar launch: use the existing ALS-style immediate state-based
    window opening without the transition animation, retaining session identity.
+   Approved bounded correction (2026-10-18): explicit shell/new-session queries
+   choose terminal loading layout before lifecycle readiness, rather than always
+   rendering the session list first. Backend snapshot validation and one-shot
+   creation remain unchanged; stale/closed/failed targets return to list, while
+   no-query launches retain the splash/list. Frontend tests/typecheck/build only;
+   asset publication and user live acceptance are separate.
+   Full-page follow-up approved: suppress session-drawer transitions by default,
+   enable the existing animation only on deliberate menu open, and clear that
+   enable on mode/session handoff. Preserve manual drawer opening/closing motion;
+   update both Terminal template and frontend, without global app-shell changes.
 
 Qualified Sidebar identities (original note 4) and ALS links after project
 switches (original note 6) are user accepted, not pending work. Each unresolved
