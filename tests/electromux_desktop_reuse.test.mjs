@@ -9,6 +9,7 @@ const app = {id: 'code_te2', name: 'Code TE2', icon_src: '/icon.svg'};
 let navigated;
 let stateListener;
 let unsubscribed = false;
+let failAssetUpdate = false;
 const platform = createRemoteElectromuxPlatform({
   getBrowserOrigin: () => 'http://127.0.0.1:44100',
   navigate: url => {navigated = url;},
@@ -28,6 +29,11 @@ const platform = createRemoteElectromuxPlatform({
     if (path === '/android-api/framework-bookmarks') return {bookmarks: [{name: 'Remote', frameworkHost: 'bookmark.test', frameworkPort: 8091}]};
     if (path === '/android-api/fws/status') return {available: true};
     if (path === '/android-api/framework/status') return {online: true};
+    if (path === '/android-api/assets/status') return {valid: true, assetRootExists: true, localVersion: 'test-version'};
+    if (path === '/android-api/assets/update') {
+      if (failAssetUpdate) throw new Error('Android gateway unavailable');
+      return {started: true};
+    }
     if (path === '/android-api/apps/code_te2/quit' || path === '/android-api/apps/reload') return {};
     throw new Error(`Unexpected route ${path}`);
   },
@@ -43,6 +49,16 @@ globalThis.document = {querySelector: () => null};
 globalThis.__te2ShellPlatform = platform;
 try {
   const {desktopShellHost: host} = await load('../desktop_client/android_shell/host.js');
+  assert.equal(host.assetOwnerLabel, 'Android');
+  assert.equal((await host.getAssetStatus()).interceptorAvailable, true);
+  assert.deepEqual(await host.updateAssets(), {started: true}, 'native admission is not reported as completion');
+  assert.deepEqual(calls.filter(call => call.path === '/android-api/assets/update'),
+    [{path: '/android-api/assets/update', method: 'POST', body: undefined}]);
+  failAssetUpdate = true;
+  await assert.rejects(host.updateAssets(), /Android gateway unavailable/);
+  assert.equal(calls.filter(call => call.path === '/android-api/assets/update').length, 2,
+    'failed update admission is never retried');
+  failAssetUpdate = false;
   assert.equal((await host.getSettings()).frameworkHost, 'remote.test');
   const catalog = await host.getApps();
   assert.equal(catalog.online, true);
@@ -95,6 +111,7 @@ globalThis.parent = {
 globalThis.document = {querySelector: () => null};
 try {
   const {desktopShellHost: host} = await load('../desktop_client/android_shell/host.js', 'electron');
+  assert.equal(host.assetOwnerLabel, 'Desktop');
   assert.equal((await host.getSettings()).frameworkHost, 'electron.test');
   host.navigate('http://127.0.0.1:44100/app/code_te2');
   assert.equal(navigated, 'http://127.0.0.1:44100/app/code_te2');

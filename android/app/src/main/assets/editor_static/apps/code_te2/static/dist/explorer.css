@@ -1518,6 +1518,8 @@
 }
 
 .fe-search-line-num {
+  flex: none;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--muted);
   min-width: 40px;

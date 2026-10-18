@@ -275,20 +275,24 @@ export function bindRenderUtils(ctx: RenderUtilsContext) {
     return null;
   }
 
-  function buildViewCardTitle(path: string, viewRange: unknown, fallbackTitle = '') {
+  function buildViewCardTitle(path: string, viewRange: unknown, fallbackTitle = '', explicitTitle = '') {
     const shortPath = path ? String(path).split('/').pop() : '';
+    const baseTitle = explicitTitle || shortPath || fallbackTitle || 'view';
+    // A router may already have formatted the generic range into its title.
+    // Replace that trailing annotation rather than hiding or duplicating it.
+    const rangeBase = baseTitle.replace(/\s+Lines? \d+(?:[–-]\d+|\+)?$/, '');
     if (
       Array.isArray(viewRange)
       && viewRange.length >= 2
       && Number.isFinite(Number(viewRange[0]))
       && Number.isFinite(Number(viewRange[1]))
     ) {
-      return `${shortPath || fallbackTitle || 'view'}  Lines ${Number(viewRange[0])}–${Number(viewRange[1])}`;
+      return `${rangeBase}  Lines ${Number(viewRange[0])}–${Number(viewRange[1])}`;
     }
     if (Array.isArray(viewRange) && viewRange.length === 1 && Number.isFinite(Number(viewRange[0]))) {
-      return `${shortPath || fallbackTitle || 'view'}  Line ${Number(viewRange[0])}+`;
+      return `${rangeBase}  Line ${Number(viewRange[0])}+`;
     }
-    return shortPath || fallbackTitle || 'view';
+    return baseTitle;
   }
 
   function detectLangFromCommand(command: string | null | undefined) {

@@ -324,6 +324,7 @@ export function toast(message) {
 }
 
 export const desktopShellHost = {
+  assetOwnerLabel: platformBridge?.capabilities?.assetUpdates ? "Android" : "Desktop",
   localFrameworkOwnerLabel: platformBridge?.capabilities?.localFramework ? "TE2 Termux" : "Electron",
   getLocalApps,
   getApps,

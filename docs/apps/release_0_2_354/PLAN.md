@@ -27,6 +27,29 @@ The ALS framework-pipe/Sidebar IPC migration is explicitly next-version work.
 
 ## Ordered remaining work
 
+### Accepted native builds and Android settings/assets — 2026-10-18
+
+User accepts the current Rust binaries and newly built/running mypyc extension;
+retain those artifacts and their existing provenance instead of rebuilding them
+for this Android-only correction. Packaging must still validate exact receipts.
+
+Approved source slice: enable TE2 Termux settings asset updates through the
+existing Android gateway, remove obsolete capability disabling, distinguish
+native admission from completed Electron updates, and add focused regressions.
+Statically audit all three APK bundle/interception paths and seed freshness.
+No APK assembly/install, seed publication or native-runtime transition here.
+Findings and exact stale file list: APK_ASSET_AUDIT.md. Refresh the common seed
+before release assembly: the audit found 16 changed files among 445 expected,
+with none missing/extra. Subsequent user-approved bundler refresh resolves all
+16 differences; all 445 expected files now match source with no extras. Final
+APK payload checks remain pending. Settings shell changes are APK-owned, not
+OTA-updatable.
+
+Next-release direction: end the three-APK matrix after this release; one Android
+application/codebase with standalone and Termux/shared-UID build variants using
+the same renderer, not two independently maintained apps. Renderer
+selection/migration is future work, not permission to remove a current target.
+
 ### Code Server status authority correction — approved 2026-10-18
 
 Keep disk installation, runtime readiness and selected language mode separate.

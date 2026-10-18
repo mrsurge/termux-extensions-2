@@ -922,6 +922,33 @@ relevant after final packaging; do not count unrun stress experiments as bugs.
 - [ ] Final release artifact installation/client matrix; older wheels/APKs cannot
   accept source changes introduced since those artifacts were built.
 
+## Android settings OTA and asset-source audit — 2026-10-18
+
+- [x] User reports current Rust binaries/new mypyc extension running well and
+  requests preserving them. No native artifacts rebuilt, reselected or replaced
+  in this slice; final packaging still validates exact provenance.
+- [x] Termux settings fix: remove obsolete disabled-capability observer and add
+  update_assets -> Android gateway POST /android-api/assets/update. Treat 202
+  started acknowledgement as admission, not completed installation; retain native
+  update/cache-clear/reload and failure feedback. Electron completion unchanged.
+- [x] Six bootstrap/adapter/Android-settings/local-state regression tests pass;
+  nine native inventory/interception/icon checks and four Python asset-route
+  tests pass. No Gradle/APK build or device runtime acceptance claimed.
+- [x] All three APKs share the editor seed; static URL/source wiring passes.
+  Current manifest expansion finds 445 expected, no missing/extra, 16 stale files.
+  Exact list and source ownership are in APK_ASSET_AUDIT.md.
+- [x] User-approved shared seed refresh via scripts/bundle_gecko_assets.sh:
+  all 445 manifest-expanded files match current source bytes, with zero missing,
+  stale or extra files. Nine static asset/interception/icon tests pass again.
+  Seed retains source version 0.2.353; no version bump/native rebuild performed.
+- [ ] Verify final APK packaged bytes; rebuild Termux consumer shell into the
+  APK and live-test its settings OTA. Seed refresh alone does not change an
+  installed APK or its retained app-private assets.
+- [x] User clarifies next-release direction: one Android application/codebase,
+  standalone and Termux/shared-UID build variants with the same renderer, not
+  separate apps. Do not remove a current target this release. User assigns live
+  settings OTA and packaged-byte acceptance to APK/wheel/release validation.
+
 ## Debian release build-host preparation — 2026-10-18
 
 - [x] User selects Debian as primary Linux/APK build host and experimental

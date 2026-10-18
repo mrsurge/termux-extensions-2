@@ -18,6 +18,8 @@ const assetVersion = document.querySelector("#asset-version");
 const assetInterceptor = document.querySelector("#asset-interceptor");
 const assetRoot = document.querySelector("#asset-root");
 const updateAssetsButton = document.querySelector("#update-assets");
+const assetHeading = document.querySelector("#asset-heading");
+if (assetHeading) assetHeading.textContent = `${desktopShellHost.assetOwnerLabel} Assets`;
 const localFrameworkCommandInput = document.querySelector("#local-framework-command");
 const localFrameworkVenvInput = document.querySelector("#local-framework-venv");
 const localFrameworkPortInput = document.querySelector("#local-framework-port");
@@ -458,13 +460,13 @@ function renderAssetStatus(result) {
     setStatus(
       assetStatus,
       "offline",
-      error || "Assets installed, but WebKit interception is unavailable",
+      error || "Assets installed, but interception is unavailable",
     );
   } else {
     setStatus(
       assetStatus,
       "offline",
-      error || "No complete desktop asset bundle is installed",
+      error || "No complete asset bundle is installed",
     );
   }
 }
@@ -484,14 +486,19 @@ async function refreshAssetStatus() {
 
 async function updateAssets() {
   updateAssetsButton.disabled = true;
-  setStatus(assetStatus, "loading", "Downloading desktop assets");
+  setStatus(assetStatus, "loading", `Downloading ${desktopShellHost.assetOwnerLabel.toLowerCase()} assets`);
   try {
     const result = await desktopShellHost.updateAssets();
+    if (result?.started === true) {
+      setStatus(assetStatus, "loading", "Asset update started; waiting for app reload");
+      desktopShellHost.toast("Asset update started");
+      return;
+    }
     renderAssetStatus(result);
     desktopShellHost.toast(
       result.updated
-        ? `Desktop assets updated to v${result.localVersion}`
-        : result.error || "Desktop assets are already current",
+        ? `${desktopShellHost.assetOwnerLabel} assets updated to v${result.localVersion}`
+        : result.error || "Assets are already current",
     );
   } catch (error) {
     setStatus(

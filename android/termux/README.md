@@ -48,7 +48,9 @@ using the established APK-seed/OTA path and existing loopback relay.
 
 The bootstrap injects the remote gateway adapter before importing Desktop's
 launcher/settings modules. It rejects non-loopback hosting. Startup settings use
-the exact-document native bridge; asset-update controls remain disabled here. Endpoint,
+the exact-document native bridge; asset updates use POST /android-api/assets/update,
+whose admission acknowledgement is not completion. The existing Android updater
+owns verification, cache clearing, reload and failure feedback. Endpoint,
 bookmarks, catalog and app actions reuse the existing Android gateway/service.
 Sidebar preferences and second-editor bridge continue through the same native
 implementation; source reuse is not physical parity acceptance.

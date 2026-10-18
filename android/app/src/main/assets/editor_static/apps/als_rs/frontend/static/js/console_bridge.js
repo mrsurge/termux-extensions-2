@@ -25,6 +25,12 @@ let _bridgeSocket = null;
 let _workerId = null;
 let _workerLabel = null;
 let _originals = {};
+let _connectHandler = null;
+let _registeredHandler = null;
+let _evalHandler = null;
+let _errorHandler = null;
+let _rejectionHandler = null;
+let _ownsSocket = false;
 
 function _publishWorkerInfo() {
   if (typeof window === 'undefined') return;
@@ -106,17 +112,20 @@ function _patchConsole() {
 }
 
 function _hookErrors() {
-  window.addEventListener('error', (e) => {
+  _errorHandler = (e) => {
     _emitLog('error', [e.message, e.filename, e.lineno, e.colno, e.error || null]);
-  });
-  window.addEventListener('unhandledrejection', (e) => {
+  };
+  _rejectionHandler = (e) => {
     _emitLog('error', ['UnhandledRejection', e.reason]);
-  });
+  };
+  window.addEventListener('error', _errorHandler);
+  window.addEventListener('unhandledrejection', _rejectionHandler);
 }
 
 function _hookEval() {
   if (!_bridgeSocket) return;
-  _bridgeSocket.on('console:eval', async ({ reqId, code }) => {
+  const socket = _bridgeSocket;
+  _evalHandler = async ({ reqId, code }) => {
     try {
       let result;
       try { result = (0, eval)(code); }
@@ -125,6 +134,7 @@ function _hookEval() {
         else throw synErr;
       }
       const value = await Promise.resolve(result);
+      if (!_bridgeActive || _bridgeSocket !== socket) return;
       _bridgeSocket.emit('console:evalResult', {
         workerId: _workerId,
         reqId,
@@ -132,6 +142,7 @@ function _hookEval() {
         value: _serializeArg(value),
       });
     } catch (err) {
+      if (!_bridgeActive || _bridgeSocket !== socket) return;
       _bridgeSocket.emit('console:evalResult', {
         workerId: _workerId,
         reqId,
@@ -139,7 +150,8 @@ function _hookEval() {
         error: _serializeArg(err),
       });
     }
-  });
+  };
+  socket.on('console:eval', _evalHandler);
 }
 
 /**
@@ -174,6 +186,7 @@ export function initConsoleBridge(opts = {}) {
 
   if (opts.socket) {
     _bridgeSocket = opts.socket;
+    _ownsSocket = false;
   } else {
     const io = window.io;
     if (!io) {
@@ -193,15 +206,31 @@ export function initConsoleBridge(opts = {}) {
         workerLabel: _workerLabel,
       },
     });
+    _ownsSocket = true;
   }
 
-  // Tell the server this is a console-producing worker
-  _bridgeSocket.on('connect', () => {
-    _bridgeSocket.emit('console:register', { workerId: _workerId, workerLabel: _workerLabel, role: 'worker' });
-  });
+  const query = new URLSearchParams(window.location?.search || '');
+  const sidebarWindowId = query.get('sidebarWindowId') || '';
+  if (sidebarWindowId) _workerId = sidebarWindowId;
+  const requestedWorkerId = _workerId;
+  const registration = {
+    workerId: requestedWorkerId, workerLabel: _workerLabel, role: 'worker',
+    compactIdentity: true,
+    qualifiedIdentity: !!sidebarWindowId,
+    clientInstanceId: query.get('clientInstanceId') || '',
+    presentationId: query.get('presentationId') || '',
+  };
+  _registeredHandler = (data) => {
+    if (data?.requestedWorkerId !== requestedWorkerId || typeof data.workerId !== 'string') return;
+    _workerId = data.workerId;
+    _publishWorkerInfo();
+  };
+  _bridgeSocket.on('console:registered', _registeredHandler);
+  _connectHandler = () => _bridgeSocket.emit('console:register', registration);
+  _bridgeSocket.on('connect', _connectHandler);
   // If already connected, register immediately
   if (_bridgeSocket.connected) {
-    _bridgeSocket.emit('console:register', { workerId: _workerId, workerLabel: _workerLabel, role: 'worker' });
+    _bridgeSocket.emit('console:register', registration);
   }
 
   _patchConsole();
@@ -218,6 +247,24 @@ export function initConsoleBridge(opts = {}) {
  */
 export function destroyConsoleBridge() {
   if (!_bridgeActive) return;
+  if (_bridgeSocket?.connected) {
+    _bridgeSocket.emit('console:unregister', { role: 'worker', workerId: _workerId });
+  }
+  if (_bridgeSocket && typeof _bridgeSocket.off === 'function') {
+    if (_connectHandler) _bridgeSocket.off('connect', _connectHandler);
+    if (_registeredHandler) _bridgeSocket.off('console:registered', _registeredHandler);
+    if (_evalHandler) _bridgeSocket.off('console:eval', _evalHandler);
+  }
+  if (_errorHandler) window.removeEventListener?.('error', _errorHandler);
+  if (_rejectionHandler) window.removeEventListener?.('unhandledrejection', _rejectionHandler);
+  if (_ownsSocket) _bridgeSocket?.disconnect?.();
+  _connectHandler = null;
+  _registeredHandler = null;
+  _evalHandler = null;
+  _errorHandler = null;
+  _rejectionHandler = null;
+  _ownsSocket = false;
+  _bridgeSocket = null;
   for (const level of LEVELS) {
     if (_originals[level]) console[level] = _originals[level];
   }

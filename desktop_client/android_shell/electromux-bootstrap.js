@@ -36,32 +36,6 @@ globalThis.__te2ShellPlatform = createRemoteElectromuxPlatform({
   },
 });
 
-// Startup settings are native-owned; only asset update remains
-// visibly unavailable until their separate parity slices.
-function disableUnavailableControls() {
-  for (const section of document.querySelectorAll('.settings-section')) {
-    if (!section.querySelector('#update-assets')) continue;
-    for (const control of section.querySelectorAll('input, button, select')) control.disabled = true;
-    section.dataset.capability = 'unavailable';
-    section.title = 'Asset updates are not enabled in this consumer shell yet';
-  }
-}
-disableUnavailableControls();
-// Settings initialization may re-enable controls after async rendering. Observe
-// only these capability sections, not the editor or the rest of the document.
-const observer = new MutationObserver(records => {
-  for (const record of records) {
-    if (record.type === 'attributes' && record.target.disabled) continue;
-    const section = record.target.closest?.('[data-capability="unavailable"]');
-    if (section?.matches('input, button, select')) section.disabled = true;
-    if (section) for (const control of section.querySelectorAll('input, button, select'))
-      if (!control.disabled) control.disabled = true;
-  }
-});
-for (const section of document.querySelectorAll('[data-capability="unavailable"]'))
-  observer.observe(section, {subtree: true, childList: true, attributes: true, attributeFilter: ['disabled']});
-window.addEventListener('pagehide', () => observer.disconnect(), {once: true});
-
 const settings = window.location.pathname.endsWith('/settings.html');
 await import(settings ? './settings.js' : './launcher.js');
 if (settings) {

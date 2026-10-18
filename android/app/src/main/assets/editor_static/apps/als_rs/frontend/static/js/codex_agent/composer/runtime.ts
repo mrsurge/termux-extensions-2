@@ -73,7 +73,7 @@ interface ComposerRuntimeContext {
 
 const DRAFT_MENTION_ENVELOPE_START = '\x1eCODEX_MENTION ';
 const DRAFT_MENTION_ENVELOPE_END = '\x1f';
-export const COMPOSER_PAIR_GESTURE_TIMEOUT_MS = 800;
+export const COMPOSER_PAIR_GESTURE_TIMEOUT_MS = 1_100;
 const COMPOSER_AUTO_PAIRS: Readonly<Record<string, string>> = {
   '(': ')',
   '[': ']',

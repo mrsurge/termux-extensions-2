@@ -69,6 +69,9 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
         return {...status, interceptorAvailable: status.assetRootExists === true,
           assetRoot: "Android app-private editor_static"};
       }
+      // Android acknowledges admission only. Its existing native updater owns
+      // completion, cache invalidation, failure feedback and the final reload.
+      case "update_assets": return gateway("/assets/update", "POST");
       case "get_local_framework_state": return {supported: false, phase: "unavailable", ownership: "none"};
       case "get_local_framework_config": return {version: 1, command: "", venvPath: "", port: 8089,
         broadcast: [], env: {}, persisted: false, commandDetected: false,
@@ -111,5 +114,5 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
   }
   function dispose() {disposed = true; unsubscribeState?.(); stateListeners.clear();}
   return Object.freeze({request, navigate: navigateLocal, on: subscribe, reconcileLocalState, dispose,
-    capabilities: Object.freeze({localFramework: typeof nativeRequest === "function", automaticStartup: typeof nativeRequest === "function", assetUpdates: false})});
+    capabilities: Object.freeze({localFramework: typeof nativeRequest === "function", automaticStartup: typeof nativeRequest === "function", assetUpdates: true})});
 }
