@@ -214,7 +214,7 @@ export type ElectronSidebarSurfaceAction =
   | "stop";
 
 export type ElectronSidebarSurfaceEvent = {
-  type: "closed" | "action";
+  type: "closed" | "action" | "focused";
   hostId: string;
   surfaceId: string;
   presentationId: string;

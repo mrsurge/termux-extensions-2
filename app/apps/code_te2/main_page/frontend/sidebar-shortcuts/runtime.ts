@@ -11,6 +11,7 @@ import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import { generateUuid } from '../uuid.ts';
 import { applySidebarWindowIdentity, readSidebarWindowIdentity, type SidebarWindowIdentity } from './qualified-identity.ts';
 import { bindDockOverflowScroll } from "./dock-scroll.ts";
+import { DockedSelection, bindDockedFocus } from "./docked-selection.ts";
 import {
   notifyExplorerRpc,
   requestExplorerRpc,
@@ -184,7 +185,7 @@ interface ElectronNativeSurfaceEntry {
 }
 
 interface ElectronSidebarSurfaceEvent {
-  type: "closed" | "action";
+  type: "closed" | "action" | "focused";
   hostId: string;
   surfaceId: string;
   presentationId: string;
@@ -380,6 +381,9 @@ export function initSidebarShortcuts(
   let _lastPickerPath = "";
   let _clientActiveShortcutId = "";
   let _clientActiveWindowHostId = "";
+  const _dockedSelection = new DockedSelection();
+  let _displayedShortcutKey = "";
+  let _disposeDockedFocus: (() => void) | null = null;
   let _pendingActivatedWindowHostId = "";
   let _presentationState = emptySidebarPresentationState();
   let _presentationStateLoaded = false;
@@ -1194,6 +1198,42 @@ export function initSidebarShortcuts(
     return pickMruShortcutFromModel(Array.isArray(shortcuts) ? shortcuts : []);
   }
 
+  function _resolveDockedShortcut(
+    shortcuts: SidebarShortcut[],
+    active: SidebarShortcut | null,
+  ): SidebarShortcut | null {
+    const eligible = shortcuts.filter((sc) =>
+      !_isDetachedShortcut(sc) &&
+      _presentationModeForHost(_normStr(sc.host_id)) !== "hidden",
+    );
+    return _dockedSelection.resolve(eligible, active, _pickMruShortcut(eligible));
+  }
+
+  function _activateFocusedDockedShortcut(key: string, presentationId: string): void {
+    if (key !== _displayedShortcutKey) return;
+    const entry = _iframeMap.get(key) || _electronNativeSurfaceMap.get(key);
+    if (!entry || entry.presentationId !== presentationId) return;
+    const shortcuts = _collectVisibleShortcuts(_latestUiPrefs || {});
+    const sc = shortcuts.find((item) => item.key === key);
+    if (!sc || _isDetachedShortcut(sc) ||
+        _presentationModeForHost(_normStr(sc.host_id)) === "hidden" ||
+        _resolveActive(_latestUiPrefs || {}, shortcuts)?.key === key) return;
+    _setClientActiveShortcut(sc.host_id || sc.id || sc.url || sc.key, {
+      emit: true,
+      source: "sidebar_surface_focus",
+    });
+  }
+
+  function _onDockedIframeFocus(): void {
+    const focused = document.activeElement;
+    for (const [key, entry] of _iframeMap) {
+      if (focused === entry.iframe && entry.iframe.classList.contains("is-active")) {
+        _activateFocusedDockedShortcut(key, entry.presentationId);
+        return;
+      }
+    }
+  }
+
   function _ensureActiveSelection(
     uiPrefs: UnknownRecord,
     shortcuts: SidebarShortcut[] | null,
@@ -1690,7 +1730,9 @@ export function initSidebarShortcuts(
     _nativePlacementFrame = requestAnimationFrame(() => {
       _nativePlacementFrame = 0;
       const shortcuts = _collectVisibleShortcuts(_latestUiPrefs || {});
-      const activeKey = _resolveActive(_latestUiPrefs || {}, shortcuts)?.key || "";
+      const activeKey = _resolveDockedShortcut(
+        shortcuts, _resolveActive(_latestUiPrefs || {}, shortcuts),
+      )?.key || "";
       for (const sc of shortcuts) {
         const entry = _electronNativeSurfaceMap.get(sc.key);
         if (!entry?.loaded) continue;
@@ -1857,6 +1899,15 @@ export function initSidebarShortcuts(
 
   function _handleElectronSurfaceEvent(event: ElectronSidebarSurfaceEvent): void {
     if (!event || typeof event !== "object") return;
+    if (event.type === "focused") {
+      const key = `dock:${event.hostId}`;
+      const sc = _collectVisibleShortcuts(_latestUiPrefs || {})
+        .find((item) => item.key === key);
+      if (sc && _surfaceIdForShortcut(sc) === event.surfaceId) {
+        _activateFocusedDockedShortcut(key, event.presentationId);
+      }
+      return;
+    }
     if (event.type === "closed") {
       _reattachDetachedShortcut(event);
       return;
@@ -4286,8 +4337,11 @@ export function initSidebarShortcuts(
       }
     });
 
-    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const resolvedActive = _resolveDockedShortcut(
+      resolvedShortcuts, active || _resolveActive(uiPrefs, resolvedShortcuts),
+    );
     const activeKey = resolvedActive ? resolvedActive.key : "";
+    _displayedShortcutKey = activeKey;
 
     // Eager load (best-effort). For framework apps this will start apps too.
     const eager = resolvedShortcuts.filter(
@@ -4312,20 +4366,18 @@ export function initSidebarShortcuts(
     // Mark active + lazy-load active.
     let hasActive = false;
     _iframeMap.forEach((entry, key) => {
-      const isActive = !!(activeKey && key === activeKey);
+      const isActive = !!(activeKey && key === activeKey && !detachedKeys.has(key));
       entry.iframe.classList.toggle("is-active", isActive);
       if (isActive) hasActive = true;
     });
     _electronNativeSurfaceMap.forEach((entry, key) => {
-      const isActive = !!(activeKey && key === activeKey);
+      const isActive = !!(activeKey && key === activeKey && !detachedKeys.has(key));
       entry.placeholder.classList.toggle("is-active", isActive);
       if (isActive) hasActive = true;
     });
 
     let activeReady = false;
-    if (resolvedActive && detachedKeys.has(resolvedActive.key)) {
-      activeReady = true;
-    } else if (hasActive && resolvedActive) {
+    if (hasActive && resolvedActive) {
       const nativeEntry = _electronNativeSurfaceMap.get(resolvedActive.key);
       if (nativeEntry) {
         activeReady = await _placeElectronNativeSurface(
@@ -5399,6 +5451,13 @@ export function initSidebarShortcuts(
   }
 
   async function init() {
+    if (!_disposeDockedFocus) {
+      _disposeDockedFocus = bindDockedFocus(window, document, _onDockedIframeFocus);
+      window.addEventListener("beforeunload", () => {
+        _disposeDockedFocus?.();
+        _disposeDockedFocus = null;
+      }, { once: true });
+    }
     const electronBridge = _electronSurfaceBridge();
     if (electronBridge && !_electronSurfaceEventsUnsubscribe) {
       _electronSurfaceEventsUnsubscribe = electronBridge.onSidebarSurfaceEvent(

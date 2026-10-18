@@ -27,6 +27,35 @@ The ALS framework-pipe/Sidebar IPC migration is explicitly next-version work.
 
 ## Ordered remaining work
 
+### Immediate user-note finish sequence — 2026-10-17
+
+These clarified user notes precede the remaining R4 cleanup and R5 packaging.
+TRACKER.md is the single current status owner; retain other plans as technical
+references and historical evidence, not competing execution queues. Preserve the
+original user notes verbatim in the tracker.
+
+1. Detached Sidebar gap: show the last eligible docked presentation instead of
+   blank space when the selected app is detached. Its icon continues to raise
+   the detached window, even on repeated clicks. Focusing the visible docked
+   presentation makes that presentation active. Keep detached window activation
+   distinct from the presentation occupying Sidebar space; preserve client-local
+   focus and shared membership. Investigate existing selection/focus owners first.
+2. Project-switch draft hydration: opened files must send their full draft content
+   to WBA on project restoration just as ordinary file opens do. Draft content is
+   intended, not an erroneous entry in the open-model list. Audit the project
+   switch path without changing cold-start behavior that already hydrates models.
+3. Deleted-draft gutter indicator: inspect the VS Code implementation and follow
+   its small red between-line deletion marker pattern in the draft gutter.
+4. Mentions from the inline problem widget: reuse the existing mention owner and
+   exact-client destination path rather than a parallel mechanism.
+5. Terminal Sidebar launch: use the existing ALS-style immediate state-based
+   window opening without the transition animation, retaining session identity.
+
+Qualified Sidebar identities (original note 4) and ALS links after project
+switches (original note 6) are user accepted, not pending work. Each unresolved
+item still needs source-backed concrete implementation approval; this ordering
+does not authorize shared-runtime restarts, Android changes or release actions.
+
 ### Approved follow-up: mobile shortcuts after file switches
 
 Monaco setModel detaches/disposes its view and creates a new textarea while the
@@ -163,12 +192,17 @@ refresh persistence without duplicating registrations.
   failures. CODE_TE2_FORCE_INTERPRETED=1 deliberately overrides editable domain
   selection without changing the Rust worker or artifacts; packaged installs
   reject this override. Validation/live gates are in TRACKER.md.
-- Terminal extension profile generator: the documented TS2488/unknown iterable
-  still exists in activation-events.ts. Narrow profiles with Array.isArray and add
-  valid/missing/malformed fixtures; this was explicitly promised for next release.
-- Record pre-existing test failures separately from runtime bugs; modernize stale
-  retired-Python mount assertions without restoring obsolete architecture. The
-  suppressed-preview MRU test needs bounded triage, not a new Explorer redesign.
+- Group the remaining small correctness/test-maintenance items into one cleanup
+  slice rather than a standalone terminal-profile task:
+  - Terminal extension profile generator: the documented TS2488/unknown iterable
+    still exists in activation-events.ts. Narrow profiles with Array.isArray and
+    add valid/missing/malformed fixtures. This is defensive extension-manifest
+    bookkeeping, not VS Code terminal support; valid arrays already work and the
+    existing outer catch contains malformed-contribution errors.
+  - Record pre-existing test failures separately from runtime bugs; modernize
+    stale retired-Python mount assertions without restoring obsolete architecture.
+    The suppressed-preview MRU test needs bounded triage, not a new Explorer
+    redesign. Investigate and approve the combined edit scope before implementation.
 
 ### 5. Packaging and final release verification
 

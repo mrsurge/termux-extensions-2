@@ -3703,6 +3703,17 @@ navigates the view, reconnects the trusted wrapper, or replaces the extension
 document's JavaScript heap. A main-page reload temporarily hides the retained
 view until the reconstructed host reports its current placement.
 
+Detached foreground and docked rendering are separate projections. Activating a
+detached icon continues to raise that window on every click, but the Sidebar
+keeps the most recently displayed eligible docked surface instead of an empty
+placeholder. Local rendering history is pruned against current visible/project
+membership; cold fallback uses existing MRU selection. It does not create another
+durable foreground owner. Actual focus in the displayed docked iframe activates
+it through the existing client selection path. Electron persistent views report
+focus with their exact surface/presentation identity; hidden, replaced or detached
+views cannot claim embedded focus. No background fallback changes mention routing
+or shared membership merely by being displayed.
+
 Ordinary user URL and Run Profile surfaces keep the prior reconstruction path:
 their detached frame starts at `about:blank`, receives the complete namespaced
 `window.name` marker, and then navigates to the final URL.

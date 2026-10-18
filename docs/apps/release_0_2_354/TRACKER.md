@@ -235,7 +235,7 @@ restart, native/mypyc build, OTA refresh or client deployment in this slice.
 ### User notes transferred verbatim from search_memory/TRACKER.md
 
 The following 673-character block is preserved unchanged. Its original request
-to commit remains text; the current instruction is still **no commits**.
+to commit is historical text, not current commit authorization.
 
 User notes (commit this): 
 
@@ -247,17 +247,46 @@ User notes (commit this):
 6. project switches cause file links to stop working in als.
 7. use the same window launch mechanism as als for the terminal. instant window opening in the sidrbar based on state, no transition animation.
 
-### Triage of user notes — not implementation claims
+### Clarified user-note execution queue — 2026-10-17
 
-- [ ] Investigate/prioritize notes 1–7 with the user before implementation; no
-  release/defer decision is silently assigned by this consolidation.
-- [ ] Verify note 6 across an actual project switch after activating the current
-  exact-presentation correction. Earlier routing/dialog acceptance and new source
-  tests do not close the newly listed regression without live evidence.
+This queue precedes remaining R4 cleanup and R5 packaging. Other workstream
+plans are retained as references; they do not replace this current checklist.
+
+- [ ] U1 / original note 1 — Detached Sidebar windows leave no blank space.
+  Show the last eligible docked iframe instead; the detached icon still raises
+  its window on every click. Focusing the displayed docked iframe makes it the
+  active Sidebar presentation.
+  - [x] Source fix approved and implemented: separate docked rendering history
+    from foreground/window activation, prune ineligible entries and use existing
+    MRU on cold fallback. Existing repeated detached activation remains intact.
+    Docked iframe focus uses the existing client selection/activation owner;
+    Electron persistent views report exact surface/presentation focus with
+    hidden/detached/replaced-entry fences. No backend/mypyc or Android changes.
+  - [x] 30 Sidebar selection/presentation/scroll regressions and all 123 Electron
+    tests pass. Both TypeScript checks and host/Electron builds pass. Focus tests
+    cover delayed iframe activeElement observation and disposal; native tests
+    cover hidden/replaced/detached rejection and repeated window raising.
+  - [ ] Live acceptance after matching host assets and rebuilt Electron launch:
+    detach/activate repeatedly, focus fallback, close/hide fallback, reattach.
+    Builds are not publication or activation; no shared framework restart done.
+- [ ] U2 / original note 3 — Project restoration must hydrate WBA with opened
+  files' draft models, like ordinary file opening. Earlier description claiming
+  draft models should not enter the opened-model list was incorrect; the gap is
+  project-switch draft hydration, not draft exclusion.
+- [ ] U3 / original note 2 — Add VS Code-style small red between-line gutter
+  indicators for deleted draft lines; inspect upstream behavior before editing.
+- [x] Original note 4 — Qualified Sidebar/client identities implemented and user
+  accepted; preserve the existing source and routing contract.
+- [ ] U4 / original note 5 — Mentions from the inline problem widget, reusing
+  existing mention ownership and exact-client routing.
+- [x] Original note 6 — User confirms ALS file links after project switches are
+  fixed by the completed routing work; do not reopen as missing acceptance.
+- [ ] U5 / original note 7 — Terminal Sidebar opening uses ALS-style immediate
+  state-based window launch with no transition animation.
 
 ### Still-open pre-release gates
 
-Retain R4/R5 and bounded acceptance below as the canonical remaining checklist.
+Finish the clarified user-note queue above, then R4/R5 and bounded acceptance below.
 No old test failure, dependency/pin issue, missing selected artifact or final
 wheel/APK validation is closed merely by moving documentation. No duplicate
 mandatory full-device matrix is added for the latest smoke acceptance.
@@ -442,9 +471,14 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   by regression tests; no live snapshot was deleted to exercise that case.
   User performed the runtime transition; no native/mypyc build or publication
   was needed for this bootstrap change.
-- [ ] R4: fix terminal profiles Array.isArray narrowing with malformed fixtures.
-- [ ] R4: triage stale retired-Python mount and suppressed-preview MRU assertions;
-  record known pre-existing failures accurately, without restoring old architecture.
+- [ ] R4 grouped correctness/test-maintenance slice (user direction 2026-10-17):
+  - [ ] Fix terminal profiles Array.isArray narrowing with valid/missing/malformed
+    fixtures alongside the other cleanup, not as a standalone slice. Defensive
+    extension-manifest bookkeeping only; no VS Code terminal feature work.
+  - [ ] Triage stale retired-Python mount and suppressed-preview MRU assertions;
+    record known pre-existing failures accurately, without restoring old architecture.
+  Combined implementation scope remains subject to investigation/approval;
+  grouping alone does not mark any of these fixes implemented.
 - [ ] R5: verify cleaned ALS native wheel publication and choose compatible TE2
   pin/locks; preserve already-published FWS 0.2.65 rather than release it twice.
 - [ ] R5: fresh target dependency closure, exclusive optional uvloop distributions,
