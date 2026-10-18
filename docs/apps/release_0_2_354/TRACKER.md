@@ -488,6 +488,23 @@ plans are retained as references; they do not replace this current checklist.
 - [ ] U5 / original note 7 — Terminal Sidebar opening uses ALS-style immediate
   state-based window launch with no transition animation.
 
+### Terminal touch sensitivity — 2026-10-18
+
+- [x] User selected sensitivity-first after read-only current-helper/library audit.
+  Both app-owned identical helper copies change only touch gain 0.4→1.0. Drawer
+  and File Explorer use Code TE2's helper; standalone uses its own matching copy.
+  Existing xterm wheel/line conversion and mouse-reporting ownership, native wheel,
+  selection and one-row selection edge-scroll remain unchanged. No inertia engine
+  is added; library/physics integration is deferred, not silently hand-rolled.
+- [x] All 18 touch/selection tests pass, including identical-copy checks, signed
+  drag gain, unchanged pixel units/native line-wheel events, no release inertia,
+  long-press selection, handles, one-row edge scrolling and disposal. Diff check
+  passes. Helpers are served directly; no bundle regeneration is required.
+- [x] User live accepts the approximately 1:1 touch scrubbing feel (2026-10-18).
+  Quick-flick inertia/physics remains deferred; user approves checkpoint/push
+  and moving on to U5 immediate Terminal Sidebar launch.
+  Asset publication/reload is separate; no worker restart/mypyc rebuild needed.
+
 ### Still-open pre-release gates
 
 Finish the non-deferred clarified user-note queue above, then R4/R5 and bounded

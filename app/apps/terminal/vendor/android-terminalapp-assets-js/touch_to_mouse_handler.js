@@ -18,7 +18,8 @@
 // TODO(b/375326606): consider contribution on
 // upstream(https://github.com/xtermjs/xterm.js/issues/3727)
 const LONG_PRESS_MS = 450;
-const WHEEL_DRAG_SCALE = 0.4;
+// Touch distance gain only; xterm retains wheel/line-step and TUI ownership.
+const WHEEL_DRAG_SCALE = 1.0;
 const DOUBLE_TAP_MS = 280;
 const DOUBLE_TAP_PX = 24;
 const EDGE_SCROLL_PX = 32;

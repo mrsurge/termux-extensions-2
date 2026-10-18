@@ -24,6 +24,17 @@ Lifecycle transitions cancel pending holds. Code TE2 drawer Sel is a sticky
 Shift modifier forwarded to the terminal app (including navigation keys), not
 a local-buffer selection interception; the application owns selection behavior.
 
+Mobile drag scrolling uses the byte-identical app-owned
+`vendor/android-terminalapp-assets-js/touch_to_mouse_handler.js` copies in
+Code TE2 and Terminal. File Explorer loads the Code TE2 static helper as a UI
+dependency, not its backend/shell machinery. Touch distance gain is 1.0 (formerly
+0.4): 2.5 times the prior pixel wheel input for the same drag. Xterm retains
+wheel-to-line conversion and TUI mouse reporting; native wheel input, selection
+edge-scroll's one-row step and terminal scroll options are unchanged. This is
+sensitivity only, not inertia or a fixed one-line-per-touch-event guarantee.
+No physics dependency is introduced. New bytes require native client asset
+publication/reload; worker/mypyc changes are unnecessary.
+
 Each `TerminalScreenProjectionRegistry` requires a `log_opener` that returns a
 context-managed `LogReader`. That application-owned boundary supplies file identity,
 captured size and bounded byte reads. Readers are closed before return; failures

@@ -429,7 +429,7 @@ test('one-finger movement remains wheel-backed terminal scrolling', () => {
   screen.dispatchEvent(touchEvent(harness.window, 'touchmove', screen, { x: 140, y: 120 }));
   screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 120 }));
 
-  assert.deepEqual(wheelDeltas, [-12]);
+  assert.deepEqual(wheelDeltas, [-30]);
   harness.disposable.dispose();
 });
 
@@ -446,7 +446,27 @@ test('text and blank terminal targets use the same xterm-owned scroll path', () 
     target.dispatchEvent(touchEvent(harness.window, 'touchend', target, { x: 140, y: 120 }));
   }
 
-  assert.deepEqual(wheelDeltas, [-12, -12]);
+  assert.deepEqual(wheelDeltas, [-30, -30]);
+  harness.disposable.dispose();
+});
+
+test('touch gain tracks signed drag distance without changing wheel units or adding inertia', () => {
+  const harness = createHarness();
+  const viewport = harness.root.querySelector('.xterm-viewport');
+  const screen = harness.root.querySelector('.xterm-screen');
+  const events = [];
+  viewport.addEventListener('wheel', event => events.push({ delta: event.deltaY, mode: event.deltaMode }));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
+  for (const y of [110, 115, 95]) {
+    screen.dispatchEvent(touchEvent(harness.window, 'touchmove', screen, { x: 140, y }));
+  }
+  screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 95 }));
+  harness.flushAnimationFrames();
+  assert.deepEqual(events, [{ delta: -20, mode: 0 }, { delta: -5, mode: 0 }, { delta: 20, mode: 0 }]);
+  // Native desktop wheel input is not multiplied by the touch adapter.
+  viewport.dispatchEvent(new harness.window.WheelEvent('wheel', { deltaY: 1, deltaMode: 1, bubbles: true }));
+  assert.deepEqual(events.at(-1), { delta: 1, mode: 1 });
+  assert.deepEqual(harness.scrollCalls, []);
   harness.disposable.dispose();
 });
 

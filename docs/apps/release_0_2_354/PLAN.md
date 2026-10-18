@@ -123,6 +123,27 @@ switches (original note 6) are user accepted, not pending work. Each unresolved
 item still needs source-backed concrete implementation approval; this ordering
 does not authorize shared-runtime restarts, Android changes or release actions.
 
+### Terminal touch scrolling — sensitivity-first approval, 2026-10-18
+
+User approved read-only comparison of touch-scroll-physics, Lenis,
+smooth-scrollbar and use-gesture, then selected the minimal sensitivity-first
+implementation rather than vendoring physics now. Raise identical Terminal and
+Code TE2 helper gain from 0.4 to 1.0; File Explorer already consumes the latter.
+Keep xterm-owned pixel-wheel conversion, line-step settings, TUI routing, native
+mouse wheel behavior and selection gestures intact. Add direction/unit/native
+wheel/no-inertia regressions. Client asset publication/live acceptance remain
+separate; no worker/backend/native build is required.
+
+Inertia is deferred, not implemented by this gain change. Survey sources:
+[touch-scroll-physics](https://github.com/Experience-Monks/touch-scroll-physics)
+is a small MIT renderer-independent candidate, but its update ignores dt and
+applies decay per call; refresh-rate correction and lifecycle cancellation need
+separate scope. [Lenis](https://github.com/darkroomengineering/lenis) and
+[smooth-scrollbar](https://github.com/dolphin-wood/smooth-scrollbar) own DOM scroll
+machinery rather than xterm's application mouse/scroll flow.
+[use-gesture](https://github.com/pmndrs/use-gesture) supplies gesture tracking,
+not the complete inertia scroller. U5 sidebar launch remains a separate next item.
+
 ### Approved follow-up: mobile shortcuts after file switches
 
 Monaco setModel detaches/disposes its view and creates a new textarea while the
