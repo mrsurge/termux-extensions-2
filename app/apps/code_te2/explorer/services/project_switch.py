@@ -104,9 +104,12 @@ async def switch_project_connection(
             await _mark_adapter_workspace_switching(new_root)
             adapter_status = "switching"
             adapter_rpc = _get_adapter_rpc()
+            from ...workbench_document_initialization import build_initial_documents
+            initial_documents = await asyncio.to_thread(build_initial_documents, str(new_root))
+            _require_current_switch(new_root, project_generation)
             switch_response = await adapter_rpc(
                 "adapter.reconnect",
-                {"workspaceFolder": str(new_root)},
+                {"workspaceFolder": str(new_root), "initialDocuments": initial_documents},
                 75,
             )
             _require_switch_ack(switch_response, method="adapter.reconnect")

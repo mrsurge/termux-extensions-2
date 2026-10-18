@@ -777,6 +777,8 @@ export class WorkbenchClient {
   _mgmtIpc: MgmtIpcLike | null;
   _fsWatcherSub: WatchSubscriptionLike;
   _connecting: boolean;
+  private _documentInitialization: Promise<Record<string, unknown>> | undefined;
+  private _documentInitializationEpoch = 0;
   _openFilePending: number;
   _openingPaths: Map<string, number>;
   _extRequests: PendingExtRequestOwner;
@@ -2345,6 +2347,7 @@ export class WorkbenchClient {
     uri: unknown,
     options: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
+    await this._documentInitialization;
     return openLocalDocument(this._documentContentRuntime(), uri, options);
   }
 
@@ -2403,12 +2406,22 @@ export class WorkbenchClient {
     });
   }
 
-  async connect(
+  connect(params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    if (this._connecting) return Promise.reject(new Error("already connecting"));
+    const pending = this._connectPreparedDocuments(params);
+    this._documentInitialization = pending;
+    void pending.catch(() => {});
+    return pending;
+  }
+
+  private async _connectPreparedDocuments(
     params: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
     if (this._connecting) throw new Error("already connecting");
+    if (!isRecord(params.initialDocuments)) throw new Error("initial_documents_required");
     this._resetSessionCaches("connect");
     this._connecting = true;
+    const initializationEpoch = ++this._documentInitializationEpoch;
     try {
       const management = await spanTraceAsync("connect.management.total", () => connectManagementSession(
         this._managementRuntime(),
@@ -2418,6 +2431,11 @@ export class WorkbenchClient {
         this._extensionHostRuntime(),
         management,
       ));
+      if (initializationEpoch !== this._documentInitializationEpoch) throw new Error("document_initialization_superseded");
+      if (!isRecord(params.initialDocuments)) throw new Error("initial_documents_required");
+      this._documentRegistry.initializeDocuments(params.initialDocuments);
+      this._activateInitializedDocuments();
+      // Documents are present before primary-view activation or connect ACK.
       // Sidebar providers are independent of editor readiness. WebviewRuntime
       // fences their asynchronous continuation on session/workspace teardown.
       void spanTraceAsync("connect.primaryViews.activate", () => this._webviews.activatePrimaryViews())
@@ -2425,7 +2443,7 @@ export class WorkbenchClient {
       this._startupMark("connect.ready");
       return result;
     } finally {
-      this._connecting = false;
+      if (initializationEpoch === this._documentInitializationEpoch) this._connecting = false;
     }
   }
 
@@ -2542,6 +2560,7 @@ export class WorkbenchClient {
   }
 
   async openFile(params: unknown = {}): Promise<Record<string, unknown>> {
+    await this._documentInitialization;
     this._startupMark("document.firstOpen.begin");
     const requestedPath = isRecord(params) ? String(params.path ?? "") : "";
     const previousVersion = requestedPath
@@ -2585,6 +2604,19 @@ export class WorkbenchClient {
       this._openFilePending = Math.max(0, this._openFilePending - 1);
       this._trackOpeningPath(requestedPath, -1);
       this._completionWarmup.notify();
+    }
+  }
+
+  async initializeDocuments(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    await this._documentInitialization;
+    const result = this._documentRegistry.initializeDocuments(params);
+    this._activateInitializedDocuments();
+    return result;
+  }
+
+  private _activateInitializedDocuments(): void {
+    for (const language of new Set(this._documentRegistry.values().map(entry => entry.languageId))) {
+      void this.activateLanguage(language).catch(error => console.warn("[document_initialization] activation failed", language, error));
     }
   }
 
@@ -3051,6 +3083,8 @@ export class WorkbenchClient {
   }
 
   disconnect(): void {
+    this._documentInitializationEpoch += 1;
+    this._documentInitialization = undefined;
     disconnectSession(this._transportRuntime());
     this._resetSessionCaches("disconnect");
   }

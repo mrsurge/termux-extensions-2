@@ -297,8 +297,6 @@ export function registerEditorSocketConnectionHandlers(
           try {
             const requestId = file && file.request_id ? String(file.request_id) : ('diag_' + Date.now() + '_ssot');
             const nextActiveModel = deps.getModel();
-            const text = nextActiveModel && nextActiveModel.getValue ? nextActiveModel.getValue() : '';
-            deps.wbQueueDidChange(activePath, text, nextActiveModel && nextActiveModel.getLanguageId ? nextActiveModel.getLanguageId() : lang, ssotGeneration);
             deps.wbQueueSymbols(activePath, ssotGeneration);
             languageOpenPromise = deps.wbOpenFileFlow({
               path: activePath,

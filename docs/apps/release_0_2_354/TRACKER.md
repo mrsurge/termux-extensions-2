@@ -269,15 +269,16 @@ plans are retained as references; they do not replace this current checklist.
   - [ ] Live acceptance after matching host assets and rebuilt Electron launch:
     detach/activate repeatedly, focus fallback, close/hide fallback, reattach.
     Builds are not publication or activation; no shared framework restart done.
-- [ ] U2 / original note 3 — **Deferred unresolved; not a release blocker**
+- [x] U2 / original note 3 — **Draft-first initialization correction; live accepted**
   (user direction 2026-10-17). Project restoration must hydrate WBA with opened
   files' draft models, like ordinary file opening. Earlier description claiming
   draft models should not enter the opened-model list was incorrect; the reported
   concern was project-switch draft hydration, not draft exclusion.
   Original symptom: a draft contained a diagnostic-suppression change, leaving
   disk content untouched, but an error unexpectedly remained after restoration.
-  User now cannot reproduce it and observes draft-aware intelligence working;
-  possibly a one-off, not a proven cause or an implemented behavioral fix.
+  Earlier user retesting could not reproduce it, so it was deferred at that
+  time. Subsequent reproduction below supersedes that deferral and the earlier
+  conclusion that the existing startup implementation satisfied the requirement.
   - [x] Read-only trace finds existing logical_document_reconciler already builds
     draft-first descriptors/materializes full draft content. WorkbenchClient
     supplies foreground-protection paths to the registry; no missing DTO field
@@ -290,8 +291,8 @@ plans are retained as references; they do not replace this current checklist.
     document DTO text and foreground overwrite rejection. Python transport is
     stubbed and WBA registry is exercised separately: this is not full live
     project-service/frontend transport reproduction.
-  - [ ] Revisit only if the live restoration discrepancy recurs, before behavioral
-    edits. Current worker log has client_foreground_document_protected hydration
+  - [x] Revisited after live restoration discrepancy recurred. Earlier worker log
+    had client_foreground_document_protected hydration
     warnings; registry tests confirm this guard intentionally rejects background
     writes to foreground-owned documents. Warnings alone do not prove draft loss.
     No runtime code, mypyc, assets, active projects or user drafts changed in this
@@ -327,6 +328,43 @@ plans are retained as references; they do not replace this current checklist.
     restoration issue remains deferred above. The captured occurrence's precise
     replay sequence remains unproven. No runtime restart, mypyc rebuild, user
     draft mutation or client publication performed by agent.
+  - [x] Fresh capture: both main_page:Xvpr (Electron) and main_page:qQOs
+    (Cefrium) contain the persisted codec.py suppression but show the ty error.
+    WBA startup log at 1792286446975 opens the disk-backed document at version 1;
+    client didChange at 1792286450061 replaces it with 6182-character draft text
+    at version 2. Later same-file reopen at 1792287362287 replaces v2 with v3
+    from disk; ty republishes the unresolved import immediately afterward.
+    Source lifecycle.ts confirms unconditional disk reads for same-file reopens.
+    This is evidence of content-lifecycle failure, not just stale diagnostics.
+  - [x] User separately approved backend-owned draft-first initialization,
+    attach-only reopens, lifecycle/invalidation regression coverage and builds.
+    No runtime transition, OTA or mypyc activation is included in this approval.
+  - [x] Implemented initial document bodies in adapter.connect/reconnect over
+    the existing local pipe, using existing sidecar materialization and content
+    hashes. All initial bodies validate before registry mutation. Normal backend
+    opens prepare missing documents before editor notification. Missing-path
+    reconciliation initializes rather than attempting protected replacement.
+    Foreground attach and extension document-open wait for initialization;
+    attach has no disk fallback. Removed initial/reconnect synthetic didChange
+    correction sends, while retaining actual edits and conditional mirrors.
+  - [x] Existing live buffers are not replaced by late initialization. Backend
+    invalidation may update a backend-initialized unchanged version, or reconcile
+    identical current text; newer unpublished client edits retain protection.
+    Project/revision/hash checks, reset cancellation and per-client facade
+    ownership remain. Backend initialization/logical hydration is pipe-only.
+  - [x] 62 focused JS tests; 40 Python tests plus three subtests; changed Python
+    ty; frontend typecheck and host/WBA build pass. Coverage includes real
+    WorkbenchClient connect/open wrappers with only external connection setup
+    stubbed, actual persisted draft→connect request→ready ordering, dispatcher
+    forwarding, multi-client reopens, no disk read, reset/failure, Unicode,
+    hash rejection, backend/live edit invalidation and actual isolated server
+    HTTP rejection of private document initialization/hydration. Adapter-wide compiler
+    baseline/current both report 107 existing diagnostics, zero new diagnostics.
+  - [x] User tested the resulting fix, reports it working well and approves a
+    local commit. This records user live acceptance without claiming each
+    individual suggested scenario was separately exercised. No agent runtime
+    restart, client reload, user draft edit, publication or mypyc activation
+    performed in this slice.
 - [ ] U3 / original note 2 — Add VS Code-style small red between-line gutter
   indicators for deleted draft lines; inspect upstream behavior before editing.
   - [x] User approved frontend-only marker; inspected local code-server/VS Code

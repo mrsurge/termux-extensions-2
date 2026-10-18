@@ -332,7 +332,7 @@ class LogicalDocumentReconcilerTests(unittest.IsolatedAsyncioTestCase):
             [method for method, _params in calls],
             [
                 "vscode.logicalDocuments.reconcile",
-                "vscode.logicalDocuments.hydrate",
+                "vscode.documents.initialize",
             ],
         )
         self.assertEqual(materialized, [requested])
@@ -566,8 +566,9 @@ class LogicalDocumentReconcilerTests(unittest.IsolatedAsyncioTestCase):
                         {**item, "languageId": "rust", "reason": "missing", "expectedActiveEpoch": 0}
                         for item in descriptors
                     ]}}
-                self.assertEqual(method, "vscode.logicalDocuments.hydrate")
-                hydration.append(dict(params))
+                self.assertEqual(method, "vscode.documents.initialize")
+                documents = cast(list[JsonObject], params["documents"])
+                hydration.extend({**params, **document} for document in documents)
                 return {"result": {"ok": True}}
 
             with (

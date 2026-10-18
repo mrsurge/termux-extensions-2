@@ -3975,6 +3975,44 @@ Host file-open intent does not preflight a boot snapshot. The frontend may use i
 - The direct WBA Socket.IO boundary authenticates and injects `clientInstanceId` plus metadata-only `windowId`. The worker editor and UI IPC lanes additionally carry the authenticated client role; WBA does not infer that role from a window. Request normalization must preserve the WBA identity through `vscode.openFile` into `WorkbenchClient.openFile`; otherwise the client facade cannot acknowledge the active document, leaving hover and semantic-token requests blocked even though shared extension-host diagnostic pushes can still arrive.
 - Draft-aware materialization is centralized in `monaco_editor/editor_backend_services/document_materialization_service.py`.
 
+### Draft-first WBA initialization
+
+`workbench_document_initialization.py` captures the bounded opened set using
+the existing sidecar snapshot/materializer. The existing local pipe
+`adapter.connect` / `adapter.reconnect` request carries `initialDocuments`:
+project path/generation, open-state revision and exact text, content SHA,
+content identity, base SHA and dirty state for each document. WBA validates the
+complete handoff and publishes those bodies as the first `addedDocuments` DTOs
+after the extension-host handshake, before connect completion. It does not
+open disk first and rely on a remote client to correct the text later.
+
+Ordinary backend file opens send `vscode.documents.initialize` over that same
+pipe using the already materialized editor payload before client notification.
+If intelligence is unavailable, the visible editor may still open; its WBA
+attach waits for initialization (bounded, reset-cancellable) and fails explicitly
+rather than substituting disk. Missing paths discovered by the existing
+metadata reconciliation use this initialization method as well. Initialization
+and logical hydration methods are not admitted from HTTP/browser RPC.
+
+Initialization is create-only: retained entries survive late/repeated payloads.
+Foreground `vscode.openFile` is a presentation attach, including force-refresh,
+new-generation and multi-client reopens. It cannot read disk or replace shared
+document text. Extension-host `$tryOpenDocument` also waits for the connect
+initialization barrier before checking the registry. Extension-requested files
+outside the already opened set retain their existing document-content behavior.
+Client initial-open, SSOT replay and reconnect no longer synthesize `didChange`
+to repair a disk-backed WBA model. Actual edits and guarded mirrors retain their
+existing direct intelligence path.
+
+Each registry entry records the version last established/acknowledged by the
+backend. Revision-scoped reconciliation may update an unchanged backend version
+even if presentations are attached; it may also acknowledge identical current
+text after draft persistence. A newer differing client edit remains protected.
+Thus draft updates, save/discard and disk invalidation do not rely on reopening
+the editor, and a stale backend snapshot cannot erase unpublished text.
+Project/generation/revision/hash admission and reset invalidation remain required.
+Matching Python domain, WBA outputs and client assets are one activation slice.
+
 ### Metadata-first reconcile
 
 `logical_document_reconciler.py` builds a metadata-only snapshot:
@@ -3998,8 +4036,10 @@ Hydration carries exact content, language, content/base identities, dirty state,
 
 Before WBA reconciles that Python snapshot, `WorkbenchClient` injects the exact
 union of every retained client facade path and every in-flight open. Those paths
-are protected from hydration replacement and release even though Python's
-metadata snapshot intentionally has no global active path.
+are protected from release and from overwriting newer client-owned text even
+though Python's metadata snapshot intentionally has no global active path.
+Presentation ownership alone does not prohibit initialization of a missing
+document or revision-guarded updates to an unchanged backend-owned version.
 
 ### Document and editor lifetime
 

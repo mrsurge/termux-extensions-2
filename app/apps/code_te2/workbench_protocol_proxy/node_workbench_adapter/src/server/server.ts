@@ -583,6 +583,7 @@ if (HEAP_SNAPSHOT_ENABLE) {
 async function handleJsonRpc(
   reqObj: unknown,
   context?: EditorWbaRequestContext,
+  internalPipe = false,
 ): Promise<JsonRpcReply> {
   // We accept either JSON-RPC 2.0, or a simple {cmd,args} convenience envelope.
   const envelope = asJsonRpcEnvelope(reqObj);
@@ -613,6 +614,10 @@ async function handleJsonRpc(
   }
 
   // HTTP /cmd and browser Socket.IO share this dispatcher. Eval is pipe-only.
+  if (!internalPipe && (method === "vscode.documents.initialize" || method.startsWith("vscode.logicalDocuments.") ||
+      (isRecord(params) && Object.hasOwn(params, "initialDocuments")))) {
+    return { ...buildJsonRpcErrorReply(id, -32601, "documentInitialization.pipeOnly") };
+  }
   if (method.startsWith("runtime.debug.")) {
     return { ...buildJsonRpcErrorReply(id, -32601, "runtimeDebug.pipeOnly") };
   }
@@ -825,7 +830,7 @@ async function dispatchStdio(msg: unknown): Promise<void> {
     const method = envelope.method;
     const reply = typeof method === "string" && method.startsWith("runtime.debug.")
       ? { jsonrpc: "2.0", id: envelope.id, result: await runtimeDebug.dispatch(method, isRecord(envelope.params) ? envelope.params : {}, wb, state) }
-      : await handleJsonRpc(msg);
+      : await handleJsonRpc(msg, undefined, true);
     if (reply && reply.id != null) pipeOutput.write(encodeRpcReply(reply));
   } catch (error) {
     const message = asJsonRpcEnvelope(msg);

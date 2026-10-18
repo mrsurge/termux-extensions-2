@@ -182,14 +182,21 @@ async def _adopt_live_adapter_session(project_root: str) -> bool:
         ext_connected = bool(session.get("extConnected"))
         live_project = _normalized_project_path(session.get("workspaceFolder"))
         if connected and ext_connected and live_project == expected_project:
+            from .workbench_document_initialization import build_initial_documents
+            initial_documents = await asyncio.to_thread(build_initial_documents, expected_project)
+            _ = _rpc_result(await adapter_rpc(
+                "vscode.documents.initialize", initial_documents, timeout=10.0,
+            ), method="vscode.documents.initialize")
             await _publish_ready_if_changed(expected_project)
             return True
 
         if connected and ext_connected:
+            from .workbench_document_initialization import build_initial_documents
+            initial_documents = await asyncio.to_thread(build_initial_documents, expected_project)
             reconnect_result = _rpc_result(
                 await adapter_rpc(
                     "adapter.reconnect",
-                    {"workspaceFolder": expected_project},
+                    {"workspaceFolder": expected_project, "initialDocuments": initial_documents},
                     timeout=75.0,
                 ),
                 method="adapter.reconnect",
@@ -854,6 +861,8 @@ async def _connect_prepared_adapter(
         }
         if code_server_socket_path:
             params["codeServerSocketPath"] = code_server_socket_path
+        from .workbench_document_initialization import build_initial_documents
+        params["initialDocuments"] = await asyncio.to_thread(build_initial_documents, project_root)
         with trace.span("workbench.connect"):
             response = await adapter_rpc("adapter.connect", params, timeout=75.0)
         _ = _rpc_result(response, method="adapter.connect")

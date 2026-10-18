@@ -1062,10 +1062,6 @@ export function createEditorWorkbenchRuntime(
       generation = bumpGeneration(currentPath, reason || 'active_model_open');
     }
     const languageId = (model.getLanguageId ? model.getLanguageId() : '') || '';
-    try {
-      const content = model.getValue ? model.getValue() : '';
-      queueDidChange(currentPath, content, languageId, generation);
-    } catch (_) {}
     queueSymbols(currentPath, generation);
     return wbQueueOpenFile(wbFlow, {
       path: currentPath,

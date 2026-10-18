@@ -148,6 +148,13 @@ for (const enabled of [false, true]) test(`real adapter pipe eval and HTTP rejec
   const deadline = setTimeout(() => child.kill(), 12000);
   try {
     const status = await rpc('runtime.debug.status');
+    for (const method of ['vscode.documents.initialize', 'vscode.logicalDocuments.hydrate', 'adapter.connect']) {
+      const response = await fetch(`http://127.0.0.1:${port}/cmd`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 78, method, params: { initialDocuments: {} } }),
+      });
+      assert.match((await response.json()).error.message, /documentInitialization.pipeOnly/);
+    }
     if (!enabled) { assert.match(status.error.message, /disabled/); return; }
     const identity = status.result.instanceId;
     assert.ok(identity);

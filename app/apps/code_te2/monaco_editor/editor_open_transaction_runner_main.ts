@@ -300,14 +300,8 @@ export async function runEditorOpenTransaction(
     if (!sameFileNavigationOnly) {
       try {
         const openReqId = (payload && payload.request_id) ? String(payload.request_id) : (`diag_${Date.now()}_open`);
-        let openText = '';
-        try { openText = model && model.getValue ? model.getValue() : ''; } catch (_) {}
-        deps.queueDidChange(
-          currentPath,
-          openText,
-          model && model.getLanguageId ? model.getLanguageId() : lang,
-          openGeneration,
-        );
+        // The backend initializes the shared document before this presentation
+        // attaches. Opening is not a synthetic edit/correction round trip.
         deps.queueSymbols(currentPath, openGeneration);
         languageOpenPromise = deps.openFileFlow({
           path: currentPath,

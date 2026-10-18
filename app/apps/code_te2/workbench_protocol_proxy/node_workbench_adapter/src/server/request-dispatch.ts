@@ -48,6 +48,7 @@ export interface WorkbenchStatus {
 }
 
 export interface WorkbenchLike {
+  initializeDocuments: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   codeActions: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   state?: WorkbenchStatus & Record<string, unknown>;
   resync: () => unknown;
@@ -430,6 +431,7 @@ export async function dispatchJsonRpcRequest(
       serverRootPath: params.serverRootPath,
       commit: params.commit,
       proxyUri: params.proxyUri,
+      initialDocuments: params.initialDocuments,
     });
     runtime.buildStatusResult();
     runtime.logStatus("adapter_connected");
@@ -506,6 +508,7 @@ export async function dispatchJsonRpcRequest(
           params.codeServerSocketPath ??
           runtime.state.config.codeServerSocketPath,
         token: params.token ?? "00000000000000000000",
+        initialDocuments: params.initialDocuments,
       });
       mergeWorkbenchState(runtime);
       runtime.logStatus("adapter_reconnected");
@@ -667,6 +670,10 @@ export async function dispatchJsonRpcRequest(
     } catch (error) {
       return failure(id, -32000, error);
     }
+  }
+
+  if (method === "vscode.documents.initialize") {
+    return success(id, await runtime.wb.initializeDocuments(params));
   }
 
   if (method === "vscode.logicalDocuments.reconcile") {

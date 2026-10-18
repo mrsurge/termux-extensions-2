@@ -42,14 +42,21 @@ original user notes verbatim in the tracker.
    focus and shared membership. Investigate existing selection/focus owners first.
 2. Project-switch draft hydration: opened files must send their full draft content
    to WBA on project restoration just as ordinary file opens do. Draft content is
-   intended, not an erroneous entry in the open-model list. Deferred unresolved
-   by user on 2026-10-17, not a release blocker: current tests and user retesting
-   restore drafts correctly; the original diagnostic discrepancy is no longer
-   reproducible and may have been a one-off. Retain regression coverage; do not
-   claim a fix or alter hydration/foreground guards without fresh evidence.
-   A subsequent live reproduction exposed a separate diagnostic-projection
-   mismatch. The approved owner-clear protocol correction is recorded under U2
-   in TRACKER.md; this does not establish a project-switch hydration defect.
+   intended, not an erroneous entry in the open-model list. **Reopened after
+   fresh live evidence**: startup foreground open read disk, a later client edit
+   corrected it, and a subsequent same-file reopen read disk again. Earlier
+   materializer/registry-only tests did not cover that production lifecycle and
+   were insufficient to establish the requested behavior. The separately fixed
+   diagnostic owner-clear operation did not resolve this content race.
+   Approved correction: backend draft-first initialization travels in the
+   existing local adapter connect/reconnect request; foreground opens attach to
+   prepared documents without disk reads or synthetic client corrections.
+   Ordinary backend opens prepare missing documents before client notification;
+   reconciliation handles later backend content identities with protection for
+   unpublished client edits. Preserve generation/hash/revision/reset guards,
+   explicit invalidation and the independent visible-editor readiness boundary.
+   Matching Python domain, WBA and client assets must be activated together;
+   live acceptance remains required. Detailed evidence/gates are under U2.
 3. Deleted-draft gutter indicator: inspect the VS Code implementation and follow
    its small red between-line deletion marker pattern in the draft gutter.
 4. Mentions from the inline problem widget: reuse the existing mention owner and
