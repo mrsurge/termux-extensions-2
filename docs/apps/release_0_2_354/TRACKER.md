@@ -788,11 +788,14 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   2026-10-18 PyPI inspection confirms TE2 0.2.353 Android cp314/Linux wheels,
   FWS 0.2.65 Android ABI3/Linux ABI3+free-threaded wheels and uvloop-te2
   0.23.0.post1 Android cp314. Public ALS remains 0.2.132; source preparation is
-  0.2.139.dev1. User requires latest compatible ALS/FWS, not exact runtime pins:
-  requirements now use ALS>=0.2.139 and FWS>=0.2.65 (including ALS's FWS edge).
-  Regression tests reject exact/upper constraints and admit newer releases.
-  Fresh TE2 resolution still awaits public ALS>=0.2.139; do not lower the floor
-  or retain an old pin merely to make an unpublished release resolve.
+  0.2.139.dev1. User corrected source-install policy: TE2 now declares bare
+  agent-log-server/framework-shells, with no lower/upper/exact version bound.
+  The unpublished ALS stable minimum incorrectly rejected installed dev/source
+  distributions. Regression covers stable, dev and local-version metadata.
+  Cleaned public wheel closure remains a release gate, not a source-install
+  restriction. ALS checkout and installed environments were not changed.
+- [x] User-approved correction/checkpoint/push removes TE2's ALS/FWS minimums;
+  no release/version bump, native build or device mutation is part of this fix.
 - [x] R5 installer source: normal Termux launch uses binary-only PyPI staging
   instead of a GitHub wheelhouse archive. Missing wheels fail before activation;
   offline payloads and managed rollback/uninstall remain. New prerequisites omit

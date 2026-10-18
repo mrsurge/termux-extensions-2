@@ -330,11 +330,13 @@ refresh persistence without duplicating registrations.
 
 ### 5. Packaging and final release verification
 
-Do not infer clean dependency closure from source imports. User policy is latest
-compatible ALS/FWS releases, with minimums only: TE2 requires FWS>=0.2.65 and
-ALS>=0.2.139; ALS requires FWS>=0.2.65. Do not reintroduce exact runtime pins or
-upper caps. Release-validation locks may record exact tested versions, but do
-not impose those on normal installs. ALS source is 0.2.139.dev1, not published
+Do not infer clean dependency closure from source imports. TE2 declares bare
+framework-shells and agent-log-server requirements: no minimum, exact pin or
+upper cap. User requires existing source/development installs to satisfy these
+edges without waiting for an unpublished stable version. Fresh installs use pip's
+normal compatible release selection; this does not force upgrades of already
+satisfied installs. Release-validation locks may record exact tested versions,
+but do not impose those on normal installs. ALS source is 0.2.139.dev1, not published
 release evidence. Verify/build cleaned ALS native wheels, regenerate target
 validation locks, and validate optional uvloop target selection and
 private-runtime ABI. FWS 0.2.65 is already published: do not repeat its release

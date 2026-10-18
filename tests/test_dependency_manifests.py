@@ -10,8 +10,8 @@ from packaging.requirements import Requirement
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FRAMEWORK_SHELLS_REQUIREMENT = "framework-shells>=0.2.65"
-AGENT_LOG_SERVER_REQUIREMENT = "agent-log-server>=0.2.139"
+FRAMEWORK_SHELLS_REQUIREMENT = "framework-shells"
+AGENT_LOG_SERVER_REQUIREMENT = "agent-log-server"
 NODEJS_WHEEL_REQUIREMENT = (
     'nodejs-wheel==24.16.0; sys_platform == "linux" '
     'and platform_machine == "x86_64"'
@@ -49,7 +49,7 @@ class DependencyManifestTests(unittest.TestCase):
         self.assertIn("../mcp_probe/fixtures/python_tools.json", manifest["fingerprint"]["sharedInputs"])
         self.assertFalse(any("console_reference" in path for paths in metadata["tool"]["setuptools"]["data-files"].values() for path in paths))
 
-    def test_python_runtime_accepts_latest_first_party_wheels_above_minimums(self) -> None:
+    def test_python_runtime_leaves_first_party_source_and_release_versions_unconstrained(self) -> None:
         requirements = _manifest_entries("requirements.txt")
 
         self.assertIn("uvicorn", requirements)
@@ -60,15 +60,13 @@ class DependencyManifestTests(unittest.TestCase):
         self.assertNotIn("fastapi", requirements)
         self.assertIn(FRAMEWORK_SHELLS_REQUIREMENT, requirements)
         self.assertIn(AGENT_LOG_SERVER_REQUIREMENT, requirements)
-        for name, minimum, older in [("framework-shells", "0.2.65", "0.2.64"),
-                                     ("agent-log-server", "0.2.139", "0.2.138")]:
+        for name in ("framework-shells", "agent-log-server"):
             matches = [Requirement(line) for line in requirements if Requirement(line).name == name]
             self.assertEqual(len(matches), 1)
             specifier = matches[0].specifier
-            self.assertEqual({part.operator for part in specifier}, {">="})
-            self.assertIn(minimum, specifier)
-            self.assertIn("9.0.0", specifier)
-            self.assertNotIn(older, specifier)
+            self.assertEqual(str(specifier), "")
+            for version in ("0.2.132", "0.2.139.dev1", "0.2.139.dev1+git.abc123", "9.0.0"):
+                self.assertTrue(specifier.contains(version, prereleases=True))
         self.assertIn(NODEJS_WHEEL_REQUIREMENT, requirements)
 
     def test_als_shellspec_executes_the_wheel_entrypoint_without_login_shell(self) -> None:
