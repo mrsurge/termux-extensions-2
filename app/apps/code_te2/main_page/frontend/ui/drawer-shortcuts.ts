@@ -129,6 +129,7 @@ export function initDrawerAndShortcuts(deps: any) {
   if (miFontLarge) miFontLarge.addEventListener('click', () => deps.setFontScale('large'));
 
   document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
     const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
 

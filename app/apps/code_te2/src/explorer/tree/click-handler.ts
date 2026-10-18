@@ -16,7 +16,7 @@ interface ExplorerTreeClickHandlerDeps {
   setEntrySelected(rel: string, selected: boolean): void;
   handleSearchDirectoryClick(rel: string): Promise<boolean>;
   openCardMenuForEntry(entry: ExplorerTreeMenuEntry, anchorEl: HTMLElement): void;
-  openFile(rel: string): Promise<void>;
+  openFile(rel: string, keyboard?: boolean): Promise<void>;
 }
 
 function getNodeName(node: HTMLLIElement): string {
@@ -203,7 +203,7 @@ export function createExplorerTreeClickHandler(
         }
         return;
       }
-      await deps.openFile(rel);
+      await deps.openFile(rel, event.detail === 0);
     }
   }
 

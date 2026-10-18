@@ -84,6 +84,8 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.pulse.alive": "pulse:alive",
     "explorer.refresh": "explorer:refresh",
     "explorer.review.discard": "review:discard",
+    "explorer.review.revertHunk": "review:revertHunk",
+    "explorer.review.saveHunks": "review:saveHunks",
     "explorer.review.list": "review:list",
     "explorer.review.save": "review:save",
     "explorer.search.cancel": "search:cancel",

@@ -14,6 +14,8 @@ class Contents extends EventEmitter {
   reloads = 0;
   reloadIgnoringCache() { this.reloads++; }
   isDestroyed() { return false; }
+  getURL() { return "http://localhost/app"; }
+  close() {}
   setWindowOpenHandler() {}
   async loadURL() {}
   async executeJavaScript() {}
@@ -32,6 +34,7 @@ class Window extends EventEmitter {
   webContents = new Contents();
   contentView = { addChildView() {}, removeChildView() {} };
   minimized = false;
+  focusCount = 0;
   destroyed = false;
   constructor() { super(); Window.all.push(this); }
   setMenu() {}
@@ -40,7 +43,7 @@ class Window extends EventEmitter {
   minimize() { this.minimized = true; }
   restore() { this.minimized = false; }
   show() {}
-  focus() {}
+  focus() { this.focusCount++; }
   getContentSize() { return [980, 720]; }
   async loadURL() {}
 }
@@ -51,7 +54,7 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
   const output = buildSync({ entryPoints: ["src/main/sidebar-surface-registry.ts"], bundle: true, platform: "node", format: "cjs", external: ["electron"], write: false });
   const module = { exports: {} };
   runInNewContext(output.outputFiles[0].text, {
-    module, exports: module.exports, console,
+    module, exports: module.exports, console, URL,
     require: (name: string) => {
       if (name === "electron") return { BrowserWindow: Window, WebContentsView: View };
       if (name === "node:path") return { resolve: (...parts: string[]) => parts.join("/") };
@@ -65,6 +68,9 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
     getMainWindow: () => main,
     getAppContents: () => app,
     getAppPath: () => ".",
+    getAppViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+    getAppZoomFactor: () => 1,
+    getRelayOrigin: () => "http://localhost",
     shellUrl: "http://localhost/surface",
     frameworkPartition: "test",
     registerTrustedContents() {}, unregisterTrustedContents() {}, installContextMenu() {},
@@ -89,8 +95,30 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
   assert.equal(app.sent.length, 0, "minimize must not emit lifecycle actions");
   registry.focus("one", "p1");
   assert.equal(one.minimized, false);
+  const priorFocus = one.focusCount;
+  await registry.detach(descriptor, true);
+  await registry.detach(descriptor, true);
+  assert.equal(one.focusCount, priorFocus + 2, "every icon activation raises its existing window");
   one.destroyed = true;
   assert.equal(registry.handleShellAction(sender(one.webContents), "minimize"), false);
+  View.all[0].webContents.emit("focus");
+  assert.equal(app.sent.length, 0, "detached focus is not embedded activation");
+  const embedded = { ...descriptor, renderer: "persistent-extension" as const,
+    surfaceId: "embedded", presentationId: "p3" };
+  const bounds = { x: 0, y: 0, width: 300, height: 400 };
+  await registry.place(embedded, bounds, true);
+  const embeddedContents = View.all[2].webContents;
+  embeddedContents.emit("focus");
+  assert.deepEqual(JSON.parse(JSON.stringify(app.sent)), [[
+    "te2-desktop:sidebar-surface-event",
+    { type: "focused", hostId: "host", surfaceId: "embedded", presentationId: "p3" },
+  ]]);
+  await registry.place(embedded, bounds, false);
+  embeddedContents.emit("focus");
+  assert.equal(app.sent.length, 1, "hidden content cannot claim foreground");
+  await registry.place({ ...embedded, presentationId: "p4" }, bounds, true);
+  embeddedContents.emit("focus");
+  assert.equal(app.sent.length, 1, "replaced content cannot claim foreground");
 });
 
 test("detached chrome exposes the minimize action, not main window control", () => {

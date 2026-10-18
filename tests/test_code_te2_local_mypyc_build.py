@@ -11,7 +11,7 @@ from app.apps.code_te2 import build_mypyc
 @pytest.fixture(autouse=True)
 def cached_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv('NO_CACHE', raising=False)
-    monkeypatch.setattr(build_mypyc.shutil, 'which', lambda name: '/usr/bin/ccache')
+    monkeypatch.setattr(build_mypyc, 'ccache_health', lambda: (True, ''))
 
 
 def test_publishes_to_resolved_root_and_reuses_existing_cache() -> None:
@@ -20,10 +20,11 @@ def test_publishes_to_resolved_root_and_reuses_existing_cache() -> None:
         cache_home=Path('/custom/cache'), compiler_cache=repo / '.codex-scratch/mypyc-build-cache',
         name='unique', activate=True)
     assert snapshot == Path('/custom/cache/code_te2/build/mypyc-snapshots/unique')
-    assert commands[0][-1] == str(snapshot)
+    assert commands[0][commands[0].index('--output') + 1] == str(snapshot)
+    assert '--fingerprinted' in commands[0]
     assert commands[0][commands[0].index('--cache-dir') + 1] == '/checkout/.codex-scratch/mypyc-build-cache'
-    assert commands[1][-1] == '/checkout/.codex-scratch/mypyc-active'
-    assert commands[1][commands[1].index('--snapshot') + 1] == str(snapshot)
+    assert commands[0][-1] == '/checkout/.codex-scratch/mypyc-active'
+    assert '--activate-link' in commands[0]
 
 
 def test_no_activate_has_no_activation_command() -> None:
@@ -57,21 +58,25 @@ def test_print_commands_never_runs_build(monkeypatch: pytest.MonkeyPatch) -> Non
     build_mypyc.main()
 
 
-def test_missing_ccache_fails_before_build(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(build_mypyc.shutil, 'which', lambda name: None)
+@pytest.mark.parametrize('diagnostic', ['ccache is not installed', 'cannot locate libc++ symbol'])
+def test_unusable_ccache_falls_back_before_build(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], diagnostic: str) -> None:
+    monkeypatch.setattr(build_mypyc, 'ccache_health', lambda: (False, diagnostic))
     monkeypatch.setattr(sys, 'argv', ['build_mypyc.py'])
-    monkeypatch.setattr(build_mypyc.subprocess, 'run', lambda *args, **kwargs: pytest.fail('build must not start'))
-    with pytest.raises(SystemExit) as error:
-        build_mypyc.main()
-    assert error.value.code == 1
+    calls = []
+    def run(command, **kwargs):
+        assert kwargs['env']['NO_CACHE'] == '1'
+        calls.append(command)
+    monkeypatch.setattr(build_mypyc.subprocess, 'run', run)
+    build_mypyc.main()
+    assert len(calls) == 1
     message = capsys.readouterr().err
-    assert '--no-cache' in message and 'NO_CACHE=1' in message
+    assert '--no-cache' in message and diagnostic in message
 
 
 @pytest.mark.parametrize('mode', ['flag', 'env', 'cached'])
 def test_cache_opt_out_reaches_compiler(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
     if mode != 'cached':
-        monkeypatch.setattr(build_mypyc.shutil, 'which', lambda name: None)
+        monkeypatch.setattr(build_mypyc, 'ccache_health', lambda: pytest.fail('explicit no-cache must not probe'))
     if mode == 'env':
         monkeypatch.setenv('NO_CACHE', '1')
     monkeypatch.setattr(sys, 'argv', ['build_mypyc.py', '--no-activate'] + (['--no-cache'] if mode == 'flag' else []))
@@ -84,3 +89,12 @@ def test_cache_opt_out_reaches_compiler(monkeypatch: pytest.MonkeyPatch, mode: s
     monkeypatch.setattr(build_mypyc.subprocess, 'run', run)
     build_mypyc.main()
     assert len(calls) == 1
+
+
+def test_status_runs_no_build_or_ccache_probe(monkeypatch):
+    monkeypatch.setattr(build_mypyc, 'ccache_health', lambda: pytest.fail('status does not probe ccache'))
+    monkeypatch.setattr(sys, 'argv', ['build_mypyc.py', '--status'])
+    calls = []
+    monkeypatch.setattr(build_mypyc.subprocess, 'run', lambda command, **kw: calls.append(command))
+    build_mypyc.main()
+    assert len(calls) == 1 and 'status' in calls[0] and 'build' not in calls[0]

@@ -84,15 +84,18 @@ an optional experiment or a Python-framework compatibility path.
 Python remains intentionally in these roles:
 
 - CLI/bootstrap discovery in `app/cli/`
-- runtime bridge services in `app/te2_runtime_mounts.py`,
-  `app/te2_console_runtime.py`, and `app/te2_mcp/`
+- runtime bridge console/private owner services in `app/te2_runtime_mounts.py`,
+  `app/te2_console_runtime.py`, and `app/libs/native_*_owner.py`
 - manifest/scaffolding helpers in `app/extensions/apps/`
 - app-worker and pipe support in `app/libs/`
 - app backends under `app/apps/`
 
 This is a hard framework cutover, not a Python compatibility arrangement.
 Outside app code, retain Python only when the packaged Rust launcher, the
-Axum-proxied console/FastMCP sidecar, or a Rust-launched app worker imports it.
+Axum-proxied console/private-owner sidecar, or a Rust-launched app worker imports it.
+MCP serving is Rust-owned at `/te2_mcp_http`; retired `/te2_mcp` returns 410.
+Do not restore Python FastMCP or legacy FastAPI worker-router fallbacks. Ordinary
+HTTP workers export `TE2_ASGI_APP`; pipe-only workers retain their own dispatch.
 Do not recreate the removed Python framework, supervisor, IPC server, app
 lifecycle, generic-extension runtime, or duplicate Git provider. Framework
 lifecycle, proxying, app registry, bookmarks/settings/state, Git, filesystem,

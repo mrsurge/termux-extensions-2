@@ -296,6 +296,16 @@ export class DetachedSidebarSurfaceRegistry {
       loadPromise: null,
     };
     this.#options.registerTrustedContents(view.webContents);
+    view.webContents.on("focus", () => {
+      if (this.#entries.get(entry.descriptor.surfaceId) !== entry ||
+          entry.disposing || entry.parent !== "main" || !entry.embeddedVisible) return;
+      this.#emitToApp({
+        type: "focused",
+        hostId: entry.descriptor.hostId,
+        surfaceId: entry.descriptor.surfaceId,
+        presentationId: entry.descriptor.presentationId,
+      });
+    });
     this.#options.installContextMenu(
       view.webContents,
       () => entry.window || this.#options.getMainWindow(),

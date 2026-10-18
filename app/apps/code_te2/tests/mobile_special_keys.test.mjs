@@ -9,6 +9,11 @@ import { build } from "esbuild";
 const appRoot = path.resolve(import.meta.dirname, "..");
 let moduleSequence = 0;
 
+test("editor navigation grid has seven equal columns after replacing page keys with Jmp", () => {
+  const source = fs.readFileSync(path.join(appRoot, "monaco_editor/inline_host.ts"), "utf8");
+  assert.match(source, /\.te2-mobile-special-key-navigation-row \{\s*grid-template-columns: repeat\(7, minmax\(0, 1fr\)\);/);
+});
+
 test("keeps Cefrium focused Monaco textareas above Chromium's small-input zoom threshold", () => {
   const source = fs.readFileSync(
     path.join(appRoot, "monaco_editor/inline_host.ts"),
@@ -581,6 +586,14 @@ test("moves the translucent controls and key target into the focused secondary e
   assert.equal(currentMobileEditorModifiers(fixture.win).ctrl, false);
   assert.equal(modifierConsumptions, 1);
 
+  assert.equal(requestMobileEditorSpecialKey(
+    fixture.win, "secondary",
+    { key: "g", code: "KeyG", keyCode: 71 },
+    { ctrl: true, alt: false, shift: false },
+  ), true);
+  assert.equal(fixture.actionRuns.at(-1), "editor.action.gotoLine");
+  assert.equal(keyEvents.length, 1, "Jmp invokes the action without typing g");
+
   pointerDown(fixture.win, save);
   assert.equal(saveRequests, 1);
   pointerDown(fixture.win, trigger);
@@ -917,8 +930,9 @@ test("provides two-row navigation, persistent selection, and Ctrl lock", async (
   const tab = findButton(panel, "Tab");
   const home = findButton(panel, "Home");
   const end = findButton(panel, "End");
-  const pageUp = findButton(panel, "Page up");
-  const pageDown = findButton(panel, "Page down");
+  const jump = findButton(panel, "Go to Line (:)");
+  assert.equal(findButton(panel, "Page up"), null);
+  assert.equal(findButton(panel, "Page down"), null);
   const context = findButton(overlay, "Context menu");
   const hover = findButton(overlay, "Show hover");
   const cut = findButton(overlay, "Cut selection");
@@ -939,7 +953,7 @@ test("provides two-row navigation, persistent selection, and Ctrl lock", async (
   assert.equal(findButton(overlay, "Toggle selection (Shift)"), null);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].children.length, 7);
-  assert.equal(rows[1].children.length, 8);
+  assert.equal(rows[1].children.length, 7);
   assert.equal(findButton(panel, "Enter"), null);
   assert.equal(
     fixture.appRoot.classList.contains("te2-mobile-special-keys-open"),
@@ -991,16 +1005,16 @@ test("provides two-row navigation, persistent selection, and Ctrl lock", async (
 
   pointerDown(fixture.win, select);
   assert.equal(select.classList.contains("toggle"), false);
-  for (const button of [tab, home, end, pageUp, pageDown]) {
+  for (const button of [tab, home, end]) {
     pointerDown(fixture.win, button);
   }
-  assert.deepEqual(keyEvents.slice(-5).map((event) => event.key), [
+  assert.deepEqual(keyEvents.slice(-3).map((event) => event.key), [
     "Tab",
     "Home",
     "End",
-    "PageUp",
-    "PageDown",
   ]);
+  pointerDown(fixture.win, jump);
+  assert.equal(fixture.actionRuns.at(-1), "editor.action.gotoLine");
 
   pointerDown(fixture.win, hover);
   pointerDown(fixture.win, cut);

@@ -66,6 +66,7 @@ export interface LifecycleRuntime {
   authority: string;
   extRpcIds: LifecycleExtRpcIds;
   readTextFile: (path: string) => Promise<string>;
+  getWatcherExcludes: (root: string) => string[];
   uriForPath: (path: string, authority: string | null) => Record<string, unknown>;
   uriToString: (uri: unknown) => string;
   resolveLanguageId: (
@@ -108,10 +109,6 @@ export function coerceOptionalGeneration(raw: unknown): number | string | null {
   if (typeof raw === "number" && Number.isFinite(raw)) return raw;
   if (typeof raw === "string") return raw;
   return null;
-}
-
-function lineByteLength(text: string): number {
-  return new TextEncoder().encode(text).length;
 }
 
 function normalizeDocumentText(text: string): string {
@@ -182,6 +179,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     await switchWorkspace(runtime, requestedWorkspace);
   }
 
+  await runtime.session.documentRegistry.waitForInitialization(path);
   const prevEditorId = runtime.session.activeEditorId;
   const prevUriObj = runtime.session.activeUriObj;
   const prevTab = runtime.session.activeTab;
@@ -211,41 +209,20 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     "openFile.uriForPath",
     () => runtime.uriForPath(path, authority),
   );
-  let text: string | null = null;
-  let lines: string[] | null = null;
   let languageId: string;
-  if (existingEntry && !isSameFileReopen) {
+  if (existingEntry) {
     languageId =
       typeof input.languageId === "string" && input.languageId
         ? runtime.resolveLanguageId(path, "", input.languageId)
         : existingEntry.languageId;
   } else {
-    const rawText = await runtime.spanTraceAsync(
-      "openFile.fs.readFile",
-      () => runtime.readTextFile(path),
-    );
-    text = normalizeDocumentText(rawText);
-    languageId = runtime.resolveLanguageId(path, text, input.languageId);
-    lines = runtime.spanTrace(
-      "openFile.text.splitLines",
-      () => text!.split("\n"),
-    );
-    let maxLineLen = 0;
-    for (const line of lines) {
-      if (line.length > maxLineLen) maxLineLen = line.length;
-    }
-    runtime.logMetrics("metrics/open_file", {
-      path,
-      text_bytes: lineByteLength(text),
-      lines: lines.length,
-      max_line_len: maxLineLen,
-    });
+    throw new Error(`document_not_initialized: ${path}`);
   }
   const uriObj = existingEntry?.uri ?? generatedUri;
-  const lineCount = existingEntry?.lineCount ?? lines?.length ?? 1;
+  const lineCount = existingEntry.lineCount;
   const visibleLastLineLength =
     lineCount <= 31
-      ? existingEntry?.lastLineLength ?? (lines?.[lineCount - 1] ?? "").length
+      ? existingEntry.lastLineLength
       : 0;
   updateActiveState(runtime, path, uriObj, languageId);
 
@@ -277,21 +254,8 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   } catch {}
 
   if (isSameFileReopen) {
-    if (text === null) throw new Error(`missing reopen text for ${path}`);
-    const replaced = runtime.session.documentRegistry.replaceFullText(
-      {
-        path,
-        text,
-        languageId,
-        dirty: false,
-      },
-      { isDirtyEvent: false },
-    );
-    if (!replaced.ok) {
-      throw new Error(`${replaced.error}: ${path}`);
-    }
     runtime.log(
-      `[openFile] ts=${Date.now()} same-file reopen contentChanged=${replaced.contentChanged ? 1 : 0} (v${replaced.previousVersionId}→v${replaced.versionId})`,
+      `[openFile] ts=${Date.now()} same-file attach version=${existingEntry.versionId}`,
     );
     runtime.session.activeEditorId = prevEditorId;
     runtime.session.activeUriObj = uriObj;
@@ -314,18 +278,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     return { ok: true, req: null };
   }
 
-  const retained = existingEntry
-    ? { entry: existingEntry, added: false }
-    : runtime.spanTrace("openFile.registry.retain", () => {
-        if (text === null) throw new Error(`missing initial text for ${path}`);
-        return runtime.session.documentRegistry.retain({
-          path,
-          uri: uriObj,
-          text,
-          languageId,
-          dirty: false,
-        });
-      });
+  const retained = { entry: existingEntry, added: false };
   const openedDocument = runtime.session.documentRegistry.markClientOpen(path);
   runtime.log(
     `[openFile] ts=${Date.now()} ${retained.added ? "addedDocuments" : "retainedDocument"}=[${path}] lineCount=${retained.entry.lineCount}`,
@@ -614,7 +567,8 @@ export async function setupFileWatcher(runtime: LifecycleRuntime, workspaceRoot:
       const authority = runtime.useRemote ? runtime.authority : null;
       const rootUri = runtime.uriForPath(String(workspaceRoot), authority);
       runtime.log(`[watcher] calling watch() sessionId=${sessionId} watchId=${watchId} uri=${JSON.stringify(rootUri)}`);
-      await runtime.watcher.mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes: ["**/.git/*.lock"] }]);
+      const excludes = runtime.getWatcherExcludes(String(workspaceRoot));
+      await runtime.watcher.mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes }]);
       runtime.onEvent({ type: "watcher/subscribed", ts_ms: Date.now(), root: String(workspaceRoot) });
       runtime.log(`[watcher] watch() call returned OK — subscribed to ${workspaceRoot}`);
     } else {

@@ -195,6 +195,7 @@ interface XtermOptions {
 }
 
 interface XtermDisposable {
+  cancelGesture?(): void;
   dispose(): void;
 }
 
@@ -1001,12 +1002,20 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   function setMode(mode: 'list' | 'terminal'): void {
     state.mode = mode;
-    root.classList.remove('mode-list', 'mode-terminal', 'drawer-open');
+    root.classList.remove('mode-list', 'mode-terminal', 'drawer-open', 'drawer-motion-enabled');
     root.classList.add(mode === 'terminal' ? 'mode-terminal' : 'mode-list');
   }
 
+  function initializePresentation(): void {
+    // Query state selects presentation only. The lifecycle owner must still
+    // validate an existing shell or acknowledge explicit new-session creation.
+    const pending = Boolean(sidebarState.initialShellId || sidebarState.initialNewSession);
+    setMode(pending ? 'terminal' : 'list');
+    if (pending) ui.title.textContent = 'Loading terminal…';
+  }
+
   function openDrawer(): void {
-    root.classList.add('drawer-open');
+    root.classList.add('drawer-motion-enabled', 'drawer-open');
   }
 
   function closeDrawer(): void {
@@ -1285,6 +1294,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function clearSocket(): void {
+    state.touchSelection?.cancelGesture?.();
     if (state.ws) {
       try {
         state.ws.close(1000, 'dispose');
@@ -1394,6 +1404,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
 
     ws.addEventListener('close', () => {
+      state.touchSelection?.cancelGesture?.();
       setStatus('disconnected');
     });
 
@@ -1459,6 +1470,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         await selectShell(data.shell_id);
       } catch (error) {
         console.error('[terminal] launch session failed (not replayed)', error);
+        setMode('list');
         setStatus(`Session launch failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       return;
@@ -1611,7 +1623,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const touchSelection = state.touchSelection;
     const disposeMenu = bindTerminalContextMenu(ui.termContainer, term, message => setStatus(message));
     const cursorBinding = bindTerminalCursor(ui.termContainer, term);
-    state.touchSelection = { dispose() { cursorBinding.dispose(); disposeMenu(); touchSelection?.dispose(); } };
+    state.touchSelection = {
+      cancelGesture() { touchSelection?.cancelGesture?.(); },
+      dispose() { cursorBinding.dispose(); disposeMenu(); touchSelection?.dispose(); },
+    };
     await bindVendoredCtrlHandler(term);
     installVendoredCtrlFocusBinding(term);
     term.onData((data) => {
@@ -1746,9 +1761,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }, { once: true });
 
   syncSpecialKeysUi();
-  setMode('list');
+  initializePresentation();
   void startLifecycleClient().catch((error) => {
     console.error('[terminal] lifecycle startup failed', error);
+    setMode('list');
     setStatus('lifecycle unavailable');
   });
 }

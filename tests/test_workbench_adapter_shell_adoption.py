@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, call, patch
 
 from app.apps.code_te2 import workbench_adapter_shell_manager as manager
+from app.apps.code_te2 import workbench_document_initialization as initialization
 
 
 class WorkbenchAdapterShellAdoptionTests(unittest.IsolatedAsyncioTestCase):
@@ -22,6 +23,7 @@ class WorkbenchAdapterShellAdoptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('node "${ctx:WORKBENCH_ADAPTER_ENTRY}"', shellspec)
 
     async def test_adopts_matching_connected_session_and_publishes_ready(self) -> None:
+        seed = {"projectPath": "/workspace/project", "projectGeneration": 0, "openStateRevision": 0, "documents": []}
         publish = AsyncMock()
         rpc = AsyncMock(
             return_value={
@@ -39,6 +41,7 @@ class WorkbenchAdapterShellAdoptionTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(manager, "adapter_rpc", rpc),
             patch.object(manager, "_publish_adapter_state_fact", publish),
+            patch.object(initialization, "build_initial_documents", return_value=seed),
         ):
             adopted = await manager._adopt_live_adapter_session(
                 "/workspace/project"
@@ -47,10 +50,14 @@ class WorkbenchAdapterShellAdoptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(adopted)
         self.assertEqual("ready", manager.get_adapter_state()["status"])
         self.assertEqual("/workspace/project", manager.get_adapter_state()["project"])
-        rpc.assert_awaited_once_with("adapter.status", timeout=15.0)
+        self.assertEqual(rpc.await_args_list, [
+            call("adapter.status", timeout=15.0),
+            call("vscode.documents.initialize", seed, timeout=10.0),
+        ])
         publish.assert_awaited_once()
 
     async def test_retargets_connected_session_before_publishing_ready(self) -> None:
+        seed = {"projectPath": "/workspace/current", "projectGeneration": 0, "openStateRevision": 0, "documents": []}
         publish = AsyncMock()
         rpc = AsyncMock(
             side_effect=[
@@ -70,10 +77,9 @@ class WorkbenchAdapterShellAdoptionTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(manager, "adapter_rpc", rpc),
             patch.object(manager, "_publish_adapter_state_fact", publish),
+            patch.object(initialization, "build_initial_documents", return_value=seed),
         ):
-            adopted = await manager._adopt_live_adapter_session(
-                "/workspace/current"
-            )
+            adopted = await manager._adopt_live_adapter_session("/workspace/current")
 
         self.assertTrue(adopted)
         self.assertEqual(
@@ -81,7 +87,7 @@ class WorkbenchAdapterShellAdoptionTests(unittest.IsolatedAsyncioTestCase):
                 call("adapter.status", timeout=15.0),
                 call(
                     "adapter.reconnect",
-                    {"workspaceFolder": "/workspace/current"},
+                    {"workspaceFolder": "/workspace/current", "initialDocuments": seed},
                     timeout=75.0,
                 ),
             ],

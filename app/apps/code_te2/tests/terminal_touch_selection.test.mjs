@@ -28,6 +28,7 @@ function createHarness({
   mobile = true,
   touchHook = true,
   hostZIndex = null,
+  pageHeight = 100,
 } = {}) {
   const window = new Window({ url: 'http://127.0.0.1/apps/by-id/terminal' });
   Object.defineProperty(window.navigator, 'maxTouchPoints', {
@@ -44,7 +45,7 @@ function createHarness({
     configurable: true,
     value: { mobile },
   });
-  window.matchMedia = () => ({ matches: true });
+  window.matchMedia = query => ({ matches: !query.includes('prefers-reduced-motion') });
   const clipboardWrites = [];
   Object.defineProperty(window.navigator, 'clipboard', {
     configurable: true,
@@ -55,6 +56,8 @@ function createHarness({
   });
 
   let rafId = 0;
+  let now = 0;
+  Object.defineProperty(window, 'performance', { value: { now: () => now }, configurable: true });
   const rafCallbacks = new Map();
   window.requestAnimationFrame = (callback) => {
     const id = ++rafId;
@@ -62,11 +65,17 @@ function createHarness({
     return id;
   };
   window.cancelAnimationFrame = (id) => rafCallbacks.delete(id);
-  const flushAnimationFrames = () => {
-    while (rafCallbacks.size) {
+  const frame = (elapsed = 16, frameTimestampOffset = 0) => {
+      now += elapsed;
       const callbacks = [...rafCallbacks.entries()];
       rafCallbacks.clear();
-      for (const [, callback] of callbacks) callback(window.performance.now());
+      for (const [, callback] of callbacks) callback(now + frameTimestampOffset);
+  };
+  const flushAnimationFrames = () => {
+    let frames = 0;
+    while (rafCallbacks.size) {
+      assert.ok(frames++ < 200, 'animation must terminate');
+      frame();
     }
   };
 
@@ -98,9 +107,9 @@ function createHarness({
     left: 100,
     top: 50,
     right: 200,
-    bottom: 150,
+    bottom: 50 + pageHeight,
     width: 100,
-    height: 100,
+    height: pageHeight,
     x: 100,
     y: 50,
     toJSON() { return this; },
@@ -263,6 +272,9 @@ function createHarness({
     get selectAllCalls() { return selectAllCalls; },
     disposedSubscriptions,
     flushAnimationFrames,
+    frame,
+    advance: elapsed => { now += elapsed; },
+    signal: kind => { for (const callback of callbacks[kind]) callback(); },
     handles: () => [
       ...window.document.querySelectorAll('.te2-xterm-touch-selection-handle'),
     ],
@@ -307,6 +319,16 @@ function touchEvent(window, type, target, { x, y, identifier = 1 } = {}) {
 test('standalone and Code TE2 serve one identical touch helper', () => {
   assert.equal(fs.readFileSync(terminalHelperPath, 'utf8'), helperSource);
   assert.doesNotMatch(helperSource, /document\.addEventListener\('touch/);
+});
+
+test('terminal owners cancel gestures at socket/session handoff boundaries', () => {
+  const standalone = fs.readFileSync(new URL('../../terminal/src/main.ts', import.meta.url), 'utf8');
+  assert.match(standalone, /function clearSocket\(\): void \{\s*state\.touchSelection\?\.cancelGesture\?\.\(\)/);
+  assert.match(standalone, /cancelGesture\(\) \{ touchSelection\?\.cancelGesture\?\.\(\); \}/);
+  const drawer = fs.readFileSync(new URL('../main_page/frontend/host-terminal-drawer.ts', import.meta.url), 'utf8');
+  assert.match(drawer, /function emitTerminalRegister\([^\n]+\n\s*touchSelectionDisposable\?\.cancelGesture\?\.\(\)/);
+  const explorer = fs.readFileSync(new URL('../../file_explorer/terminal_drawer.ts', import.meta.url), 'utf8');
+  assert.match(explorer, /touchBinding\?\.cancelGesture\?\.\(\);\s*view\.reset\(\)/);
 });
 
 test('selection handles use viewport-adjusted xterm cell geometry', () => {
@@ -429,7 +451,7 @@ test('one-finger movement remains wheel-backed terminal scrolling', () => {
   screen.dispatchEvent(touchEvent(harness.window, 'touchmove', screen, { x: 140, y: 120 }));
   screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 120 }));
 
-  assert.deepEqual(wheelDeltas, [-12]);
+  assert.deepEqual(wheelDeltas, [-30]);
   harness.disposable.dispose();
 });
 
@@ -446,8 +468,167 @@ test('text and blank terminal targets use the same xterm-owned scroll path', () 
     target.dispatchEvent(touchEvent(harness.window, 'touchend', target, { x: 140, y: 120 }));
   }
 
-  assert.deepEqual(wheelDeltas, [-12, -12]);
+  assert.deepEqual(wheelDeltas, [-30, -30]);
   harness.disposable.dispose();
+});
+
+test('untimed scrubbing keeps signed drag distance and native wheel units without coasting', () => {
+  const harness = createHarness();
+  const viewport = harness.root.querySelector('.xterm-viewport');
+  const screen = harness.root.querySelector('.xterm-screen');
+  const events = [];
+  viewport.addEventListener('wheel', event => events.push({ delta: event.deltaY, mode: event.deltaMode }));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
+  for (const y of [110, 115, 95]) {
+    screen.dispatchEvent(touchEvent(harness.window, 'touchmove', screen, { x: 140, y }));
+  }
+  screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 95 }));
+  harness.flushAnimationFrames();
+  assert.deepEqual(events, [{ delta: -20, mode: 0 }, { delta: -5, mode: 0 }, { delta: 20, mode: 0 }]);
+  // Native desktop wheel input is not multiplied by the touch adapter.
+  viewport.dispatchEvent(new harness.window.WheelEvent('wheel', { deltaY: 1, deltaMode: 1, bubbles: true }));
+  assert.deepEqual(events.at(-1), { delta: 1, mode: 1 });
+  assert.deepEqual(harness.scrollCalls, []);
+  harness.disposable.dispose();
+});
+
+function flingHarness(options = {}) {
+  const h = createHarness({ selection: null, ...options });
+  const screen = h.root.querySelector('.xterm-screen');
+  const wheels = [];
+  h.root.querySelector('.xterm-viewport').addEventListener('wheel', event => wheels.push(event.deltaY));
+  const touch = (type, y) => screen.dispatchEvent(touchEvent(h.window, type, screen, { x: 140, y }));
+  return { ...h, wheels, touch,
+    flick(distance = 60, duration = 40, pause = 0) {
+      touch('touchstart', 130);
+      for (let step = 1; step <= 4; step++) {
+        h.advance(duration / 4); touch('touchmove', 130 - distance * step / 4);
+      }
+      h.advance(pause); touch('touchend', 130 - distance);
+      wheels.length = 0;
+    } };
+}
+
+test('only a quick release throws the wheel; stronger flicks travel farther', () => {
+  const distances = [];
+  for (const [distance, duration] of [[30, 60], [60, 40]]) {
+    const h = flingHarness(); h.flick(distance, duration); h.flushAnimationFrames();
+    assert.ok(h.wheels.length > 0);
+    assert.ok(h.wheels.every(delta => delta > 0 && delta <= 20), 'wheel pulses never exceed one measured row');
+    distances.push(h.wheels.reduce((sum, delta) => sum + delta, 0));
+    h.disposable.dispose();
+  }
+  assert.ok(distances[1] > distances[0] * 2, 'release velocity controls travel');
+  for (const [distance, duration, pause] of [[30, 300, 0], [60, 40, 100], [10, 20, 0]]) {
+    const h = flingHarness(); h.flick(distance, duration, pause); h.flushAnimationFrames();
+    assert.deepEqual(h.wheels, [], 'slow/short/paused drag must not coast');
+    h.disposable.dispose();
+  }
+});
+
+test('flick trajectory is independent of animation refresh rate', () => {
+  const travelled = [];
+  for (const hz of [60, 90, 120]) {
+    const h = flingHarness(); h.flick();
+    for (let frame = 0; frame < hz / 2; frame++) h.frame(1000 / hz);
+    travelled.push(h.wheels.reduce((sum, delta) => sum + delta, 0));
+    h.disposable.dispose();
+  }
+  assert.ok(Math.max(...travelled) - Math.min(...travelled) < 0.01);
+});
+
+test('regular and strong throws scale continuously to page height', () => {
+  for (const pageHeight of [100, 532, 1000]) {
+    const ranges = [];
+    for (const [distance, duration, expected] of [[60, 60, 0.75], [60, 40, 1.6875], [100, 40, 4.5]]) {
+      const h = flingHarness({ pageHeight, rows: 37 });
+      h.flick(distance, duration); h.flushAnimationFrames();
+      const pages = h.wheels.reduce((sum, delta) => sum + delta, 0) / pageHeight;
+      assert.ok(pages >= expected - 0.015 && pages <= expected, `${pageHeight}px page, expected ${expected}, got ${pages}`);
+      assert.ok(h.wheels.every(delta => delta <= pageHeight / 37));
+      ranges.push(pages); h.disposable.dispose();
+    }
+    assert.ok(ranges[0] < 1 && ranges[2] >= 4);
+    assert.ok(ranges[0] < ranges[1] && ranges[1] < ranges[2]);
+  }
+});
+
+test('strong throws retain residual motion within a bounded per-frame pulse budget', () => {
+  const h = flingHarness({ pageHeight: 2000, rows: 200 });
+  h.flick(100, 40);
+  let frames = 0;
+  for (; frames < 138; frames++) {
+    const before = h.wheels.length;
+    h.frame(16);
+    assert.ok(h.wheels.length - before <= 16);
+  }
+  const pages = h.wheels.reduce((sum, delta) => sum + delta, 0) / 2000;
+  assert.ok(pages >= 4 && pages <= 4.5, String(pages));
+  h.disposable.dispose();
+});
+
+test('a frame-start timestamp preceding release does not cancel the fling', () => {
+  const h = flingHarness(); h.flick();
+  // Captured Cefrium case: callback runs after release, but its frame timestamp
+  // is from before the release handler. Mixing clocks formerly killed motion.
+  h.frame(1.4, -13.8);
+  assert.ok(h.wheels.length > 0);
+  const first = h.wheels.reduce((sum, delta) => sum + delta, 0);
+  h.frame(16, -10);
+  assert.ok(h.wheels.reduce((sum, delta) => sum + delta, 0) > first);
+  h.disposable.dispose();
+});
+
+test('recent direction reversal discards old velocity and never throws the wrong way', () => {
+  const h = flingHarness(); h.touch('touchstart', 130);
+  h.advance(20); h.touch('touchmove', 70);
+  h.advance(20); h.touch('touchmove', 90);
+  h.advance(20); h.touch('touchmove', 110);
+  h.touch('touchend', 110); h.wheels.length = 0; h.flushAnimationFrames();
+  assert.ok(h.wheels.length > 0); assert.ok(h.wheels.every(delta => delta < 0));
+  h.disposable.dispose();
+});
+
+test('new touch, selection, resize, page lifecycle and terminal changes stop active inertia', () => {
+  const stops = {
+    touch: h => h.touch('touchstart', 100),
+    outsideTouch: h => h.window.dispatchEvent(new h.window.Event('touchstart')),
+    selection: h => h.signal('selection'), resize: h => h.signal('resize'),
+    blur: h => h.window.dispatchEvent(new h.window.Event('blur')),
+    pagehide: h => h.window.dispatchEvent(new h.window.Event('pagehide')),
+    visibility: h => h.window.document.dispatchEvent(new h.window.Event('visibilitychange')),
+    detached: h => h.root.remove(), dispose: h => h.disposable.dispose(),
+    sessionHandoff: h => h.disposable.cancelGesture(),
+    modes: h => { h.terminal.modes = { mouseTrackingMode: 'sgr' }; },
+    buffer: h => { h.terminal.buffer.active = {}; },
+    disabled: h => { h.window.__fileEditorCm6TerminalHelpersActive = false; },
+  };
+  for (const [name, stop] of Object.entries(stops)) {
+    const h = flingHarness(); h.flick(); h.frame();
+    assert.ok(h.wheels.length > 0, name);
+    h.wheels.length = 0; stop(h); h.flushAnimationFrames();
+    assert.deepEqual(h.wheels, [], name); h.disposable.dispose();
+  }
+});
+
+test('bounds, reduced motion and delayed frames prevent runaway wheel output', () => {
+  for (const variant of ['boundary', 'reduced', 'suspended']) {
+    const h = flingHarness();
+    if (variant === 'reduced') h.window.matchMedia = () => ({ matches: true });
+    if (variant === 'boundary') Object.assign(h.terminal.buffer.active, { type: 'normal', baseY: 10 });
+    h.flick(); if (variant === 'suspended') h.frame(1000);
+    h.flushAnimationFrames(); assert.deepEqual(h.wheels, [], variant);
+    h.disposable.dispose();
+  }
+});
+
+test('application mouse tracking keeps wheel ownership even without normal scrollback', () => {
+  const h = flingHarness();
+  Object.assign(h.terminal.buffer.active, { type: 'normal', baseY: 0 });
+  h.terminal.modes = { mouseTrackingMode: 'any' };
+  h.flick(); h.frame();
+  assert.ok(h.wheels.length > 0, 'normal-buffer scrollback bounds must not suppress app-owned wheels');
+  h.disposable.dispose();
 });
 
 test('long press retains word selection without a synthetic mouse lifecycle', async () => {

@@ -513,6 +513,54 @@ test("mobile wait retains readiness beyond Desktop attempt limit", async () => {
   child.emitClose(0);
 });
 
+test("build progress outlives hello deadline without health polling; build completion is not ready", async () => {
+  const child = fakeChild(99999999);
+  let probes = 0;
+  const controller = new LocalFrameworkController({
+    ...controllerOptions({
+      spawnFramework: (() => child) as typeof spawn,
+      probeFramework: async () => ++probes === 1 ? {kind: "free"}
+        : {kind: "te2", instanceId: "test", version: "test"},
+    }),
+    waitIndefinitelyForStartup: true,
+    controlHelloTimeoutMs: 5,
+  });
+  const started = controller.start();
+  await new Promise(resolve => setImmediate(resolve));
+  child.control.write(JSON.stringify({version: 1, type: "event", event: "startup",
+    phase: "building", unit: "code_te2", output: "Building 3/8"}) + "\n");
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(probes, 1); // The initial external-owner check only.
+  assert.equal(controller.snapshot().startupStage, "building");
+  assert.equal(controller.snapshot().startupOutput, "Building 3/8");
+  assert.equal(controller.snapshot().cancellableStartup, true);
+  child.control.write(JSON.stringify({version: 1, type: "event", event: "startup",
+    phase: "build-finished", unit: "code_te2", exitCode: 0}) + "\n");
+  assert.equal(probes, 1);
+  hello(child);
+  assert.equal((await started).phase, "running");
+  assert.equal(controller.snapshot().startupOutput, undefined);
+  child.emitClose(0);
+});
+
+test("build process failure retains exit status and never begins health polling", async () => {
+  const child = fakeChild(99999999);
+  let probes = 0;
+  const controller = new LocalFrameworkController({
+    ...controllerOptions({spawnFramework: (() => child) as typeof spawn,
+      probeFramework: async () => { probes++; return {kind: "free"}; }}),
+    waitIndefinitelyForStartup: true,
+  });
+  const start = controller.start();
+  const rejected = assert.rejects(start, /before control hello \(9\)/);
+  await new Promise(resolve => setImmediate(resolve));
+  child.emitClose(9);
+  await rejected;
+  assert.equal(probes, 1);
+  assert.equal(controller.snapshot().phase, "failed");
+  assert.match(controller.snapshot().error || "", /\(9\)/);
+});
+
 test("mobile cancellation fences a late hello and endpoint selection", async () => {
   const child = fakeChild(99999999);
   let selections = 0;

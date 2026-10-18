@@ -1,4 +1,3 @@
-fastapi
 starlette
 uvicorn
 websockets
@@ -6,11 +5,12 @@ httpx
 msgspec>=0.21.1
 msgpack>=1.1
 anyio
-fastmcp==3.4.7
-framework-shells==0.0.64
-agent-log-server==0.2.132
+framework-shells
+agent-log-server
 nodejs-wheel==24.16.0; sys_platform == "linux" and platform_machine == "x86_64"
 libarchive-c>=5.1
 python-socketio[client,asyncio-client]
 pyte==0.8.2
 pyyaml
+uvloop==0.23.0; sys_platform == "linux" and platform_machine == "x86_64"
+uvloop-te2==0.23.0.post1; sys_platform == "android" and platform_machine == "aarch64"

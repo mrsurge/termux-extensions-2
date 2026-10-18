@@ -30,7 +30,7 @@ function toOpenOptions(
   lineNumber: number | null,
   jumpOptions: ExplorerJumpOptions,
 ): ExplorerFileOpenOptions {
-  const openOptions: ExplorerFileOpenOptions = {};
+  const openOptions: ExplorerFileOpenOptions = { focus: true };
   if (jumpOptions.source) openOptions.source = jumpOptions.source;
   if (typeof lineNumber === "number" && lineNumber >= 1) {
     openOptions.line = lineNumber;

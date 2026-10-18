@@ -216,6 +216,7 @@ pub(super) fn search_content_parallel_with_options(
 
             let mut sink = ContentSink {
                 matcher: matcher.as_ref(),
+                cancelled: options.cancelled.clone(),
                 max_matches_per_file: effective_match_cap,
                 context_chars,
                 matches: Vec::new(),

@@ -141,8 +141,15 @@ private atomic requests and bounded shell-event files (0700/0600). Typed
 directory.request/result and shell.state envelopes keep control separate from
 terminal output. Bash PS0 publishes busy before execution; the final prompt hook
 publishes idle. Clean idle requests use SIGWINCH and a shell-side state recheck,
-not injected PTY commands. Busy/partial input defers to the next prompt. Later
-input is held at most 64 KiB during the bounded two-second wake; cancellation
+not injected PTY commands. Busy/partial input defers to the next prompt.
+Ordinary ASCII end-of-line input is tracked as a length only, not stored command
+text. Standard Backspace/DEL and Ctrl-U can return a known line to zero and wake
+a pending directory request without submitting a user command. The erasure is
+queued before the existing wake/empty-line refresh, and later input remains held.
+Unknown cursor/history/completion/non-ASCII editing remains conservative until
+a fresh submitted or cancelled prompt; this is not a full Readline emulator.
+Ctrl-C alone does not establish clean input until that fresh idle event.
+Later input is held at most 64 KiB during the bounded two-second wake; cancellation
 flushes held input without replaying a directory mutation. Quoted builtin cd
 consumes the latest literal path once. After a clean-idle trap application, the
 broker submits only an empty line while holding later user input: Bash re-runs

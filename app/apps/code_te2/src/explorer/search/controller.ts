@@ -41,6 +41,7 @@ interface ExplorerSearchControllerDeps {
     payload: JsonObject,
     timeoutMs?: number,
   ): Promise<JsonObject>;
+  applyReviewProjection(payload: unknown): void;
   getProjectPath(): string;
   getSearchOverlayVisible(): boolean;
   setSearchOverlayVisible(next: boolean): void;
@@ -106,6 +107,7 @@ export function createExplorerSearchController(
   deps: ExplorerSearchControllerDeps,
 ) {
   let activeSearchHighlightKey: string | null = null;
+  let reviewGeneration = 0;
 
   function setSearchIdentityFromPayload(payload: unknown): void {
     if (!isRecord(payload)) return;
@@ -432,6 +434,8 @@ export function createExplorerSearchController(
   async function fetchReviewResults(force = false): Promise<void> {
     if (deps.getSearchMode() !== "review") return;
     if (deps.getSearchLoading() && !force) return;
+    const generation = ++reviewGeneration;
+    const project = deps.getProjectPath();
 
     cancelActiveSearch("modeChanged");
     deps.setSearchLoading(true);
@@ -447,8 +451,11 @@ export function createExplorerSearchController(
     }
 
     try {
-      deps.sendBus(EXPLORER_RPC_METHODS.reviewList, { lightweight: false });
+      const result = await deps.requestBus(EXPLORER_RPC_METHODS.reviewList, { lightweight: false });
+      if (generation !== reviewGeneration || project !== deps.getProjectPath()) return;
+      deps.applyReviewProjection(result);
     } catch (error) {
+      if (generation !== reviewGeneration || project !== deps.getProjectPath() || deps.getSearchMode() !== 'review') return;
       deps.setSearchLoading(false);
       deps.setSearchError(getErrorMessage(error, "Failed to load review list"));
       deps.renderSearchOverlay();

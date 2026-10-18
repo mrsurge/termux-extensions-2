@@ -1,0 +1,21 @@
+// Typed subset of the existing browser vendor. These packages supply types only.
+export { EditorState } from '@codemirror/state';
+export { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from '@codemirror/view';
+export { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from '@codemirror/commands';
+export { searchKeymap, search, openSearchPanel } from '@codemirror/search';
+export { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
+import type { Extension } from '@codemirror/state';
+import type { LanguageSupport, StreamParser } from '@codemirror/language';
+export const oneDark: Extension | undefined;
+export const termuxTheme: (() => Extension) | undefined;
+export const javascript: (() => LanguageSupport) | undefined;
+export const json: (() => LanguageSupport) | undefined;
+export const python: (() => LanguageSupport) | undefined;
+export const html: (() => LanguageSupport) | undefined;
+export const css: (() => LanguageSupport) | undefined;
+export const markdown: (() => LanguageSupport) | undefined;
+export const xml: (() => LanguageSupport) | undefined;
+export const shell: StreamParser<unknown> | undefined;
+export const shellMode: StreamParser<unknown> | undefined;
+export const modeShell: StreamParser<unknown> | undefined;
+export const StreamLanguage: typeof import('@codemirror/language').StreamLanguage | undefined;

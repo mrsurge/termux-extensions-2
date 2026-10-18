@@ -9,7 +9,9 @@
 
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import { generateUuid } from '../uuid.ts';
+import { applySidebarWindowIdentity, readSidebarWindowIdentity, type SidebarWindowIdentity } from './qualified-identity.ts';
 import { bindDockOverflowScroll } from "./dock-scroll.ts";
+import { DockedSelection, bindDockedFocus } from "./docked-selection.ts";
 import {
   notifyExplorerRpc,
   requestExplorerRpc,
@@ -183,7 +185,7 @@ interface ElectronNativeSurfaceEntry {
 }
 
 interface ElectronSidebarSurfaceEvent {
-  type: "closed" | "action";
+  type: "closed" | "action" | "focused";
   hostId: string;
   surfaceId: string;
   presentationId: string;
@@ -284,6 +286,7 @@ export function initSidebarShortcuts(
       ? options.emitSidebarUiRequest
       : null;
   const requestSidebarUi = options.requestSidebarUi;
+  const requestSidebarRpc = options.requestSidebarRpc;
   const emitSidebarRpcRequest =
     typeof options.emitSidebarRpcRequest === "function"
       ? options.emitSidebarRpcRequest
@@ -378,6 +381,9 @@ export function initSidebarShortcuts(
   let _lastPickerPath = "";
   let _clientActiveShortcutId = "";
   let _clientActiveWindowHostId = "";
+  const _dockedSelection = new DockedSelection();
+  let _displayedShortcutKey = "";
+  let _disposeDockedFocus: (() => void) | null = null;
   let _pendingActivatedWindowHostId = "";
   let _presentationState = emptySidebarPresentationState();
   let _presentationStateLoaded = false;
@@ -388,6 +394,8 @@ export function initSidebarShortcuts(
   let _presentationProjectGeneration = 0;
   let _pendingPresentationSlots: SidebarAppDockSlot[] | null = null;
   let _detachedPresentationIds = new Map<string, string>();
+  const _qualifiedPresentations = new Map<string, SidebarWindowIdentity>();
+  const _presentationRegistrations = new Map<string, Promise<void>>();
   let _detachPromises = new Map<string, Promise<boolean>>();
   let _electronSurfaceEventsUnsubscribe: (() => void) | null = null;
   let _lastShortcutUsageKey = "";
@@ -1190,6 +1198,42 @@ export function initSidebarShortcuts(
     return pickMruShortcutFromModel(Array.isArray(shortcuts) ? shortcuts : []);
   }
 
+  function _resolveDockedShortcut(
+    shortcuts: SidebarShortcut[],
+    active: SidebarShortcut | null,
+  ): SidebarShortcut | null {
+    const eligible = shortcuts.filter((sc) =>
+      !_isDetachedShortcut(sc) &&
+      _presentationModeForHost(_normStr(sc.host_id)) !== "hidden",
+    );
+    return _dockedSelection.resolve(eligible, active, _pickMruShortcut(eligible));
+  }
+
+  function _activateFocusedDockedShortcut(key: string, presentationId: string): void {
+    if (key !== _displayedShortcutKey) return;
+    const entry = _iframeMap.get(key) || _electronNativeSurfaceMap.get(key);
+    if (!entry || entry.presentationId !== presentationId) return;
+    const shortcuts = _collectVisibleShortcuts(_latestUiPrefs || {});
+    const sc = shortcuts.find((item) => item.key === key);
+    if (!sc || _isDetachedShortcut(sc) ||
+        _presentationModeForHost(_normStr(sc.host_id)) === "hidden" ||
+        _resolveActive(_latestUiPrefs || {}, shortcuts)?.key === key) return;
+    _setClientActiveShortcut(sc.host_id || sc.id || sc.url || sc.key, {
+      emit: true,
+      source: "sidebar_surface_focus",
+    });
+  }
+
+  function _onDockedIframeFocus(): void {
+    const focused = document.activeElement;
+    for (const [key, entry] of _iframeMap) {
+      if (focused === entry.iframe && entry.iframe.classList.contains("is-active")) {
+        _activateFocusedDockedShortcut(key, entry.presentationId);
+        return;
+      }
+    }
+  }
+
   function _ensureActiveSelection(
     uiPrefs: UnknownRecord,
     shortcuts: SidebarShortcut[] | null,
@@ -1532,12 +1576,12 @@ export function initSidebarShortcuts(
     return _normStr(surface.surfaceId) || `sidebar:${hostId}`;
   }
 
-  function _extensionWebviewPresentationUrl(
+  async function _extensionWebviewPresentationUrl(
     sc: SidebarShortcut,
     rawUrl: string,
     presentationId: string,
     includeWindowId: boolean,
-  ): string {
+  ): Promise<string> {
     const surface = _extensionWebviewSurface(sc);
     if (_normStr(surface.dto) !== "ExtensionWebviewSurface" && !_isAppDockEntry(sc)) return rawUrl;
     const clientInstanceId = _normStr(getClientId());
@@ -1548,6 +1592,12 @@ export function initSidebarShortcuts(
     const parsed = new URL(rawUrl, window.location.href);
     parsed.searchParams.set("clientInstanceId", clientInstanceId);
     parsed.searchParams.set("presentationId", normalizedPresentationId);
+    if (_isAppDockEntry(sc)) {
+      await _registerPresentationIdentity(_normStr(sc.host_id) || sc.key, normalizedPresentationId);
+      const identity = _qualifiedPresentations.get(normalizedPresentationId);
+      if (!identity) throw new Error('Sidebar window identity is not registered');
+      applySidebarWindowIdentity(parsed, identity);
+    }
     const windowId = includeWindowId ? _normStr(getWindowId()) : "";
     if (windowId) parsed.searchParams.set("windowId", windowId);
     else parsed.searchParams.delete("windowId");
@@ -1595,7 +1645,8 @@ export function initSidebarShortcuts(
       devRuntime: runtime?.devRuntime === true,
       devTools: runtime?.devTools === true,
       consoleWorkerId: _normStr(
-        slot?.console_worker_id ||
+        _qualifiedPresentations.get(presentationId)?.sidebarWindowId ||
+          slot?.console_worker_id ||
           slot?.consoleWorkerId ||
           readiness.console_worker_id ||
           readiness.consoleWorkerId,
@@ -1645,7 +1696,7 @@ export function initSidebarShortcuts(
       if (!entry.url) {
         const rawUrl = _shortcutFrameUrl(sc, null);
         if (!rawUrl) return false;
-        entry.url = _extensionWebviewPresentationUrl(
+        entry.url = await _extensionWebviewPresentationUrl(
           sc,
           rawUrl,
           entry.presentationId,
@@ -1679,7 +1730,9 @@ export function initSidebarShortcuts(
     _nativePlacementFrame = requestAnimationFrame(() => {
       _nativePlacementFrame = 0;
       const shortcuts = _collectVisibleShortcuts(_latestUiPrefs || {});
-      const activeKey = _resolveActive(_latestUiPrefs || {}, shortcuts)?.key || "";
+      const activeKey = _resolveDockedShortcut(
+        shortcuts, _resolveActive(_latestUiPrefs || {}, shortcuts),
+      )?.key || "";
       for (const sc of shortcuts) {
         const entry = _electronNativeSurfaceMap.get(sc.key);
         if (!entry?.loaded) continue;
@@ -1735,7 +1788,7 @@ export function initSidebarShortcuts(
       const runtime = runProfileRuntimeMetadata(sc);
       const presentationUrl = nativeEntry
         ? nativeEntry.url
-        : _extensionWebviewPresentationUrl(
+        : await _extensionWebviewPresentationUrl(
             sc,
             fallbackUrl,
             presentationId,
@@ -1846,6 +1899,15 @@ export function initSidebarShortcuts(
 
   function _handleElectronSurfaceEvent(event: ElectronSidebarSurfaceEvent): void {
     if (!event || typeof event !== "object") return;
+    if (event.type === "focused") {
+      const key = `dock:${event.hostId}`;
+      const sc = _collectVisibleShortcuts(_latestUiPrefs || {})
+        .find((item) => item.key === key);
+      if (sc && _surfaceIdForShortcut(sc) === event.surfaceId) {
+        _activateFocusedDockedShortcut(key, event.presentationId);
+      }
+      return;
+    }
     if (event.type === "closed") {
       _reattachDetachedShortcut(event);
       return;
@@ -1905,6 +1967,12 @@ export function initSidebarShortcuts(
     hostId: string,
     presentationId: string,
   ): void {
+    if (requestSidebarRpc && presentationId) {
+      void _registerPresentationIdentity(hostId, presentationId).catch((error: unknown) => {
+        console.warn('[Sidebar] identity registration failed', error);
+      });
+      return;
+    }
     if (!hostId || !emitSidebarRpcRequest) return;
     emitSidebarRpcRequest(
       SIDEBAR_IPC_RPC_METHODS.windowPresentationUpdate,
@@ -1913,12 +1981,33 @@ export function initSidebarShortcuts(
         host_id: hostId,
         presentationId,
         presentation_id: presentationId,
+        active: !!presentationId && _presentationState.foregroundHostId === hostId,
         source: "sidebar_presentation",
       },
     );
   }
 
+  function _registerPresentationIdentity(hostId: string, presentationId: string): Promise<void> {
+    const current = _presentationRegistrations.get(presentationId);
+    if (current) return current;
+    if (!requestSidebarRpc) return Promise.reject(new Error('Sidebar identity registration is unavailable'));
+    const pending = requestSidebarRpc(SIDEBAR_IPC_RPC_METHODS.windowPresentationUpdate, {
+      hostId, presentationId,
+      active: _presentationState.foregroundHostId === hostId,
+      source: 'sidebar_presentation',
+    }).then((result) => {
+      _qualifiedPresentations.set(presentationId, readSidebarWindowIdentity(result));
+    }).catch((error: unknown) => {
+      if (_presentationRegistrations.get(presentationId) === pending) _presentationRegistrations.delete(presentationId);
+      throw error;
+    });
+    _presentationRegistrations.set(presentationId, pending);
+    return pending;
+  }
+
   function publishPresentationIdentities(): void {
+    _presentationRegistrations.clear();
+    _qualifiedPresentations.clear();
     _iframeMap.forEach((entry, key) => {
       if (!key.startsWith("dock:")) return;
       _publishPresentationIdentity(key.slice("dock:".length), entry.presentationId);
@@ -1959,7 +2048,9 @@ export function initSidebarShortcuts(
         }),
       );
     }
-    return target;
+    if (!target) return null;
+    const identity = _qualifiedPresentations.get(target.presentationId);
+    return identity ? { ...target, ...identity } : null;
   }
 
   function _bindAgentPresentationIfCurrent(
@@ -3871,7 +3962,7 @@ export function initSidebarShortcuts(
     const url = _shortcutFrameUrl(sc, entry, options);
     if (!url) return false;
     const forceReload = !!options.forceReload;
-    let loadUrl = _extensionWebviewPresentationUrl(
+    let loadUrl = await _extensionWebviewPresentationUrl(
       sc,
       url,
       entry.presentationId,
@@ -4246,8 +4337,11 @@ export function initSidebarShortcuts(
       }
     });
 
-    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const resolvedActive = _resolveDockedShortcut(
+      resolvedShortcuts, active || _resolveActive(uiPrefs, resolvedShortcuts),
+    );
     const activeKey = resolvedActive ? resolvedActive.key : "";
+    _displayedShortcutKey = activeKey;
 
     // Eager load (best-effort). For framework apps this will start apps too.
     const eager = resolvedShortcuts.filter(
@@ -4272,20 +4366,18 @@ export function initSidebarShortcuts(
     // Mark active + lazy-load active.
     let hasActive = false;
     _iframeMap.forEach((entry, key) => {
-      const isActive = !!(activeKey && key === activeKey);
+      const isActive = !!(activeKey && key === activeKey && !detachedKeys.has(key));
       entry.iframe.classList.toggle("is-active", isActive);
       if (isActive) hasActive = true;
     });
     _electronNativeSurfaceMap.forEach((entry, key) => {
-      const isActive = !!(activeKey && key === activeKey);
+      const isActive = !!(activeKey && key === activeKey && !detachedKeys.has(key));
       entry.placeholder.classList.toggle("is-active", isActive);
       if (isActive) hasActive = true;
     });
 
     let activeReady = false;
-    if (resolvedActive && detachedKeys.has(resolvedActive.key)) {
-      activeReady = true;
-    } else if (hasActive && resolvedActive) {
+    if (hasActive && resolvedActive) {
       const nativeEntry = _electronNativeSurfaceMap.get(resolvedActive.key);
       if (nativeEntry) {
         activeReady = await _placeElectronNativeSurface(
@@ -5359,6 +5451,13 @@ export function initSidebarShortcuts(
   }
 
   async function init() {
+    if (!_disposeDockedFocus) {
+      _disposeDockedFocus = bindDockedFocus(window, document, _onDockedIframeFocus);
+      window.addEventListener("beforeunload", () => {
+        _disposeDockedFocus?.();
+        _disposeDockedFocus = null;
+      }, { once: true });
+    }
     const electronBridge = _electronSurfaceBridge();
     if (electronBridge && !_electronSurfaceEventsUnsubscribe) {
       _electronSurfaceEventsUnsubscribe = electronBridge.onSidebarSurfaceEvent(

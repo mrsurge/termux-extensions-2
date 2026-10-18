@@ -48,6 +48,8 @@ export interface WorkbenchStatus {
 }
 
 export interface WorkbenchLike {
+  initializeDocuments: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  codeActions: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   state?: WorkbenchStatus & Record<string, unknown>;
   resync: () => unknown;
   languageCatalog: () => Promise<unknown>;
@@ -255,6 +257,7 @@ function missingPathError(id: unknown): Record<string, unknown> {
 }
 
 const LANGUAGE_ACTIVATION_METHODS = new Set([
+  "vscode.codeActions.provide",
   "vscode.documentSymbols",
   "vscode.foldingRanges",
   "vscode.hover",
@@ -274,6 +277,7 @@ const LANGUAGE_ACTIVATION_METHODS = new Set([
 ]);
 
 const DOCUMENT_OPERATION_METHODS = new Set([
+  "vscode.codeActions.provide", "vscode.codeActions.resolve", "vscode.codeActions.release",
   "vscode.documentSymbols",
   "vscode.foldingRanges",
   "vscode.hover",
@@ -427,6 +431,7 @@ export async function dispatchJsonRpcRequest(
       serverRootPath: params.serverRootPath,
       commit: params.commit,
       proxyUri: params.proxyUri,
+      initialDocuments: params.initialDocuments,
     });
     runtime.buildStatusResult();
     runtime.logStatus("adapter_connected");
@@ -503,6 +508,7 @@ export async function dispatchJsonRpcRequest(
           params.codeServerSocketPath ??
           runtime.state.config.codeServerSocketPath,
         token: params.token ?? "00000000000000000000",
+        initialDocuments: params.initialDocuments,
       });
       mergeWorkbenchState(runtime);
       runtime.logStatus("adapter_reconnected");
@@ -664,6 +670,10 @@ export async function dispatchJsonRpcRequest(
     } catch (error) {
       return failure(id, -32000, error);
     }
+  }
+
+  if (method === "vscode.documents.initialize") {
+    return success(id, await runtime.wb.initializeDocuments(params));
   }
 
   if (method === "vscode.logicalDocuments.reconcile") {
@@ -991,6 +1001,13 @@ export async function dispatchJsonRpcRequest(
         generation: params.generation,
       }));
     return success(id, result);
+  }
+
+  if (method === 'vscode.codeActions.provide' || method === 'vscode.codeActions.resolve' || method === 'vscode.codeActions.release') {
+    const path = runtime.normalizePathParam(params);
+    if (!path) return missingPathError(id);
+    const operation = method.slice('vscode.codeActions.'.length);
+    return success(id, await runDocumentOperation('codeActions.' + operation, () => runtime.wb.codeActions(operation, {...params,path})));
   }
 
   if (method === "vscode.inlayHints") {

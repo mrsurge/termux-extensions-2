@@ -60,6 +60,10 @@ export type LocalFrameworkPhase =
 export type LocalFrameworkOwnership = "none" | "external" | "electron";
 
 export type LocalFrameworkState = {
+  startupStage?: "preparing" | "building" | "build-finished" | "starting";
+  startupUnit?: string;
+  startupOutput?: string;
+  cancellableStartup?: boolean;
   supported: boolean;
   phase: LocalFrameworkPhase;
   ownership: LocalFrameworkOwnership;

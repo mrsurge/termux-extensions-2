@@ -39,6 +39,7 @@ export interface ContentEditTarget {
 export interface ExplorerContentSearchMatch {
   editTarget?: ContentEditTarget;
   line?: number;
+  endLine?: number;
   column?: number;
   text?: string;
   snippet?: string;
@@ -121,6 +122,7 @@ export interface ExplorerSearchIdentity {
 export interface SearchContentDtoMatch {
   editTarget?: ContentEditTarget;
   lineNumber?: number;
+  endLineNumber?: number;
   columnNumber?: number;
   lineText?: string;
   snippet?: string;

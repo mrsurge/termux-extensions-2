@@ -100,6 +100,8 @@ function replaceHeader(headers, name, value) {
 // Prefixes backed by complete OTA directory entries. Keep API prefixes limited
 // to immutable static trees so dynamic backend routes always stay on TE2.
 const LOCAL_PREFIXES = [
+  "/api/app/als-rs/proxy/static/",
+  "/apps/als_rs/frontend/static/",
   "/apps/terminal/vendor/android-terminalapp-assets-js/",
   "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
   "/static/vendor/codicons/",
@@ -138,6 +140,7 @@ const LOCAL_FILES = new Set([
   "/apps/code_te2/static/dist/explorer-search-widget.css",
   "/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
   "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
+  "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/codicon-LN6W7LCM.ttf",
   "/api/app/code_te2/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
   "/apps/code_te2/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
   "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
@@ -146,6 +149,7 @@ const LOCAL_FILES = new Set([
 
 // Exact built-in resources only; dynamic app/API URLs retain framework routing.
 const BUILTIN_APP_ASSETS = new Map([
+  ["/apps/code_te2/extensions/sidebar_extension/manifest.json", "/apps/code_te2/extensions/sidebar_extension/manifest.json"],
   ["/apps/als_rs/template.html", "/apps/als_rs/template.html"],
   ["/apps/by-id/als-rs/template.html", "/apps/als_rs/template.html"],
   ["/apps/als_rs/main.js", "/apps/als_rs/main.js"],
@@ -177,6 +181,9 @@ const BUILTIN_APP_ASSETS = new Map([
 ]);
 
 function localPathFor(urlPath) {
+  if (urlPath.startsWith("/api/app/als-rs/proxy/static/")) {
+    return "/apps/als_rs/frontend/static/" + urlPath.slice("/api/app/als-rs/proxy/static/".length);
+  }
   if (BUILTIN_APP_ASSETS.has(urlPath)) return BUILTIN_APP_ASSETS.get(urlPath);
   if (!LOCAL_FILES.has(urlPath) && !LOCAL_PREFIXES.some((prefix) => urlPath.startsWith(prefix))) {
     return null;

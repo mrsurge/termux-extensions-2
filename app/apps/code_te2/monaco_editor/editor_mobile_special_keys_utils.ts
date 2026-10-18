@@ -100,6 +100,12 @@ export function dispatchMobileEditorKey(
     modifiers?: SyntheticKeyModifiers;
   } = {},
 ): boolean {
+  // The host's Jmp button forwards Ctrl+G to the owning editor realm. Run the
+  // existing action even if that realm currently has a quick-input open.
+  if (options.modifiers?.ctrl && !options.modifiers.alt && !options.modifiers.shift
+    && key.key.toLowerCase() === 'g') {
+    return runEditorAction(editor, 'editor.action.gotoLine');
+  }
   const quickInput = focusedQuickInput(win.document);
   if (quickInput) {
     const state = activeModifierStates.get(win);
@@ -307,12 +313,11 @@ export function bindMobileEditorSpecialKeys(
   const tab = createButton(doc, 'Tab', 'Tab');
   const home = createButton(doc, 'Home', 'Home');
   const end = createButton(doc, 'End', 'End');
-  const pageUp = createButton(doc, 'PgUp', 'Page up');
-  const pageDown = createButton(doc, 'PgDn', 'Page down');
+  const jump = createButton(doc, 'Jmp', 'Go to Line (:)');
   const shift = createButton(doc, 'Shift', 'Shift next key');
   const palette = createButton(doc, 'Cmd', 'Command Palette (Ctrl+Shift+P)');
   const escape = createButton(doc, 'Esc', 'Escape');
-  navigationRow.append(shift, tab, home, end, pageUp, pageDown, palette, escape);
+  navigationRow.append(shift, tab, home, end, jump, palette, escape);
   panel.append(primaryRow, navigationRow);
 
   const ctrlWindow = win as MobileSpecialKeysWindow;
@@ -645,6 +650,13 @@ export function bindMobileEditorSpecialKeys(
       } else quickInputAction(editor, 'p');
       state.consumeOneShot();
     }),
+    bindPointerAction(jump, () => {
+      const owner = currentMobileEditorOwner(win);
+      if (role === 'primary' && owner === 'secondary') {
+        requestMobileEditorSpecialKey(win, owner, { key: 'g', code: 'KeyG', keyCode: 71 }, { ctrl: true, alt: false, shift: false });
+      } else runEditorAction(editor, 'editor.action.gotoLine');
+      state.consumeOneShot();
+    }),
     bindPointerAction(escape, () => dispatchActiveKey({ key: 'Escape', code: 'Escape', keyCode: 27 })),
     bindPointerAction(trigger, () => {
       if (role === 'secondary') {
@@ -711,16 +723,6 @@ export function bindMobileEditorSpecialKeys(
       key: 'End',
       code: 'End',
       keyCode: 35,
-    })),
-    bindPointerAction(pageUp, () => dispatchActiveKey({
-      key: 'PageUp',
-      code: 'PageUp',
-      keyCode: 33,
-    })),
-    bindPointerAction(pageDown, () => dispatchActiveKey({
-      key: 'PageDown',
-      code: 'PageDown',
-      keyCode: 34,
     })),
   ];
 

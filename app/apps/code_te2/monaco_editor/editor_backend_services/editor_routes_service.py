@@ -119,6 +119,7 @@ def build_view_state_dict(
         pass
     return {
         "showLineNumbers": editor_prefs.get("showLineNumbers"),
+        "relativeLineNumbers": editor_prefs.get("relativeLineNumbers", False),
         "showSyntax": editor_prefs.get("showSyntax"),
         "showShading": editor_prefs.get("showShading"),
         "wordWrap": editor_prefs.get("wordWrap"),
@@ -127,6 +128,8 @@ def build_view_state_dict(
         "showInlayHints": editor_prefs.get("showInlayHints"),
         "theme": editor_prefs.get("theme"),
         "autoSave": editor_prefs.get("autoSave"),
+        "autosaveRevision": editor_prefs.get("autosaveRevision", 0),
+        "autosaveProject": editor_prefs.get("autosaveProject"),
         "showInlineDiffs": editor_prefs.get("showInlineDiffs"),
         "trackAgentSidebarEdits": editor_prefs.get("trackAgentSidebarEdits"),
         "fontScale": editor_prefs.get("fontScale"),

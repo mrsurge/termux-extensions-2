@@ -4,20 +4,60 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any, List, Optional
+from collections.abc import Callable
+from typing import Protocol, Self, TypeVar, cast
 from urllib.parse import quote
 from urllib.parse import urlencode
 from urllib import request as urllib_request
 
-from fastapi import APIRouter, HTTPException, Body, Query
-from fastapi.responses import JSONResponse
+import msgspec
+from starlette.exceptions import HTTPException
 
 from app.libs.archiver_service import browse_archive
 from app.libs.jobs import manager as job_manager
 from app.utils.paths import _resolve_user_path
 
-archive_manager_bp = APIRouter()
 APP_ID = str(os.environ.get("TE_APP_ID") or "archive_manager").strip() or "archive_manager"
+JsonObject = dict[str, object]
+
+
+class _ReadableHttpResponse(Protocol):
+    def __enter__(self) -> Self: ...
+    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: object | None) -> None: ...
+    def read(self) -> bytes: ...
+
+
+class _JobResult(Protocol):
+    def to_public_dict(self) -> JsonObject: ...
+
+
+class _JobManager(Protocol):
+    def create_job(self, job_type: str, params: JsonObject) -> _JobResult: ...
+
+
+class LaunchArchiveRequest(msgspec.Struct, kw_only=True):
+    archive_path: str = ""
+    internal: str | None = None
+    filesystem_path: str | None = None
+    destination: str | None = None
+    show_hidden: bool = False
+
+
+class ExtractArchiveRequest(msgspec.Struct, kw_only=True):
+    archive_path: str = ""
+    items: list[str] | None = None
+    destination: str | None = None
+    options: JsonObject | None = None
+
+
+RequestT = TypeVar("RequestT", bound=msgspec.Struct)
+
+
+def _request(payload: JsonObject, shape: type[RequestT]) -> RequestT:
+    try:
+        return msgspec.convert(payload, type=shape, strict=False)
+    except msgspec.ValidationError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 def _framework_url() -> str:
@@ -42,8 +82,9 @@ def _post_serving_readiness() -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib_request.urlopen(req, timeout=5) as resp:
-        resp.read()
+    response = cast(_ReadableHttpResponse, urllib_request.urlopen(req, timeout=5))
+    with response as resp:
+        _ = resp.read()
 
 
 async def te2_app_backend_serving() -> None:
@@ -62,8 +103,7 @@ async def te2_app_backend_serving() -> None:
 # Routes
 # ---------------------------------------------------------------------------
 
-@archive_manager_bp.get("/ping")
-def ping():
+def ping() -> JsonObject:
     return {"ok": True, "data": {"message": "archive-manager ready"}}
 
 
@@ -71,8 +111,8 @@ def _looks_like_archive(path: Path) -> bool:
     lower = path.name.lower()
     return any(lower.endswith(ext) for ext in {".7z", ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".rar"})
 
-def _list_directory_entries(path: Path, show_hidden: bool) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
+def _list_directory_entries(path: Path, show_hidden: bool) -> list[JsonObject]:
+    entries: list[JsonObject] = []
     try:
         iterator = os.scandir(path)
     except PermissionError as exc:
@@ -91,7 +131,7 @@ def _list_directory_entries(path: Path, show_hidden: bool) -> list[dict[str, Any
             except Exception:
                 stat = None
             is_dir = entry.is_dir(follow_symlinks=False)
-            item = {
+            item: JsonObject = {
                 "id": str(entry_path),
                 "name": name,
                 "type": "directory" if is_dir else "file",
@@ -101,16 +141,15 @@ def _list_directory_entries(path: Path, show_hidden: bool) -> list[dict[str, Any
                 "is_archive": (not is_dir) and _looks_like_archive(entry_path),
             }
             entries.append(item)
-    entries.sort(key=lambda item: (item["type"] != "directory", item["name"].lower()))
+    entries.sort(key=lambda item: (item["type"] != "directory", cast(str, item["name"]).lower()))
     return entries
 
-@archive_manager_bp.get("/browse")
 def browse(
-    path: str = Query("~"),
-    internal: str = Query(""),
-    hidden: bool = Query(False),
-    archive: bool = Query(False),
-):
+    path: str = "~",
+    internal: str = "",
+    hidden: bool = False,
+    archive: bool = False,
+) -> JsonObject:
     raw_path = path
     internal = (internal or "").strip('/')
     show_hidden = hidden
@@ -146,7 +185,10 @@ def browse(
         raise HTTPException(status_code=400, detail="Unsupported archive type.")
 
     try:
-        entries = browse_archive(target_path, internal, show_hidden)
+        # Existing archive service is a separately owned legacy boundary. Admit
+        # its known JSON records without leaking its Any annotations downstream.
+        archive_browser = cast(Callable[[Path, str, bool], list[JsonObject]], browse_archive)
+        entries = archive_browser(target_path, internal, show_hidden)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to browse archive: {exc}")
 
@@ -160,13 +202,13 @@ def browse(
     return {"ok": True, "data": payload}
 
 
-@archive_manager_bp.post("/archives/launch")
-def launch_archive(payload: dict = Body(...)):
-    raw_archive_path = payload.get("archive_path")
-    internal = (payload.get("internal") or "").strip('/')
-    filesystem_path_raw = payload.get("filesystem_path")
-    destination_raw = payload.get("destination")
-    show_hidden = bool(payload.get("show_hidden"))
+def launch_archive(payload: JsonObject) -> JsonObject:
+    request = _request(payload, LaunchArchiveRequest)
+    raw_archive_path = request.archive_path
+    internal = (request.internal or "").strip('/')
+    filesystem_path_raw = request.filesystem_path
+    destination_raw = request.destination
+    show_hidden = request.show_hidden
 
     if not isinstance(raw_archive_path, str) or not raw_archive_path.strip():
         raise HTTPException(status_code=400, detail="archive_path is required")
@@ -208,19 +250,20 @@ def launch_archive(payload: dict = Body(...)):
         "app_url": app_url,
     }}
 
-@archive_manager_bp.post("/archives/extract")
-def extract_archive(payload: dict = Body(...)):
-    raw_archive_path = payload.get("archive_path")
-    items = payload.get("items") or []
-    destination_raw = payload.get("destination")
-    options = payload.get("options") or {}
+def extract_archive(payload: JsonObject) -> JsonObject:
+    request = _request(payload, ExtractArchiveRequest)
+    raw_archive_path = request.archive_path
+    items = request.items or []
+    destination_raw = request.destination
+    options = request.options or {}
 
     if not isinstance(raw_archive_path, str) or not raw_archive_path.strip():
         raise HTTPException(status_code=400, detail="archive_path is required")
 
     try:
-        job = job_manager.create_job(
-            type="extract_archive",
+        manager = cast(_JobManager, job_manager)
+        job = manager.create_job(
+            job_type="extract_archive",
             params={
                 "archive_path": raw_archive_path,
                 "items": items,
@@ -232,4 +275,9 @@ def extract_archive(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Failed to create extraction job: {exc}")
 
     return {"ok": True, "data": job.to_public_dict()}
+
+
+from .http_app import ArchiveManagerASGI
+
+TE2_ASGI_APP = ArchiveManagerASGI()
 

@@ -585,6 +585,13 @@ add explicit preparation/build phase events in `framework/bootstrap/bootstrap.py
 and phase-specific deadlines for both clients. Those events are not required of
 the last release and must not become a prerequisite for this mobile fix.
 
+2026-10-15 follow-up: the Desktop implementation is now source-validated under
+`docs/apps/desktop_build_startup/PLAN.md` and `TRACKER.md`. It enables the same
+indefinite handshake-first wait, adds optional bootstrap FD3 build progress, and
+keeps Cancel usable while Start awaits readiness. This supersedes the Desktop
+deferral above, not the original mobile release-compatibility requirements.
+No new APK or Desktop live acceptance is implied by those source checks.
+
 Validation for the eventual implementation: published release startup without
 Cargo/prebuild, delayed editable build beyond the old deadlines, last-line
 progress, cancellation during compilation, early exit, late-ready cancellation

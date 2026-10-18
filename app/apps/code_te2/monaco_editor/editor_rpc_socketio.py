@@ -170,14 +170,14 @@ class EditorRpcSocketIONamespace(NativeNamespace):
                 trace("rpc.value_error", request_id=request_id, error=repr(value_error))
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                None,
+                request_id if isinstance(request_id, (str, int)) else None,
                 JSONRPC_INVALID_PARAMS,
                 str(value_error),
             )
         except PermissionError as permission_error:
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                None,
+                request_id if isinstance(request_id, (str, int)) else None,
                 JSONRPC_INVALID_PARAMS,
                 str(permission_error),
             )
@@ -188,7 +188,7 @@ class EditorRpcSocketIONamespace(NativeNamespace):
                 traceback.print_exc()
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                None,
+                request_id if isinstance(request_id, (str, int)) else None,
                 JSONRPC_INTERNAL_ERROR,
                 str(internal_error),
                 data={"kind": "editor_rpc_internal"},

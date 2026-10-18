@@ -6,6 +6,20 @@ import org.junit.Test
 
 class CefriumAssetRoutesTest {
     @Test
+    fun mapsSidebarMetadataAndBootstrapRelativeFontWithoutOpeningTheirTrees() {
+        val sidebar = "/apps/code_te2/extensions/sidebar_extension/manifest.json"
+        assertEquals(sidebar, CefriumAssetRoutes.localPath(sidebar))
+        assertNull(CefriumAssetRoutes.localPath("/apps/code_te2/extensions/sidebar_extension/private.json"))
+        assertEquals(
+            "/static/vendor/monaco-editor-core/te2-lang/bootstrap/codicon-LN6W7LCM.ttf",
+            CefriumAssetRoutes.localPath(
+                "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/codicon-LN6W7LCM.ttf",
+            ),
+        )
+        assertNull(CefriumAssetRoutes.localPath("/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/private.js"))
+    }
+
+    @Test
     fun mapsFrameworkAliasesIntoTheInstalledAssetTree() {
         assertEquals(
             "/apps/code_te2/template.html",
@@ -27,6 +41,13 @@ class CefriumAssetRoutesTest {
 
     @Test
     fun rejectsDynamicAndUndeclaredFrameworkPaths() {
+        assertEquals("/apps/als_rs/frontend/static/dist/codex_agent.js",
+            CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/static/dist/codex_agent.js"))
+        assertEquals("/apps/als_rs/frontend/static/vendor/tree-sitter-bash/tree-sitter-bash.wasm",
+            CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/static/vendor/tree-sitter-bash/tree-sitter-bash.wasm"))
+        assertNull(CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/"))
+        assertNull(CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/api/health"))
+        assertNull(CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/socket.io/"))
         assertNull(CefriumAssetRoutes.localPath("/api/apps/catalog"))
         assertNull(CefriumAssetRoutes.localPath("/api/app/code_te2/socket.io"))
         assertNull(CefriumAssetRoutes.localPath("/apps/file_explorer/file_explorer.py"))

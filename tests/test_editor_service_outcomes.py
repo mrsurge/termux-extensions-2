@@ -66,6 +66,12 @@ class Mismatch(Exception):
 
 
 class ServiceOutcomeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_relative_numbers_use_existing_preference_store(self) -> None:
+        store = Stores()
+        result = await self.preference({"key": "relativeLineNumbers", "value": True}, store)
+        self.assertEqual(store.updates, [{"relativeLineNumbers": True}])
+        self.assertTrue(result["ok"])
+
     async def preference(self, data: JsonMap, store: Stores) -> JsonMap:
         return await handle_update_preference(
             data, editors=[], preferences_store=store, history_store=store,
@@ -94,6 +100,7 @@ class ServiceOutcomeTests(unittest.IsolatedAsyncioTestCase):
             ({"key": "fontScale", "value": 42}, "bad scale"),
             ({"key": "cursorStyle", "value": "beam"}, "Unsupported cursor style: 'beam'"),
             ({"key": "comparisonMode", "value": "bad"}, "Invalid comparison mode"),
+            ({"key": "relativeLineNumbers", "value": "true"}, "relativeLineNumbers must be boolean"),
         ]
         for data, detail in cases:
             store = Stores()
@@ -106,7 +113,7 @@ class ServiceOutcomeTests(unittest.IsolatedAsyncioTestCase):
         store = Stores()
         self.assertEqual(await self.preference({"key": "comparisonMode", "value": "disk"}, store),
                          {"ok": True, "data": {"ready": True}})
-        self.assertEqual(store.updates, [{"showInlineDiffs": False, "showDraftDiffs": True, "autoSave": False}])
+        self.assertEqual(store.updates, [{"showInlineDiffs": False, "showDraftDiffs": True}])
         store.failure = RuntimeError("store offline")
         with self.assertRaises(EditorServiceError) as error:
             _ = await self.preference({"key": "showShading", "value": True}, store)

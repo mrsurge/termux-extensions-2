@@ -1,0 +1,874 @@
+{
+  "tools": [
+    {
+      "name": "te2_app_open",
+      "description": "Return the launch and embed URLs for a TE2 framework app, starting it first if needed.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_app_start",
+      "description": "Start a TE2 framework app by app_id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_apps_reload",
+      "description": "Reload the TE2 app registry from disk without starting any apps.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_apps_templates",
+      "description": "List available local TE2 app templates from the user-local templates directory.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_console_eval",
+      "description": "Execute JavaScript in a live TE2 console worker through the framework-owned console relay.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "target_worker_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "default": 20.0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "target_worker_id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_console_search",
+      "description": "Search the persisted TE2 console transcript for plain-text matches.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "type": "integer"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_console_tail",
+      "description": "Return the last N TE2 console log entries from the persisted transcript.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 100,
+            "type": "integer"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_console_workers",
+      "description": "List worker IDs seen in the persisted TE2 console transcript, including historical workers that may no longer be connected.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_console_workers_live",
+      "description": "List currently registered live TE2 console workers from the framework-owned console runtime.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_framework_eval",
+      "description": "Execute trusted Python in the exact worker live loop. Not sandboxed. No automatic retry: timeout does not cancel execution. backend is the live module; statements return result. Requires explicit runtime credential.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "type": "string"
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "shell_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential",
+          "app_id",
+          "shell_id",
+          "instance_id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_framework_status",
+      "description": "Query one exact live Python debug target, without evaluation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "type": "string"
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "shell_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential",
+          "app_id",
+          "shell_id",
+          "instance_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_framework_workers",
+      "description": "Discover live Python debug targets. Requires runtime-debug and an explicit runtime credential.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_fws_log_inspect",
+      "description": "Inspect framework-shell log events with generic plain/json/jsonrpc classification, plain-prefix signatures for prefixed plain logs, and optional format/signature exclusion filters.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "shell_id": {
+            "type": "string"
+          },
+          "stream": {
+            "default": "both",
+            "type": "string"
+          },
+          "query": {
+            "default": "",
+            "type": "string"
+          },
+          "lines": {
+            "default": 200,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 100,
+            "type": "integer"
+          },
+          "regex": {
+            "default": false,
+            "type": "boolean"
+          },
+          "ignore_case": {
+            "default": false,
+            "type": "boolean"
+          },
+          "format": {
+            "default": "",
+            "type": "string"
+          },
+          "signature": {
+            "default": "",
+            "type": "string"
+          },
+          "exclude_query": {
+            "default": "",
+            "type": "string"
+          },
+          "exclude_signature": {
+            "default": "",
+            "type": "string"
+          },
+          "include_io_metadata": {
+            "default": false,
+            "type": "boolean"
+          },
+          "include_stdin": {
+            "default": false,
+            "type": "boolean"
+          },
+          "include_timestamps": {
+            "default": false,
+            "type": "boolean"
+          },
+          "include_output_metadata": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "shell_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_fws_log_search",
+      "description": "Search framework shell logs directly via framework_shells manager.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "shell_id": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "stream": {
+            "default": "both",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "type": "integer"
+          },
+          "regex": {
+            "default": false,
+            "type": "boolean"
+          },
+          "ignore_case": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "shell_id",
+          "query"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_fws_log_tail",
+      "description": "Tail framework shell logs directly via framework_shells manager.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "shell_id": {
+            "type": "string"
+          },
+          "stream": {
+            "default": "both",
+            "type": "string"
+          },
+          "lines": {
+            "default": 200,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shell_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_fws_running",
+      "description": "List framework-shells records directly from the shared runtime store.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_fws_shell_get",
+      "description": "Return framework-shell detail directly from framework_shells manager.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "shell_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "shell_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_fws_shell_write",
+      "description": "Write text to a live framework-shell stdin surface through the shared framework_shells manager. The eof flag is a low-level explicit close option.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "shell_id": {
+            "type": "string"
+          },
+          "data": {
+            "default": "",
+            "type": "string"
+          },
+          "append_newline": {
+            "default": false,
+            "type": "boolean"
+          },
+          "eof": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "shell_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_mcp_status",
+      "description": "Return te2-mcp status, active local paths, and serving mode.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_scaffold_proxy_wrapper",
+      "description": "Scaffold a thin TE2 proxy-shell wrapper app in the user-local TE2 apps directory.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          },
+          "project_root": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "type": "string"
+          },
+          "start_path": {
+            "default": "/",
+            "type": "string"
+          },
+          "health_path": {
+            "default": "/api/health",
+            "type": "string"
+          },
+          "icon_src": {
+            "default": "",
+            "type": "string"
+          },
+          "icon_text": {
+            "default": "",
+            "type": "string"
+          },
+          "icon_emoji": {
+            "default": "",
+            "type": "string"
+          },
+          "readiness_timeout": {
+            "default": 20.0,
+            "type": "number"
+          },
+          "socketio_enabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "socketio_inject_path": {
+            "default": false,
+            "type": "boolean"
+          },
+          "socketio_namespace_marker": {
+            "default": "",
+            "type": "string"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "overwrite": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "app_id",
+          "project_root",
+          "command",
+          "port"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_sidebar_add_app_shortcut",
+      "description": "Add a TE2 framework app as a persistent sidebar shortcut using the existing framework_app shortcut model.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "load": {
+            "default": "lazy",
+            "type": "string"
+          },
+          "header": {
+            "default": true,
+            "type": "boolean"
+          },
+          "activate": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "app_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_validate_proxy_wrapper",
+      "description": "Validate a local TE2 proxy-shell wrapper app before reloading the registry or starting the app.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_wba_eval",
+      "description": "Evaluate trusted JavaScript on the exact live WBA Node/Bun loop via its private MessagePack pipe. wb, state, trace and persistent probe bindings are available; use an expression or set result in statements, with await supported. Not sandboxed. Timeout does not stop execution or undo mutations; never automatically retry. Requires runtime-debug, explicit credential, exact parent and WBA identities.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "type": "string"
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "shell_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "wba_shell_id": {
+            "type": "string"
+          },
+          "wba_instance_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential",
+          "app_id",
+          "shell_id",
+          "instance_id",
+          "wba_shell_id",
+          "wba_instance_id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "te2_wba_status",
+      "description": "Discover the current WBA process identity through its exact Code TE2 parent worker. Requires runtime-debug and an explicit credential; no automatic restart.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "credential": {
+            "type": "string"
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "shell_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential",
+          "app_id",
+          "shell_id",
+          "instance_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "_meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    }
+  ]
+}

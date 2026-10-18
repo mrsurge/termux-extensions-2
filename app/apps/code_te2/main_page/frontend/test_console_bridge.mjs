@@ -152,6 +152,27 @@ describe('console bridge eval', () => {
 });
 
 describe('console bridge worker identity', () => {
+  test('assigned handle is used for logs while reconnect keeps original context', async () => {
+    const mockSocket = createMockSocket();
+    const mockWindow = createMockWindow();
+    mockWindow.location = { search: '?clientInstanceId=client-a&presentationId=page-a' };
+    const bridge = await loadBridge(mockWindow, mockSocket);
+    try {
+      const registration = mockSocket._emitted.find(e => e.event === 'console:register').data;
+      assert.equal(registration.workerId, 'test-worker');
+      assert.equal(registration.clientInstanceId, 'client-a');
+      assert.equal(registration.presentationId, 'page-a');
+      assert.equal(registration.compactIdentity, true);
+      mockSocket._fire('console:registered', { requestedWorkerId: 'unrelated', workerId: 'wrong:1234' });
+      assert.equal(bridge.getConsoleBridgeStatus().workerId, 'test-worker');
+      mockSocket._fire('console:registered', { requestedWorkerId: 'test-worker', workerId: 'test:Ab12.Cd34' });
+      assert.equal(bridge.getConsoleBridgeStatus().workerId, 'test:Ab12.Cd34');
+      console.log('identity-test');
+      assert.equal(mockSocket._emitted.findLast(e => e.event === 'console:log').data.workerId, 'test:Ab12.Cd34');
+      mockSocket._fire('connect');
+      assert.deepEqual(mockSocket._emitted.findLast(e => e.event === 'console:register').data, registration);
+    } finally { bridge.destroy(); }
+  });
   test('short prefix keeps a stable four-character per-window owner', async () => {
     const mockSocket = createMockSocket();
     const mockWindow = createMockWindow();

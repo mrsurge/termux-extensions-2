@@ -188,6 +188,9 @@ async def handle_host_diagnostics_mention_request(
     source_name: str,
 ) -> JsonMap:
     from ..ui_ipc.sidebar_ws import emit_sidebar_mention_targeted
+    from ..ui_ipc.sidebar_mention_routing import bind_sidebar_mention_client
+
+    data = bind_sidebar_mention_client(data, source_name)
 
     path = data.get("path")
     if not isinstance(path, str) or not path.strip():

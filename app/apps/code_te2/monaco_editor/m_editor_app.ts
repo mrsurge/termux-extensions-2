@@ -104,6 +104,7 @@ import {
 import { applyGitBaselines as applyGitBaselinesRuntime } from "./editor_git_baseline_runtime.ts";
 import { createEditorLanguageBridgeProviders } from "./editor_language_bridge_providers.ts";
 import { registerEditorSaveMirrorSocketHandlers } from "./editor_save_mirror_socket_handlers.ts";
+import { getBooleanPref } from "./editor_pref_read_utils.ts";
 import { registerEditorRuntimeSocketHandlers } from "./editor_socket_runtime_handlers.ts";
 import { createEditorBreadcrumbRuntime } from "./editor_breadcrumb_runtime.ts";
 import { createEditorRpcHostActionRuntime } from "./editor_rpc_host_action_runtime.ts";
@@ -111,7 +112,7 @@ import { bootMonacoRuntime } from "./editor_monaco_boot_runtime.ts";
 import { registerEditorSocketConnectionHandlers } from "./editor_socket_connection_runtime.ts";
 import { createEditorWorkbenchLanguageCatalogRuntime } from "./editor_workbench_language_catalog_runtime.ts";
 import { createEditorWorkbenchRuntime } from "./editor_workbench_runtime.ts";
-import { createEditorRpcTransport } from "./editor_rpc_transport.ts";
+import { createEditorRpcTransport, publishEditorControlResponse } from "./editor_rpc_transport.ts";
 import {
   EDITOR_RPC_METHODS,
   EDITOR_RPC_NOTIFICATIONS,
@@ -132,8 +133,12 @@ import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.
 import { createEditorExtensionNavigationRuntime } from "./editor_extension_navigation_runtime.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
+import { createEditorMentionSender } from "./editor_mention_request_runtime.ts";
+import { installEditorKeyboardRuntime } from './editor_keyboard_runtime.ts';
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
-import { createEditorExtensionStateRuntime } from "./editor_extension_state_runtime.ts";
+import { createEditorExtensionStateRuntime, buildExtensionEditorSelection } from "./editor_extension_state_runtime.ts";
+import { createEditorHoverCommandRuntime } from './editor_hover_command_runtime.ts';
+import { createEditorQuickFixRuntime } from './editor_quick_fix_runtime.ts';
 import {
   createEditorCodeInspectorRuntime,
   type CodeInspectorRuntime,
@@ -417,6 +422,11 @@ interface MonacoBootWindowLike extends Window {
   const _workerLogOnce: Record<string, boolean> = Object.create(null);
   let currentPath: string | null = null;
   let cachedPrefs: CachedPrefsLike | null = null;
+  const keyboardRuntime = installEditorKeyboardRuntime({
+    getEditor: () => editor,
+    getPrefs: () => cachedPrefs,
+    updatePreference: (key, value) => editorRpcCall('editor.preference.update', { key, value }),
+  });
   let editorRpcSocket: EditorSocketLike | null = null;
   let wbaRpcSocket: EditorSocketLike | null = null;
   let lastModelReadySyncKey: string | null = null;
@@ -483,20 +493,18 @@ interface MonacoBootWindowLike extends Window {
     getCurrentPath: function () {
       return currentPath;
     },
-    sendEditorMentionRequest: function (payload) {
-      const buildTargetedPayload =
-        bootWindow.__te2InlineMonacoBuildSidebarMentionPayload;
-      if (typeof buildTargetedPayload !== "function") return false;
-      try {
-        return editorRpcNotify(
-          EDITOR_RPC_METHODS.mentionRequest,
-          buildTargetedPayload(payload),
-        );
-      } catch (error) {
-        console.warn("[mention] no active agent presentation", error);
-        return false;
-      }
-    },
+    sendEditorMentionRequest: createEditorMentionSender({
+      isConnected: () => isEditorRpcConnected(),
+      buildTargetedPayload(payload) {
+        const build = bootWindow.__te2InlineMonacoBuildSidebarMentionPayload;
+        if (typeof build !== 'function') throw new Error('No active agent presentation');
+        return build(payload);
+      },
+      request: payload => editorRpcCall(EDITOR_RPC_METHODS.mentionRequest, payload),
+      toast: message => window.dispatchEvent(new CustomEvent('code-te2:editor-notify', {
+        detail: { message },
+      })),
+    }),
     goToDefinition: function () {
       codeInspectorRuntime?.goToDefinition();
     },
@@ -1030,7 +1038,14 @@ interface MonacoBootWindowLike extends Window {
       return editor;
     },
     rpcCall: editorWbaRpcCall,
+    showLocations: (payload) => {
+      if (!codeInspectorRuntime) throw new Error('Code Inspector is unavailable');
+      codeInspectorRuntime.showLocations(payload);
+    },
   });
+
+  let hoverCommands: ReturnType<typeof createEditorHoverCommandRuntime> | null = null;
+  let quickFixes: ReturnType<typeof createEditorQuickFixRuntime> | null = null;
 
   function isEditorWbaRpcConnected(): boolean {
     return editorWbaRpcTransport.isConnected();
@@ -1191,6 +1206,8 @@ interface MonacoBootWindowLike extends Window {
       codeInspectorRuntime?.dispose();
       extensionEditorMenuRuntime?.dispose();
       extensionEditorStateRuntime?.dispose();
+      hoverCommands?.dispose();
+      quickFixes?.dispose();
     },
     { once: true },
   );
@@ -1219,6 +1236,27 @@ interface MonacoBootWindowLike extends Window {
       return monacoRangeFromProtoRange(window.monaco, range);
     },
     projectMonacoHoverContents: projectMonacoHoverContents,
+    prepareHoverContents: (contents: unknown[], context: NonNullable<ReturnType<typeof _currentLanguageContext>>) => {
+      if (!hoverCommands) {
+        const api = window.monaco as unknown as {
+          editor: { registerCommand: Parameters<typeof createEditorHoverCommandRuntime>[0]['registerCommand'] };
+        };
+        hoverCommands = createEditorHoverCommandRuntime({
+          registerCommand: (id, handler) => api.editor.registerCommand(id, handler),
+          getContext: _currentLanguageContext,
+          getGeneration: () => wbaConnectionRevision,
+          execute: (params) => editorWbaRpcCall('vscode.extensionCommands.execute', {
+            ...params, selection: buildExtensionEditorSelection(diffEditor?.getModifiedEditor?.() ?? editor),
+          }, { timeoutMs: 35000 }).catch((error: unknown) => {
+            editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, {
+              message: `Hover command failed: ${error instanceof Error ? error.message : String(error)}`,
+            });
+            throw error;
+          }),
+        });
+      }
+      return hoverCommands.prepare(contents, context);
+    },
     ensureTextmateTokenization: ensureTextmateTokenization,
     flushMirrorDebounce: _flushMirrorDebounce,
     ensureWorkbenchLanguageCatalogInstalled: function () {
@@ -1382,6 +1420,21 @@ interface MonacoBootWindowLike extends Window {
 
   function installWorkbenchLanguageBridgeProviders() {
     if (_languageWorkersEnabled()) return;
+    if (!quickFixes && window.monaco) quickFixes = createEditorQuickFixRuntime({
+      monaco: window.monaco as unknown as Parameters<typeof createEditorQuickFixRuntime>[0]['monaco'],
+      getContext: _currentLanguageContext,
+      getGeneration: () => wbaConnectionRevision,
+      getClient: () => String(fileEditorSocketQuery().client_instance_id || ''),
+      isEnabled: () => !_languageWorkersEnabled(),
+      getEditor: () => (diffEditor?.getModifiedEditor?.() ?? editor) as unknown as ReturnType<Parameters<typeof createEditorQuickFixRuntime>[0]['getEditor']>,
+      call: (method, params) => {
+        if (method === 'vscode.codeActions.provide') _flushMirrorDebounce();
+        return editorWbaRpcCall(method, {
+          ...params, selection: buildExtensionEditorSelection(diffEditor?.getModifiedEditor?.() ?? editor),
+        });
+      },
+      notify: message => { editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, {message}); },
+    });
     languageBridgeProviders.installWorkbenchLanguageBridgeProviders();
   }
 
@@ -1791,13 +1844,8 @@ interface MonacoBootWindowLike extends Window {
     eventName: string,
     payload: Record<string, unknown>,
   ): boolean {
-    if (eventName === "editor_open_complete") {
-      return editorRpcTransport.publishReliable(
-        EDITOR_RPC_METHODS.openCompletePublish,
-        payload,
-        { timeoutMs: 10000 },
-      );
-    }
+    const controlResponse = publishEditorControlResponse(editorRpcTransport, eventName, payload);
+    if (controlResponse !== null) return controlResponse;
     const eventMethodMap: Record<string, string> = {
       editor_cache_state: EDITOR_RPC_METHODS.cacheStatePublish,
       editor_draft_state: EDITOR_RPC_METHODS.draftStatePublish,
@@ -1805,7 +1853,6 @@ interface MonacoBootWindowLike extends Window {
       editor_ready: EDITOR_RPC_METHODS.readyPublish,
       "editor:iframe_ready": EDITOR_RPC_METHODS.readyPublish,
       editor_diagnostics_counts: EDITOR_RPC_METHODS.diagnosticsCountsPublish,
-      editor_save_snapshot_response: EDITOR_RPC_METHODS.saveSnapshotResponse,
       editor_issues_dump_response: EDITOR_RPC_METHODS.issuesDumpResponse,
     };
     const method = eventMethodMap[eventName];
@@ -1941,15 +1988,21 @@ interface MonacoBootWindowLike extends Window {
 
   async function ensureEditorWithPrefs() {
     await ensureDocumentTheme();
-    return await ensureEditorWithPrefsRuntime(editorLifecycleDeps);
+    const result = await ensureEditorWithPrefsRuntime(editorLifecycleDeps);
+    keyboardRuntime.bindEditor();
+    return result;
   }
 
   function ensurePlainEditorWithPrefs() {
-    return ensurePlainEditorWithPrefsRuntime(editorLifecycleDeps);
+    const result = ensurePlainEditorWithPrefsRuntime(editorLifecycleDeps);
+    keyboardRuntime.bindEditor();
+    return result;
   }
 
   function ensureDiffEditorWithPrefs() {
-    return ensureDiffEditorWithPrefsRuntime(editorLifecycleDeps);
+    const result = ensureDiffEditorWithPrefsRuntime(editorLifecycleDeps);
+    keyboardRuntime.bindEditor();
+    return result;
   }
 
   // Force-flush the mirror/didChange debounce so the ext host has the latest
@@ -2460,6 +2513,9 @@ interface MonacoBootWindowLike extends Window {
           typeof registerEditorSaveMirrorSocketHandlers
         >[0],
         buildSaveMirrorSocketDeps({
+          onGuardedDraftApplied: function (path: string, content: string) {
+            _wbPublishDidChange(path, content, model?.getLanguageId?.() || '', _wbCurrentGeneration());
+          },
           rpcNotifications: editorRpcTransport,
           getCurrentPath: function () {
             return currentPath;
@@ -2484,6 +2540,11 @@ interface MonacoBootWindowLike extends Window {
           },
           getMirrorHotWindowMs: function () {
             return prefRuntime.getMirrorHotWindowMs();
+          },
+          setAutosaveTransitionReadOnly: function (paused: boolean) {
+            uiEditorRuntime.withTransientReadOnlyChange(() => {
+              editor?.updateOptions?.({ readOnly: paused || getBooleanPref(cachedPrefs, 'readOnly') });
+            });
           },
           getClientInstanceId: function () {
             const value = fileEditorSocketQuery().client_instance_id;
@@ -2549,6 +2610,7 @@ interface MonacoBootWindowLike extends Window {
       );
 
       registerEditorWbaRuntimeHandlers(editorWbaRpcTransport, {
+        onQuickFixProvidersChanged: () => quickFixes?.changed(),
         onDocumentSymbolsProviderRegistered(language) {
           if (currentPath && model?.getLanguageId?.() === language) {
             breadcrumbRuntime.requestSymbols(currentPath, { reason: "provider_registered" });
@@ -2576,8 +2638,11 @@ interface MonacoBootWindowLike extends Window {
           languageBridgeProviders.cacheInlineCompletionProviderRegistration,
         cacheLanguageProviderRegistration:
           languageBridgeProviders.cacheLanguageProviderRegistration,
-        resetDynamicProviderCaches:
-          languageBridgeProviders.resetDynamicProviderCaches,
+        resetDynamicProviderCaches: (reason?: string) => {
+          hoverCommands?.reset();
+          quickFixes?.reset();
+          languageBridgeProviders.resetDynamicProviderCaches(reason);
+        },
         onWorkspaceSwitchedAck: function (event) {
           const win = window as Window &
             typeof globalThis & {
@@ -2625,6 +2690,8 @@ interface MonacoBootWindowLike extends Window {
         wbaRpcSocket.on("disconnect", () => {
           console.warn("[wba] socket disconnected");
           wbaConnectionRevision += 1;
+          hoverCommands?.reset();
+          quickFixes?.reset();
           wbaResyncPromise = null;
           wbaActiveModelSyncQueued = true;
         });

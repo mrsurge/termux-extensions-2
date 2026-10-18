@@ -1,5 +1,32 @@
 # Termux native Code TE2 candidate workflow
 
+## Next-release PyPI installer path
+
+Normal source-installer execution now passes the release version to the Python
+installer on both targets. GitHub supplies checksum-verified release metadata
+and installer code, not a Termux wheelhouse archive. Termux stages PyPI wheels
+with `pip --isolated install --only-binary=te2,agent-log-server,framework-shells,uvloop-te2 --target ... te2==VERSION`,
+verifies packaged runtime/loop selection, then reuses managed activation,
+rollback and uninstall. Explicit local offline payloads retain their old path.
+This does not change already-published installers.
+
+The user has validated the upcoming source dependencies: no costly native builds,
+and any remaining small source builds take roughly ten seconds or less. Absence
+of an Android wheel alone is not a release blocker. Public TE2 0.2.353 retains
+the old dependency metadata and is not this tested source set. ALS's stale
+watchfiles requirement is removed. The installer allows source builds for small
+dependencies but requires prebuilt TE2/ALS/FWS/uvloop-te2; their missing wheels
+fail before activation rather than starting expensive runtime/uvloop builds.
+Cleaned ALS publication remains separate.
+Regenerate the legacy lock from a verified target closure, not pip freeze; the
+old schema/MCP lock is not consumed by the new PyPI path.
+
+New-path prerequisites omit python-cryptography and unused Bun. Retain Node 24,
+npm, build-essential for node-pty first use, Git, libarchive and libgit2. Runtime
+markers select uvloop-te2 on Android/aarch64 and uvloop on Linux/x86_64; the
+private Linux CPython domain also has its own uvloop requirement. The archive
+builder below remains available for explicit offline work.
+
 This supplements the existing audited Termux archive builder. It does not
 publish, activate a developer snapshot, or restart a framework.
 

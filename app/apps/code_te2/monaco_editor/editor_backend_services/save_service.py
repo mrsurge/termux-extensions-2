@@ -17,6 +17,7 @@ from ...diff_helper import invalidate_diff_cache
 from ...explorer.services.file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from ...file_save_events import publish_file_saved
 from ...stores import get_history_store
+from ...project_autosave_runtime import schedule, rebase_mirror, record_commit
 from .contracts import EmitToRoomFn, JsonMap, RuntimeMeta
 from .payload_utils import as_payload_dict, get_opt_str, get_str
 
@@ -86,6 +87,37 @@ def _typed_write_full(
     return out
 
 
+async def write_editor_file(
+    project_root: Path,
+    rel_path: str,
+    content: str,
+    *,
+    base_sha256: str | None,
+    mode: int | None,
+    record_save_sha: Callable[[str, str], None],
+) -> JsonMap:
+    """Fence watcher callbacks until the committed own-write hash is visible.
+
+    Callers own/shield the operation through completion, including the off-loop
+    write. Manual Save, autosave and Save All use the identical watcher rule.
+    """
+    from ...restore_activity import active_paths
+
+    absolute = str((project_root / rel_path).resolve())
+    if absolute in active_paths:
+        raise ValueError("File already has an active editor write")
+    active_paths.add(absolute)
+    try:
+        meta = await asyncio.to_thread(
+            _typed_write_full, project_root, rel_path, content,
+            base_sha256=base_sha256, mode=mode,
+        )
+        record_save_sha(absolute, hashlib.sha256(content.encode("utf-8")).hexdigest())
+        return meta
+    finally:
+        active_paths.discard(absolute)
+
+
 def resolve_editor_save_snapshot_response(
     waiting: dict[str, asyncio.Future[JsonMap]],
     data: object,
@@ -134,26 +166,30 @@ async def handle_editor_mirror(
         base_sha256 = base_sha256_obj
     else:
         base_sha256 = content_sha256
+    disk_sha_for_rebase: object = None
     try:
         current_meta = _typed_get_file_meta(Path(path))
         current_sha = current_meta.get("sha256")
+        disk_sha_for_rebase = current_sha
         if isinstance(current_sha, str) and current_sha == content_sha256:
             base_sha256 = current_sha
     except Exception:
         pass
 
+    from ...project_autosave import require_no_transition
+    from ...project_sidecar import ProjectSidecar
+    require_no_transition(project)
+    enabled, mode_revision = ProjectSidecar.load_or_create(project).get_autosave_state()
+    if enabled:
+        base_sha256 = rebase_mirror(project, path, base_sha256, disk_sha_for_rebase, mode_revision)
     meta = runtime_meta()
     entry = _history_store.upsert_cached_document(
-        project_path=project,
-        file_path=path,
-        content=content,
-        base_sha256=base_sha256,
-        run_id=meta["run_id"],
-        shell_id=meta["shell_id"],
-        shell_run_id=meta["shell_run_id"],
-        launcher_pid=meta["launcher_pid"],
-        worker_pid=meta["worker_pid"],
+        project_path=project, file_path=path, content=content, base_sha256=base_sha256,
+        run_id=meta["run_id"], shell_id=meta["shell_id"], shell_run_id=meta["shell_run_id"],
+        launcher_pid=meta["launcher_pid"], worker_pid=meta["worker_pid"],
     )
+    if enabled and entry.get("unsaved"):
+        schedule(project, path, mode_revision)
     is_unsaved = bool(entry.get("unsaved"))
     document_revision = entry.get("document_revision")
 
@@ -200,11 +236,61 @@ async def handle_editor_save_request(
     notify_draft_state_changed: Callable[[str], None],
     record_save_sha: Callable[[str, str], None],
 ) -> JsonMap:
+    from ...project_autosave import project_write
+    project = active_project()
+    if not project:
+        return {"ok": False, "error": "no_active_project"}
+    async def owned_save() -> JsonMap:
+        with project_write(project):
+            if active_project() != project:
+                return {"ok": False, "error": "Project changed before save admission"}
+            return await _handle_editor_save_request(
+                sid, data, active_project=active_project, normalize_abs_path=normalize_abs_path,
+                is_under_project=is_under_project, request_snapshot=request_snapshot,
+                emit_to_room=emit_to_room, notify_draft_state_changed=notify_draft_state_changed,
+                record_save_sha=record_save_sha,
+            )
+    task = asyncio.create_task(owned_save())
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
+        raise
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _handle_editor_save_request(
+    sid: str,
+    data: object,
+    *,
+    active_project: Callable[[], str | None],
+    normalize_abs_path: Callable[[str], str | None],
+    is_under_project: Callable[[str, str], bool],
+    request_snapshot: Callable[[str], Awaitable[JsonMap]],
+    emit_to_room: EmitToRoomFn,
+    notify_draft_state_changed: Callable[[str], None],
+    record_save_sha: Callable[[str, str], None],
+) -> JsonMap:
     payload = as_payload_dict(data)
 
     project = active_project()
     if not project:
         return {"ok": False, "error": "no_active_project"}
+
+    from ...project_sidecar import ProjectSidecar
+    from ...worker_services.event_bus import current_project_generation
+    generation = current_project_generation(project)
+    def validate_context() -> None:
+        if active_project() != project or current_project_generation(project) != generation:
+            raise ValueError("Project changed before save")
+        if payload.get("project") is not None and payload.get("project") != project:
+            raise ValueError("Save belongs to a different project")
+        if payload.get("is_autosave") is True:
+            enabled, revision = ProjectSidecar.load_or_create(project).get_autosave_state()
+            if not enabled or payload.get("autosave_revision") != revision:
+                raise ValueError("Autosave mode changed; stale save rejected")
+    validate_context()
 
     request_id = get_opt_str(payload, "request_id") or get_opt_str(payload, "requestId")
     if not request_id:
@@ -218,6 +304,7 @@ async def handle_editor_save_request(
         return {"ok": False, "error": f"save_snapshot_failed: {exc}"}
 
     snapshot_error = get_opt_str(snapshot, "error")
+    validate_context()
     if snapshot_error:
         return {"ok": False, "error": snapshot_error}
 
@@ -286,13 +373,14 @@ async def handle_editor_save_request(
             orig_mode = None
 
     try:
-        _ = await asyncio.to_thread(
-            _typed_write_full,
+        validate_context()
+        _ = await write_editor_file(
             root_path,
             str(rel_path),
             content,
             base_sha256=base_sha256,
             mode=orig_mode,
+            record_save_sha=record_save_sha,
         )
     except BaseMismatchError as exc:
         return {"ok": False, "error": "BASE_MISMATCH", "current_meta": exc.current_meta}
@@ -302,15 +390,25 @@ async def handle_editor_save_request(
     file_meta = _typed_get_file_meta(Path(abs_path))
     file_meta = {**file_meta, "path": abs_path}
     save_sha = file_meta.get("sha256")
-    if isinstance(save_sha, str) and save_sha:
-        record_save_sha(abs_path, save_sha)
-
-    cleared_draft = _history_store.clear_cached_document(project, abs_path)
-    document_revision = (
-        _history_store.get_document_revision(project, abs_path)
-        if cleared_draft
-        else _history_store.advance_document_revision(project, abs_path)
-    )
+    sidecar = ProjectSidecar.load_or_create(project)
+    enabled, mode_revision = sidecar.get_autosave_state()
+    if enabled and isinstance(save_sha, str) and base_sha256:
+        record_commit(project, abs_path, base_sha256, save_sha, mode_revision)
+    _, drafts = sidecar.read_review_snapshot()
+    latest = next((entry for entry in drafts if entry.get("file_path") == abs_path), None)
+    pending_content = latest.get("content") if latest else None
+    pending_sha = latest.get("content_sha256") if latest else None
+    pending_revision = latest.get("document_revision") if latest else None
+    still_unsaved = isinstance(pending_content, str) and pending_sha != save_sha
+    if still_unsaved and latest and isinstance(pending_revision, int) and isinstance(pending_sha, str) and isinstance(pending_content, str) and isinstance(save_sha, str):
+        if latest.get("base_sha256") not in {base_sha256, save_sha}:
+            return {"ok": False, "error": "File saved, but a newer draft has a different base; inspect before retrying"}
+        sidecar.replace_review_draft(abs_path, pending_revision, pending_sha, pending_content, save_sha, advance_base=True)
+        if enabled:
+            schedule(project, abs_path, mode_revision)
+    else:
+        _history_store.clear_cached_document(project, abs_path)
+    document_revision = sidecar.get_document_revision(abs_path) if latest else _history_store.advance_document_revision(project, abs_path)
     _ = _history_store.prune_clean_drafts(project)
 
     mark_git_cache_dirty(root_path)
@@ -331,10 +429,10 @@ async def handle_editor_save_request(
         "editor:cache_state",
         {
             "path": abs_path,
-            "state": "clean",
-            "unsaved": False,
+            "state": "mid_session" if still_unsaved else "clean",
+            "unsaved": still_unsaved,
             "reason": "save",
-            "content_sha256": file_meta.get("sha256"),
+            "content_sha256": pending_sha if still_unsaved else file_meta.get("sha256"),
             "base_sha256": file_meta.get("sha256"),
             "source_client": sid,
             "document_revision": document_revision,
@@ -351,5 +449,5 @@ async def handle_editor_save_request(
 
     return {
         "ok": True,
-        "data": {**file_meta, "document_revision": document_revision},
+        "data": {**file_meta, "document_revision": document_revision, "unsaved": still_unsaved},
     }

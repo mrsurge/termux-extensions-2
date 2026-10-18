@@ -21,6 +21,7 @@ interface CommandRuntimeOptions {
   ): { req: number; promise: Promise<unknown> };
   uriForPath(filePath: string): Record<string, unknown>;
   openWorkbenchResource(uri: unknown, options: unknown): Promise<unknown>;
+  showLocations?(uri: unknown, position: unknown, locations: unknown): Promise<unknown>;
   syncSelection(params: ExtensionCommandContext): void;
   onEvent(payload: Record<string, unknown>): void;
   log(...args: unknown[]): void;
@@ -269,6 +270,10 @@ export class ExtensionCommandRuntime {
 
   constructor(private readonly options: CommandRuntimeOptions) {}
 
+  canExecuteQuickFix(command: string): boolean {
+    return this.commands.has(command) || this.registeredCommands.has(command);
+  }
+
   reset(): void {
     this.registeredCommands.clear();
     this.contextValues.clear();
@@ -353,7 +358,8 @@ export class ExtensionCommandRuntime {
           return { handled: true, replyResult: [...this.registeredCommands] };
         case "$executeCommand": {
           const commandArgs = Array.isArray(message.args?.[1]) ? message.args?.[1] : [];
-          if (command === "setContext") {
+          // The extension API translates setContext to the private wire command.
+          if (command === "_setContext" || command === "setContext") {
             const key = stringValue(commandArgs?.[0]);
             if (!key) {
               return { handled: true, error: new Error("setContext requires a key") };
@@ -371,6 +377,9 @@ export class ExtensionCommandRuntime {
                 commandArgs?.[1],
               ),
             };
+          }
+          if (command === "editor.action.showReferences" && this.options.showLocations) {
+            return { handled: true, pending: this.options.showLocations(commandArgs[0], commandArgs[1], commandArgs[2]) };
           }
           return {
             handled: true,
@@ -449,7 +458,9 @@ export class ExtensionCommandRuntime {
     const commandId = stringValue(params.command);
     if (!commandId) throw new Error("Missing required param: command");
     const definition = this.commands.get(commandId);
-    if (!definition) throw new Error(`Unknown extension command: ${commandId}`);
+    if (!definition && !((params.surface === "hover" || params.surface === "quickfix") && this.registeredCommands.has(commandId))) {
+      throw new Error(`Unknown extension command: ${commandId}`);
+    }
     const filePath = stringValue(params.path);
     if (params.surface !== "explorer" && params.surface !== "webview") {
       this.options.syncSelection(params);
@@ -481,6 +492,11 @@ export class ExtensionCommandRuntime {
       30000,
     );
     const reply = await pending.promise;
+    if (isRecord(reply) && reply.type === 11) {
+      const error = reply.error;
+      throw new Error(isRecord(error) && typeof error.message === 'string'
+        ? error.message : String(error ?? 'Extension command failed'));
+    }
     this.options.log(`[extension-command] executed ${commandId} req=${pending.req}`);
     return { ok: true, command: commandId, result: replyResult(reply) };
   }

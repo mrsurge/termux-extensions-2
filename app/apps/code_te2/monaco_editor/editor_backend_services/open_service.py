@@ -213,6 +213,8 @@ async def emit_editor_open_from_backend(
             payload["symbol_range"] = symbol_range
 
         emit_started_ns = time.perf_counter_ns() if metrics_enabled else 0
+        from ...workbench_document_initialization import prepare_open_document
+        await prepare_open_document(project, cast(dict[str, object], cast(object, payload)), open_state["revision"])
         await emit_editor_open(payload)
         record_open_stage(
             request_id,

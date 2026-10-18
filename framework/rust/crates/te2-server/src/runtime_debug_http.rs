@@ -74,6 +74,82 @@ fn error(status: StatusCode, code: &str) -> Response {
     (status, Json(json!({"ok": false, "error": {"code": code}}))).into_response()
 }
 
+pub(crate) struct DebugFailure {
+    status: StatusCode,
+    code: String,
+}
+
+impl DebugFailure {
+    fn new(status: StatusCode, code: &str) -> Self {
+        Self {
+            status,
+            code: code.to_owned(),
+        }
+    }
+    #[cfg(any(feature = "native-mcp", test))]
+    pub(crate) fn data(&self) -> serde_json::Value {
+        json!({"ok": false, "error": {"code": self.code}})
+    }
+}
+
+// Shared by HTTP admission and dormant MCP. Never discover or supply a caller's
+// credential on their behalf; a disabled owner remains inaccessible.
+fn check_credential(token: Option<&str>, given: &str) -> Result<(), DebugFailure> {
+    let Some(token) = token else {
+        return Err(DebugFailure::new(
+            StatusCode::NOT_FOUND,
+            "runtimeDebug.disabled",
+        ));
+    };
+    if given.len() != token.len()
+        || given
+            .bytes()
+            .zip(token.bytes())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            != 0
+    {
+        return Err(DebugFailure::new(
+            StatusCode::UNAUTHORIZED,
+            "runtimeDebug.unauthorized",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native-mcp")]
+pub(crate) fn native_workers(credential: &str) -> serde_json::Value {
+    match check_credential(TOKEN.get().map(|token| token.as_ref()), credential) {
+        Ok(()) => workers_data(),
+        Err(failure) => failure.data(),
+    }
+}
+
+#[cfg(feature = "native-mcp")]
+pub(crate) async fn native_dispatch(
+    credential: &str,
+    target: DebugTarget,
+    code: Option<String>,
+    timeout_seconds: u64,
+    eval: bool,
+) -> serde_json::Value {
+    if let Err(failure) = check_credential(TOKEN.get().map(|token| token.as_ref()), credential) {
+        return failure.data();
+    }
+    match dispatch_data(
+        DebugRequest {
+            target,
+            code,
+            timeout_seconds,
+        },
+        eval,
+    )
+    .await
+    {
+        Ok(data) => data,
+        Err(failure) => failure.data(),
+    }
+}
+
 async fn authorize(
     State(token): State<Option<Arc<str>>>,
     request: Request,
@@ -100,12 +176,7 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
     else {
         return false;
     };
-    given.len() == token.len()
-        && given
-            .bytes()
-            .zip(token.bytes())
-            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
-            == 0
+    check_credential(Some(token), given).is_ok()
 }
 
 #[derive(Deserialize)]
@@ -117,7 +188,11 @@ struct DebugRequest {
 }
 
 async fn workers() -> Json<serde_json::Value> {
-    Json(json!({"ok": true, "data": runtime_debug_pipe::targets()}))
+    Json(workers_data())
+}
+
+fn workers_data() -> serde_json::Value {
+    json!({"ok": true, "data": runtime_debug_pipe::targets()})
 }
 
 async fn status(Json(request): Json<DebugRequest>) -> Response {
@@ -127,13 +202,29 @@ async fn evaluate(Json(request): Json<DebugRequest>) -> Response {
     dispatch(request, true).await
 }
 async fn dispatch(request: DebugRequest, eval: bool) -> Response {
+    match dispatch_data(request, eval).await {
+        Ok(data) => Json(data).into_response(),
+        Err(failure) => error(failure.status, &failure.code),
+    }
+}
+
+async fn dispatch_data(
+    request: DebugRequest,
+    eval: bool,
+) -> Result<serde_json::Value, DebugFailure> {
     if request.timeout_seconds == 0 || request.timeout_seconds > 30 {
-        return error(StatusCode::BAD_REQUEST, "runtimeDebug.invalidTimeout");
+        return Err(DebugFailure::new(
+            StatusCode::BAD_REQUEST,
+            "runtimeDebug.invalidTimeout",
+        ));
     }
     let wait = Duration::from_secs(request.timeout_seconds);
     let result = if eval {
         let Some(code) = request.code else {
-            return error(StatusCode::BAD_REQUEST, "runtimeDebug.invalidCode");
+            return Err(DebugFailure::new(
+                StatusCode::BAD_REQUEST,
+                "runtimeDebug.invalidCode",
+            ));
         };
         runtime_debug_pipe::evaluate(&request.target, code, wait).await
     } else {
@@ -141,10 +232,12 @@ async fn dispatch(request: DebugRequest, eval: bool) -> Response {
     };
     match result {
         Ok(frame) => {
-            Json(json!({"ok": frame.error.is_none(), "data": frame.result, "error": frame.error}))
-                .into_response()
+            Ok(json!({"ok": frame.error.is_none(), "data": frame.result, "error": frame.error}))
         }
-        Err(failure) => error(StatusCode::CONFLICT, &failure.to_string()),
+        Err(failure) => Err(DebugFailure::new(
+            StatusCode::CONFLICT,
+            &failure.to_string(),
+        )),
     }
 }
 
@@ -165,6 +258,61 @@ pub(crate) fn router() -> Router<crate::AppState> {
 mod tests {
     use super::*;
     use tower::ServiceExt;
+
+    #[test]
+    fn shared_credential_gate_never_promotes_implicit_credentials() {
+        assert_eq!(
+            check_credential(None, "secret").err().unwrap().data()["error"]["code"],
+            "runtimeDebug.disabled"
+        );
+        for given in ["", "wrong!", "secre", "secret "] {
+            assert_eq!(
+                check_credential(Some("secret"), given)
+                    .err()
+                    .unwrap()
+                    .data()["error"]["code"],
+                "runtimeDebug.unauthorized"
+            );
+        }
+        assert!(check_credential(Some("secret"), "secret").is_ok());
+    }
+
+    #[tokio::test]
+    async fn shared_dispatch_bounds_and_missing_target_fail_without_retry() {
+        let target = DebugTarget {
+            app_id: "fixture".into(),
+            shell_id: "missing".into(),
+            instance_id: "missing".into(),
+        };
+        for (timeout_seconds, code, expected) in [
+            (0, Some("1".to_owned()), "runtimeDebug.invalidTimeout"),
+            (31, Some("1".to_owned()), "runtimeDebug.invalidTimeout"),
+            (20, None, "runtimeDebug.invalidCode"),
+            (20, Some(" ".into()), "runtimeDebug.invalidCode"),
+            (20, Some("é".repeat(16385)), "runtimeDebug.invalidCode"),
+        ] {
+            let result = dispatch_data(
+                DebugRequest {
+                    target: target.clone(),
+                    timeout_seconds,
+                    code,
+                },
+                true,
+            )
+            .await;
+            assert_eq!(result.err().unwrap().data()["error"]["code"], expected);
+        }
+        let result = dispatch_data(
+            DebugRequest {
+                target,
+                timeout_seconds: 20,
+                code: None,
+            },
+            false,
+        )
+        .await;
+        assert!(result.is_err()); // No registered fixture identity; never a fallback target.
+    }
     #[tokio::test]
     async fn disabled_and_missing_credentials_fail_closed() {
         for (token, expected) in [

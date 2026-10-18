@@ -40,6 +40,7 @@ def resolve_sidebar_file_open_target(
     active_windows: dict[str, str],
     requester_app_id: str,
     require_presentation: bool = False,
+    allow_registered_inactive: bool = False,
 ) -> tuple[str, JsonObject]:
     target = _object(payload.get("target"))
     client_id = normalize_client_instance_id(
@@ -50,13 +51,17 @@ def resolve_sidebar_file_open_target(
         raise ValueError("file open target requires client and host identity")
     if client_id not in live_host_client_ids:
         raise ValueError("file open target client is not connected")
-    if _text(active_windows.get(client_id)) != host_id:
+    supplied_presentation = _text(target.get("presentationId") or target.get("presentation_id"))
+    presentation_id = _text(registered_presentations.get((client_id, host_id)))
+    exact_presentation = bool(supplied_presentation and supplied_presentation == presentation_id)
+    if _text(active_windows.get(client_id)) != host_id and not (
+        allow_registered_inactive and exact_presentation
+    ):
         raise ValueError("file open target window is not active")
 
-    presentation_id = _text(registered_presentations.get((client_id, host_id)))
     if not presentation_id:
         raise ValueError("file open target presentation is not registered")
-    if require_presentation and _text(target.get("presentationId") or target.get("presentation_id")) != presentation_id:
+    if (require_presentation or supplied_presentation) and not exact_presentation:
         raise ValueError("file open target presentation is stale")
 
     slots = _object(sidebar_state.get("slots"))

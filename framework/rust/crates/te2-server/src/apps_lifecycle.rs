@@ -137,13 +137,20 @@ async fn running_apps(State(state): State<AppState>) -> Json<ApiResponse<Vec<Val
 }
 
 async fn start_app(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {
-    match start_app_inner(&state, &app_id).await {
-        Ok((canonical_app_id, data)) => {
-            publish_app_running_changed(&state, &canonical_app_id, "start", Some(&data), None)
-                .await;
-            Json(ApiResponse { ok: true, data }).into_response()
-        }
+    match start_app_data(&state, &app_id).await {
+        Ok(data) => Json(ApiResponse { ok: true, data }).into_response(),
         Err(response) => response,
+    }
+}
+
+/// Shared mutation authority; HTTP and MCP must publish the same lifecycle event.
+pub(crate) async fn start_app_data(state: &AppState, app_id: &str) -> Result<Value, Response> {
+    match start_app_inner(state, app_id).await {
+        Ok((canonical_app_id, data)) => {
+            publish_app_running_changed(state, &canonical_app_id, "start", Some(&data), None).await;
+            Ok(data)
+        }
+        Err(response) => Err(response),
     }
 }
 
@@ -527,6 +534,11 @@ async fn get_app_readiness(State(state): State<AppState>, Path(app_id): Path<Str
 async fn reload_apps(
     State(state): State<AppState>,
 ) -> Json<ApiResponse<serde_json::Map<String, Value>>> {
+    let data = reload_apps_data(&state).await;
+    Json(ApiResponse { ok: true, data })
+}
+
+pub(crate) async fn reload_apps_data(state: &AppState) -> serde_json::Map<String, Value> {
     let registry = AppRegistry::load(state.app_roots());
     state.replace_app_registry(registry.clone());
     state.replace_running_apps(discover_running_apps(&registry));
@@ -536,11 +548,11 @@ async fn reload_apps(
         Value::from(registry.list_payloads().len()),
     );
     publish_apps_event(
-        &state,
+        state,
         AppsEvent::new("registry_reloaded", Value::Object(data.clone())),
     );
-    publish_catalog_snapshot(&state).await;
-    Json(ApiResponse { ok: true, data })
+    publish_catalog_snapshot(state).await;
+    data
 }
 
 async fn apps_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {

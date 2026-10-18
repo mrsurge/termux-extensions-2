@@ -13,6 +13,7 @@ export class DirectoryControl {
     this.emit = emit;
     this.state = 'starting';
     this.dirty = false;
+    this.promptLength = 0;
     this.pending = null;
     this.held = [];
     this.heldBytes = 0;
@@ -62,7 +63,10 @@ export class DirectoryControl {
       if (kind === 'state') {
         this.state = value;
         // A delayed prompt event must not erase a newer partial-input fact.
-        if (value === 'idle' && this.inputSerial === this.submittedSerial) this.dirty = false;
+        if (value === 'idle' && this.inputSerial === this.submittedSerial) {
+          this.dirty = false;
+          this.promptLength = 0;
+        }
         void this.emit({ type: 'shell.state', state: value, cwd });
         if (value === 'idle' && this.pending?.refreshing) {
           const request = this.pending;
@@ -72,6 +76,7 @@ export class DirectoryControl {
           void this.emit({ type: 'directory.result', request_id: request.id, state: request.resultState, cwd });
           this.flushInput();
         }
+        this.wakeClearedRequest();
       } else if (kind === 'result' && this.pending?.token === token) {
         const request = this.pending;
         if (value === 'deferred') {
@@ -128,17 +133,29 @@ export class DirectoryControl {
     this.writeRequest(token, wake ? 'wake' : 'prompt', message.path);
     void this.emit({ type: 'directory.result', request_id: message.request_id, state: 'pending' });
     if (wake) {
-      // No terminal-input bytes: Bash's WINCH trap rechecks its own execution
-      // state. Hold later input until the result so it cannot overtake this cd.
-      process.kill(this.pty.pid, 'SIGWINCH');
-      this.timer = setTimeout(() => {
-        if (!this.pending || this.pending.token !== token) return;
-        this.writeRequest('', 'cancel', '');
-        this.pending = null;
-        void this.emit({ type: 'directory.result', request_id: message.request_id, state: 'timeout' });
-        this.flushInput();
-      }, 2000);
+      this.armWake(this.pending);
     }
+  }
+
+  armWake(request) {
+    // No terminal-input bytes: Bash's WINCH trap rechecks its own execution
+    // state. Hold later input until the result so it cannot overtake this cd.
+    process.kill(this.pty.pid, 'SIGWINCH');
+    this.timer = setTimeout(() => {
+      if (!this.pending || this.pending.token !== request.token) return;
+      this.writeRequest('', 'cancel', '');
+      this.pending = null;
+      void this.emit({ type: 'directory.result', request_id: request.id, state: 'timeout' });
+      this.flushInput();
+    }, 2000);
+  }
+
+  wakeClearedRequest() {
+    const request = this.pending;
+    if (this.state !== 'idle' || this.dirty || !request || request.wake || request.refreshing) return;
+    request.wake = true;
+    this.writeRequest(request.token, 'wake', request.path);
+    this.armWake(request);
   }
 
   input(data) {
@@ -149,12 +166,24 @@ export class DirectoryControl {
       this.heldBytes += bytes;
       return;
     }
-    // Conservative: any input makes the prompt dirty until a fresh shell-owned
-    // idle event. Escape/editing sequences aren't guessed into a line model.
-    this.dirty = true;
     this.inputSerial += 1;
-    if (data.endsWith('\n') || data.endsWith('\r')) this.submittedSerial = this.inputSerial;
+    if (data.endsWith('\n') || data.endsWith('\r') || data.endsWith('\x03')) this.submittedSerial = this.inputSerial;
+    // Track only ordinary end-of-line editing, without retaining command text.
+    // Unknown cursor/history/completion sequences stay conservative until a
+    // fresh prompt; byte/escape-sequence length is never a clean-line threshold.
+    if (this.state !== 'idle') this.promptLength = null;
+    for (const character of data) {
+      if (this.promptLength === null) break;
+      if (character >= ' ' && character <= '~') this.promptLength += 1;
+      else if (character === '\x7f' || character === '\b') this.promptLength = Math.max(0, this.promptLength - 1);
+      else if (character === '\x15') this.promptLength = 0;
+      else this.promptLength = null;
+    }
+    this.dirty = this.promptLength === null || this.promptLength > 0;
     this.pty.write(data);
+    // Queue erasure before any wake/prompt-refresh input. The existing wake
+    // fence holds subsequent user input; it cannot overtake that erasure.
+    this.wakeClearedRequest();
   }
 
   snapshot() {

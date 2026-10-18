@@ -16,6 +16,11 @@
 }
 
 /* Drawer container - positioned off-screen by default */
+.fe-tree-text:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #8099b3);
+  outline-offset: 2px;
+}
+
 .fe-drawer {
   position: fixed;
   top: 0;
@@ -1920,6 +1925,17 @@
   border-bottom: 1px solid var(--border);
   background: var(--explorer-bg);
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fe-review-group .fe-review-checkbox { flex: 0 0 16px; margin: 0; align-self: center; }
+.fe-review-group .fe-search-diff-rows[hidden] { display: none; }
+.fe-review-group .fe-search-change-header .fe-review-revert,
+.fe-review-group .fe-search-hunk-header-row .fe-review-revert {
+  flex: 0 0 84px;
+  width: 84px;
+  padding-inline: 6px;
+  font-size: 11px;
 }
 
 .fe-review-list {

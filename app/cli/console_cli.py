@@ -7,6 +7,7 @@ import sys
 import time
 from typing import Any
 
+from app.cli.console_usage import CONSOLE_USAGE
 from app.te2_console_log import TE2_CONSOLE_LOG_PATH, iter_console_log_lines_reverse
 
 DEFAULT_HOST = "127.0.0.1"
@@ -17,8 +18,11 @@ LOG_PATH = TE2_CONSOLE_LOG_PATH
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv if argv is not None else sys.argv[1:])
+    if argv and argv[0] in {"-h", "--help"}:
+        print(CONSOLE_USAGE, end="")
+        return 0
     if not argv:
-        print("Usage: te2 console <list-workers|eval|tail|search> [options]", file=sys.stderr)
+        print(CONSOLE_USAGE, end="", file=sys.stderr)
         return 1
 
     command = argv[0]

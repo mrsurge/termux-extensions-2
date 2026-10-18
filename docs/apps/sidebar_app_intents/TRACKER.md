@@ -1,5 +1,10 @@
 # Sidebar App Intents Tracker
 
+Historical evidence, not an independent current checklist. Recent pre-release
+status/acceptance is consolidated in docs/apps/release_0_2_354/TRACKER.md
+(2026-10-17). Preserve older scope/history below; do not reopen its completed
+items or duplicate pending gates from this file.
+
 Plan: [PLAN.md](PLAN.md). Branch: `feature/code-te2-native-services`.
 Status: planned Sidebar app-intent workflows are implemented, regression-tested
 and user live-accepted. This includes File Explorer, Terminal, CM6, mobile
@@ -256,3 +261,112 @@ These checks record user acceptance, not a newly executed agent/device test run.
 - [x] Targeted backend/frontend tests, applicable typechecks and builds pass.
 - [x] User live acceptance at working end-to-end milestones; commit/release only
   when requested.
+
+## New follow-up — Archive Manager intent integration
+
+See also the independent ALS maintenance follow-up below; prior acceptance does
+not cover that work.
+
+- [x] Record desired Archive Manager minimal-query Sidebar opening and background
+  job extraction integration, plus archive-only Code TE2 Explorer context actions.
+- [ ] Investigate/approve/implement and validate; authoritative pending gates are
+  in docs/apps/dependency_trim/TRACKER.md. Prior acceptance above does not cover
+  this new work; no implementation or version/release assignment is implied.
+
+## ALS file-open presentation routing — 2026-10-17
+
+- [x] Trace global last-focus substitution and incomplete reconnect restoration;
+  user approves preserving shared state while fixing per-client click routing.
+- [x] Record intended direction in PLAN.md before implementation.
+- [x] Preserve originating client/slot/presentation through ALS frontend/Rust.
+- [x] Restore foreground registration on reconnect and fence delayed disconnects.
+- [x] Regression tests, typechecks/builds and Rust validation.
+- [x] User explicitly approves ALS checkpoint/version bump and pinned asset refresh:
+  sibling ALS commit `fb2112b`, package metadata 0.2.137; no push authorized.
+- [x] Refresh TE2's clean-source ALS snapshot: 148 resources pass hash/inventory
+  verification; only manifest, compiled main JS and its source client changed.
+- [x] User reports updated installation working and grants live acceptance
+  (2026-10-17), then requests commit/push. Activation was user-operated; no
+  additional agent-run restart/reconnect matrix is claimed.
+
+Registration logs omit client IDs: they cannot reconstruct the exact registry
+at the failed click. Console IDs/counts do not establish unique presentations.
+Future host registration logs now include client identity alongside SID.
+
+Validation: 45 Python tests (routing, mentions/registration, projection, membership,
+app backend); 35 Code TE2 frontend tests (presentation, drawer, tabs); four ALS
+frontend tests (common file-open boundary and project controls); nine native asset
+coverage tests. Both frontend typechecks and builds pass. Rust file-open tests
+(two scenarios) and sidebar tests (ten scenarios) pass in both lib/bin targets.
+Touched Rust files pass rustfmt; workspace-wide fmt finds unrelated existing
+drift, which was not reformatted. Existing unused-method/embedded-feature warnings
+remain. Code TE2 mypyc status is stale, as expected after this backend edit.
+ALS production executable also builds successfully with Cargo release, four jobs;
+this updates the Cargo output, not bootstrap selection or the running worker.
+
+Activation order: rebuild/activate Code TE2 mypyc, prepare/start the updated ALS
+binary, then publish/force OTA current Code TE2 plus pinned ALS assets and reload
+clients. These are not performed by source builds or the ALS checkpoint. No
+runtime was restarted, no APK assembled, no assets published, no push performed.
+
+## Next investigation — ALS pipe readiness parity
+
+- [x] Compare ALS worker launch/readiness against Code TE2 after this checkpoint.
+  User requires a pipe-backed ALS launch with --stdio when pipe readiness is
+  expected, protocol-only stdout and all other output on stderr. Determine current
+  ownership and propose the concrete correction before implementation; do not
+  substitute HTTP readiness or change shared app state.
+
+- [x] Investigation confirms proc launch, HTTP readiness callback and native
+  stdout logging; --stdio is absent from both bootstrap and native argument path.
+- [x] User approves stdio/pipe-readiness-only correction; record scope in PLAN.md.
+- [x] Bootstrap flag propagation and protocol-only stdout across preparation.
+- [x] Shared native lifecycle, framed readiness and stderr diagnostics.
+- [x] Pipe-only TE2 manifest/shellspec and focused regression/build validation.
+- [x] User explicitly approves removing the additional frontend HTTP health poll;
+  wrapper now mounts from metadata after app_shell's existing lifecycle gate.
+- [x] User reports the updated slice working and grants live acceptance,
+  requesting commit/push. Installation, worker refresh and wrapper publication
+  were user-operated; no additional agent-run device matrix is claimed.
+
+Validation: 22 ALS bootstrap/MCP preparation tests, four Rust pipe tests, six
+isolated native server tests plus two corruption subtests, 46 TE2 backend
+regressions, two wrapper tests and nine native asset coverage tests pass. ALS
+production release executable builds with four jobs. Tests verify one exact
+MessagePack readiness map, live serving after readiness, no readiness HTTP POST,
+stdout cleanliness, stdin EOF, SIGTERM with stdin still open, malformed/truncated
+input, occupied-listener failure and standalone stdin independence. Disposable
+roots/fake framework avoid touching the live harness. Touched Rust files pass
+rustfmt with skip_children; unrelated formatting drift remains unchanged.
+
+Activation: install new ALS first; refresh the TE2 registry and replace the old
+ALS worker with the new pipe launch using user-approved lifecycle operations.
+Publish/force OTA and reload wrapper assets. No Code TE2 mypyc rebuild or APK is
+needed. No agent-operated install/restart/publication was performed by this slice.
+Existing conversation debug logs are diagnostics on stderr; durable transcripts
+and extension-adapter protocol I/O are preserved, not removed as debug output.
+
+## ALS composer/navigation asset refresh
+
+- [x] User approves a local ALS checkpoint without a version bump, solely to
+  satisfy committed-source provenance before TE2 asset publication. ALS checkpoint
+  `fcc716b` includes composer newline/caret/Escape and Project dialog navigation
+  changes; it is not pushed or marked live accepted by this step.
+- [x] Refresh the managed ALS snapshot: existing version 0.2.138, 149 resources,
+  source/served hashes and exact source commit recorded in its manifest.
+- [x] Regenerate shared Android editor_static seed using the existing bundler;
+  framework/editor asset version remains 0.2.353. No APK assembled or installed.
+- [x] Fetch a fresh ZIP from the running framework's /api/editor_assets_bundle;
+  all 445 files match the Android seed byte for byte. ALS source hashes, projected
+  bundle, metadata/license and wrapper match the pinned inputs. Existing newer
+  Code TE2 host.js/explorer.css outputs are copied unchanged by the seed publisher.
+- [x] Snapshot verification and 12 ALS/native asset mapping tests pass. Authored
+  ALS asset/test/readme changes pass diff checks. Copied Code TE2 host.js retains
+  source-generated whitespace; unrelated search tracker/user notes are untouched.
+Client activation/live status is now tracked only in the consolidated release
+tracker; user subsequently reports the current slice seems to be working.
+Same-version installs still require force OTA, not assumed APK reseeding.
+
+Inspection ZIP: .codex-scratch/als-ota-6eXSBQ/editor-assets.zip (13,533,948 bytes),
+SHA-256 84a3991cd1cd7101fe03422b33a21495cabcb161ad34877f078e0547e769194e.
+No TE2 commit or either-repo push is performed by this asset refresh.

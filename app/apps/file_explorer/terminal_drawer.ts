@@ -6,7 +6,7 @@ import { bindTerminalCursor } from '../../libs/terminal_runtime/terminal_cursor'
 import { shiftTerminalText } from '../../libs/terminal_runtime/terminal_shift';
 import { bindTerminalShiftButton } from '../../libs/terminal_runtime/terminal_shift_button';
 
-interface Disposable { dispose(): void }
+interface Disposable { dispose(): void; cancelGesture?(): void }
 interface Terminal {
   cols: number; rows: number; textarea?: HTMLTextAreaElement;
   options: { fontSize?: number };
@@ -222,6 +222,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   let buffered: Delta[] = [], bufferedBytes = 0;
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   let bindings: Disposable[] = [];
+  let touchBinding: Disposable | undefined;
   let mounting: Promise<void> | undefined;
   let cancelShiftPress = () => {};
   let stream: WebSocket | undefined;
@@ -243,6 +244,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     buffered = []; bufferedBytes = 0; clearTimeout(resizeTimer);
     inputs.reset();
     for (const binding of bindings) binding.dispose(); bindings = [];
+    touchBinding = undefined;
     terminal?.dispose(); terminal = undefined; fit = undefined; updateZoomButtons();
     viewport.replaceChildren(); modifiers.reset(); updateModifiers(); showDirectoryStatus(); identity = ''; shell = '';
   }
@@ -311,6 +313,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
         next.onclose = () => {
           clearTimeout(timer); reject(new Error('Terminal output disconnected'));
           if (stream !== next || current !== generation || disposed) return;
+          touchBinding?.cancelGesture?.();
           stream = undefined; ready = false; inputs.reset();
           if (!minimized && socket.connected) {
             clearTimeout(retryTimer);
@@ -320,6 +323,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       });
       if (current !== generation || terminal !== view || checkpoint.shellId !== shell) return;
       if (typeof checkpoint.ansi !== 'string' || !Number.isSafeInteger(checkpoint.outputOffset)) throw new Error('Invalid terminal checkpoint');
+      touchBinding?.cancelGesture?.();
       view.reset();
       await new Promise<void>(resolve => view.write(checkpoint.ansi!, resolve));
       if (current !== generation || terminal !== view || stream !== next) return;
@@ -392,7 +396,8 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       bindings.push({ dispose: bindTerminalContextMenu(viewport, view, error) });
       bindings.push(bindTerminalCursor(viewport, view));
       view.textarea?.setAttribute('autocapitalize', 'off'); view.textarea?.setAttribute('autocorrect', 'off');
-      bindings.push(api.te2TerminalTouchSelection.attach(view));
+      touchBinding = api.te2TerminalTouchSelection.attach(view);
+      bindings.push(touchBinding);
       bindings.push(view.onData(data => {
         if (modifiers.shift) {
           data = shiftTerminalText(data);
@@ -499,6 +504,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   root.querySelector('[data-action="terminal"]')!.addEventListener('click', () => void show());
   drawer.querySelector('[data-terminal="minimize"]')!.addEventListener('click', () => {
     drawerResize.cancel();
+    touchBinding?.cancelGesture?.();
     minimized = !minimized; drawer.classList.toggle('is-minimized', minimized);
     if (!minimized) scheduleResize();
   });

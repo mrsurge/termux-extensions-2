@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import cast, final
 
 from app.libs.pipe_protocol import PipeEnvelope, PipeError, PipeIdentity, error_response, success_response
+from .host.sidebar_shortcut_backend import add_framework_shortcut
 
 
 @final
@@ -40,7 +41,7 @@ class AppIntentPipe:
             _ = future.cancel()
 
     def submit(self, request: PipeEnvelope) -> bool:
-        if request.method != "app.intent.deliver":
+        if request.method not in {"app.intent.deliver", "app.mcp.sidebarShortcut.add"}:
             return False
         with self._lock:
             loop = self._loop
@@ -98,6 +99,8 @@ def _object(value: object, name: str) -> dict[str, object]:
 
 
 async def dispatch_app_intent(request: PipeEnvelope) -> object:
+    if request.method == "app.mcp.sidebarShortcut.add":
+        return await add_framework_shortcut(request.params)
     params = _object(request.params, "params")
     if set(params) != {"intent", "context", "payload", "source"}:
         raise ValueError("invalid app intent parameters")

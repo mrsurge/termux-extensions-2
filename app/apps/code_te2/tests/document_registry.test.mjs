@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
 
 import {
   WorkbenchDocumentRegistry,
@@ -45,6 +46,7 @@ function createRegistry(
     activateLanguage = async () => {},
     isPathClientForeground = () => false,
     isPathProjectedForeground = () => false,
+    onSendExt = () => {},
   } = {},
 ) {
   let req = 0;
@@ -53,6 +55,7 @@ function createRegistry(
     uriToString,
     sendExt(rpcId, method, args, cancellable) {
       calls.push({ rpcId, method, args, cancellable });
+      onSendExt(method, args);
       return ++req;
     },
     sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs) {
@@ -63,7 +66,7 @@ function createRegistry(
       };
     },
     uriForPath,
-    workspacePath: () => workspacePath,
+    workspacePath: () => typeof workspacePath === "function" ? workspacePath() : workspacePath,
     resolveLanguageId(path, _text, requestedLanguageId) {
       return requestedLanguageId || (path.endsWith(".rs") ? "rust" : "plaintext");
     },
@@ -226,8 +229,127 @@ function createLifecycleRuntime(files) {
     log() {},
     warn() {},
   };
+  // Model the production backend handoff, not lifecycle-owned disk loading.
+  registry.initializeDocuments(initialPayload(files));
   return { calls, events, reads, registry, runtime, session, state };
 }
+
+function initialPayload(files, overrides = {}) {
+  return { projectPath: "/workspace", projectGeneration: 1, openStateRevision: 1,
+    documents: Object.entries(files).map(([path, text]) => {
+      const sha = createHash("sha256").update(text).digest("hex");
+      return { path, text, contentSha256: sha, contentIdentity: `sha256:${sha}`, baseSha256: null, dirty: true };
+    }), ...overrides };
+}
+
+test("initial backend draft is the first extension document; reload never reads disk", async () => {
+  const path = "/workspace/codec.py";
+  const draft = "import msgspec  # ty: ignore[unresolved-import]\n# λ 🦀\n";
+  const fixture = createLifecycleRuntime({ [path]: draft });
+  const entry = fixture.registry.getByPath(path);
+  const fingerprint = entry.textFingerprint;
+  await openFile(fixture.runtime, { path, generation: 1 });
+  await openFile(fixture.runtime, { path, generation: 2, forceRefresh: true });
+  await openFile(fixture.runtime, { path, generation: 3, forceRefresh: true });
+  assert.equal(entry.versionId, 1);
+  assert.equal(entry.dirty, true);
+  assert.equal(entry.textFingerprint, fingerprint);
+  assert.deepEqual(fixture.reads, []);
+  assert.equal(fixture.calls.filter(call => call.method === "$acceptModelChanged").length, 0);
+  assert.equal(documentDeltas(fixture.calls).filter(delta => delta.addedDocuments).length, 1);
+});
+
+test("late initialization preserves newer live text and validates the whole handoff", () => {
+  const calls = [];
+  const registry = createRegistry(calls);
+  registry.initializeDocuments(initialPayload({ "/workspace/a.py": "draft\n" }));
+  registry.replaceFullText({ path: "/workspace/a.py", text: "new live edit\n", dirty: true });
+  const entry = registry.getByPath("/workspace/a.py");
+  const fingerprint = entry.textFingerprint;
+  registry.initializeDocuments(initialPayload({ "/workspace/a.py": "older draft\n" }));
+  assert.equal(entry.textFingerprint, fingerprint);
+  assert.equal(entry.versionId, 2);
+  const bad = initialPayload({ "/workspace/b.py": "valid\n", "/workspace/c.py": "bad\n" });
+  bad.documents[1].contentSha256 = "wrong";
+  const before = calls.length;
+  assert.throws(() => registry.initializeDocuments(bad), /hash_mismatch/);
+  assert.equal(registry.getByPath("/workspace/b.py"), null);
+  assert.equal(calls.length, before);
+  assert.throws(() => registry.initializeDocuments(initialPayload({ "/elsewhere/a.py": "escape" })), /invalid_initial_document/);
+});
+
+test("early attach waits for backend initialization; reset and timeout reject without disk fallback", async () => {
+  const fixture = createLifecycleRuntime({});
+  let opened = false;
+  const opening = openFile(fixture.runtime, { path: "/workspace/late.py", generation: 1 }).then(() => { opened = true; });
+  await Promise.resolve();
+  assert.equal(opened, false);
+  fixture.registry.initializeDocuments(initialPayload({ "/workspace/late.py": "draft first\n" }));
+  await opening;
+  assert.equal(opened, true);
+  assert.deepEqual(fixture.reads, []);
+  const waiting = fixture.registry.waitForInitialization("/workspace/reset.py");
+  fixture.registry.clearLocal();
+  await assert.rejects(waiting, /initialization_reset/);
+  await assert.rejects(fixture.registry.waitForInitialization("/workspace/missing.py", 1), /not_initialized/);
+});
+
+test("explicit release/reset permits a fresh disk or draft initialization, stale snapshots do not", () => {
+  const calls = [];
+  const registry = createRegistry(calls);
+  registry.initializeDocuments(initialPayload({ "/workspace/a.py": "draft\n" }));
+  registry.reconcileLogicalDocuments(reconcileParams({ activePath: null,
+    background: [logicalDescriptor("/workspace/a.py", "latest")], projectGeneration: 3, openStateRevision: 10 }));
+  assert.throws(() => registry.initializeDocuments(initialPayload({ "/workspace/b.py": "old\n" })), /stale_initial_documents/);
+  registry.releaseAll();
+  const saved = initialPayload({ "/workspace/a.py": "saved disk\n" }, { projectGeneration: 4, openStateRevision: 11 });
+  saved.documents[0].dirty = false;
+  registry.initializeDocuments(saved);
+  assert.equal(registry.getByPath("/workspace/a.py").dirty, false);
+  assert.equal(registry.getByPath("/workspace/a.py").versionId, 1);
+});
+
+test("backend invalidation updates attached initial text but cannot erase unpublished client edits", async () => {
+  const calls = [];
+  const registry = createRegistry(calls, { isPathClientForeground: () => true });
+  const path = "/workspace/a.rs";
+  registry.initializeDocuments(initialPayload({ [path]: "initial draft\n" }));
+  registry.markClientOpen(path);
+  async function reconcileText(text, revision) {
+    const descriptor = logicalDescriptor(path, `sha256:${createHash('sha256').update(text).digest('hex')}`);
+    const snapshot = registry.reconcileLogicalDocuments(reconcileParams({ activePath: null,
+      projectGeneration: 1, openStateRevision: revision, background: [descriptor], clientForegroundPaths: [path] }));
+    const request = snapshot.hydration[0];
+    return registry.hydrateLogicalDocument(hydrateParams(request, text, { projectGeneration: 1, openStateRevision: revision }));
+  }
+  assert.equal((await reconcileText("newer persisted draft\n", 2)).ok, true);
+  const entry = registry.getByPath(path);
+  assert.equal(entry.backendVersionId, entry.versionId);
+  registry.replaceFullText({ path, text: "unpublished client edit\n", dirty: true });
+  const fingerprint = entry.textFingerprint;
+  assert.equal((await reconcileText("older persisted draft\n", 3)).error, 'client_foreground_document_protected');
+  assert.equal(entry.textFingerprint, fingerprint);
+  // Once the backend has the identical latest draft, it can acknowledge that
+  // version. A subsequent explicit discard/save invalidation is then safe.
+  assert.equal((await reconcileText("unpublished client edit\n", 4)).ok, true);
+  assert.equal(entry.backendVersionId, entry.versionId);
+  assert.equal((await reconcileText("disk after discard\n", 5)).ok, true);
+});
+
+test("connect and reconnect dispatcher forward the backend initial document payload", async () => {
+  const seed = initialPayload({ "/workspace/a.py": "draft\n" });
+  const requests = [];
+  const runtime = { wb: {
+    state: {}, disconnect() {},
+    async connect(params) { requests.push(params); return { ok: true }; },
+  }, state: { config: {}, session: {} }, buildStatusResult() {}, logStatus() {}, emitTe2Event() {},
+    nowMs: () => 1, defaultRemoteAuthority: 'localhost', defaultCodeServerHttp: '' };
+  for (const method of ['adapter.connect', 'adapter.reconnect']) {
+    await dispatchJsonRpcRequest(runtime, { id: 1, method,
+      params: { folder: '/workspace', workspaceFolder: '/workspace', initialDocuments: seed } });
+    assert.equal(requests.at(-1).initialDocuments, seed);
+  }
+});
 
 test("registry retains once, replaces without close/open, and releases once", async () => {
   const calls = [];
@@ -342,7 +464,7 @@ test("client A to B to A retains shared documents without document churn", async
   await openFile(fixture.runtime, { path: "/workspace/b.rs" });
   await openFile(fixture.runtime, { path: "/workspace/a.rs" });
 
-  assert.deepEqual(fixture.reads, ["/workspace/a.rs", "/workspace/b.rs"]);
+  assert.deepEqual(fixture.reads, []);
   assert.equal(fixture.registry.size, 2);
   assert.equal(fixture.registry.getByPath("/workspace/a.rs").activeEpoch, 3);
   assert.equal(fixture.registry.getByPath("/workspace/b.rs").activeEpoch, 2);
@@ -416,6 +538,55 @@ test("$tryOpenDocument shares registry identity with active documents", async ()
   );
 });
 
+test("switch-back logical hydration restores draft text and keeps foreground protection", async () => {
+  let workspace = "/first";
+  const foreground = new Set();
+  const calls = [];
+  const transmittedText = [];
+  const registry = createRegistry(calls, {
+    workspacePath: () => workspace,
+    isPathClientForeground: path => foreground.has(path),
+    onSendExt(method, args) {
+      if (method === "$acceptDocumentsAndEditorsDelta") {
+        for (const document of args[0].addedDocuments || []) {
+          transmittedText.push(document.lines.join("\n"));
+        }
+      }
+    },
+  });
+  let staleRequest;
+  for (const [index, project] of ["/first", "/second", "/first"].entries()) {
+    workspace = project;
+    foreground.clear();
+    registry.clearLocal(); // same registry reset used by WorkbenchClient reconnect
+    const path = `${project}/draft.rs`;
+    const descriptor = logicalDescriptor(path, `sha256:draft-${index}`);
+    const params = { ...reconcileParams({ activePath: null, background: [descriptor] }),
+      projectPath: project, projectGeneration: index + 1 };
+    const result = registry.reconcileLogicalDocuments(params);
+    assert.equal(result.ok, true);
+    assert.equal(result.hydration.length, 1);
+    const request = { ...hydrateParams(result.hydration[0], `// draft ${index} λ\n`),
+      projectPath: project, projectGeneration: index + 1 };
+    if (staleRequest) {
+      const rejected = await registry.hydrateLogicalDocument(staleRequest);
+      assert.equal(rejected.ok, false);
+      assert.equal(registry.getByPath(path), null);
+    }
+    assert.equal((await registry.hydrateLogicalDocument(request)).ok, true);
+    assert.equal(transmittedText.at(-1), `// draft ${index} λ\n`);
+    assert.equal(registry.getByPath(path).dirty, true);
+    // A newer client edit, not the existence of a presentation, protects text.
+    registry.replaceFullText({ path, text: "// newer unpublished client edit\n", dirty: true });
+    const retainedVersion = registry.getByPath(path).versionId;
+    foreground.add(path);
+    const protectedResult = await registry.hydrateLogicalDocument({ ...request, text: "disk text" });
+    assert.equal(protectedResult.error, "client_foreground_document_protected");
+    assert.equal(registry.getByPath(path).versionId, retainedVersion);
+    staleRequest = request;
+  }
+});
+
 test("workspace switch removes editor facade then releases every document", async () => {
   const fixture = createLifecycleRuntime({
     "/workspace/a.rs": "fn a() {}\n",
@@ -476,7 +647,7 @@ test("same-path same-generation open is idempotent", async () => {
   });
 
   assert.equal(duplicate.duplicate, true);
-  assert.deepEqual(fixture.reads, ["/workspace/a.rs"]);
+  assert.deepEqual(fixture.reads, []);
   assert.equal(fixture.calls.length, callsBeforeDuplicate);
   assert.equal(fixture.events.length, eventsBeforeDuplicate);
   assert.equal(fixture.registry.getByPath("/workspace/a.rs").versionId, 2);

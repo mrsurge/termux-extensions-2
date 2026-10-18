@@ -3,6 +3,7 @@ package com.termux.extensions
 internal object CefriumAssetRoutes {
     // Exact built-in resources only; never intercept dynamic /apps or API trees.
     private val builtInAppAssets = mapOf(
+        "/apps/code_te2/extensions/sidebar_extension/manifest.json" to "/apps/code_te2/extensions/sidebar_extension/manifest.json",
         "/apps/als_rs/template.html" to "/apps/als_rs/template.html",
         "/apps/by-id/als-rs/template.html" to "/apps/als_rs/template.html",
         "/apps/als_rs/main.js" to "/apps/als_rs/main.js",
@@ -71,6 +72,7 @@ internal object CefriumAssetRoutes {
         "/apps/code_te2/static/dist/explorer-search-widget.css",
         "/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
         "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
+        "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/codicon-LN6W7LCM.ttf",
         "/api/app/code_te2/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
         "/apps/code_te2/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
         "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
@@ -78,6 +80,7 @@ internal object CefriumAssetRoutes {
     )
 
     fun localPath(requestPath: String): String? {
+        AlsProxyAssets.localPath(requestPath)?.let { return it }
         builtInAppAssets[requestPath]?.let { return it }
         if (
             requestPath !in localFiles &&

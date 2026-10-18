@@ -48,6 +48,35 @@ async def switch_project_connection(
     open_state_source: str = "explorer_project_open",
     before_switch: Callable[[], None] | None = None,
 ) -> ExplorerProjectSwitchResult:
+    from ...project_autosave import project_switch, flush_before_project_switch, release_project_switch
+    from ...stores import get_history_store
+    previous = get_history_store().get_active_project()
+    token = await flush_before_project_switch(previous)
+    try:
+        if get_history_store().get_active_project() != previous:
+            raise ValueError("Project changed while preparing the switch")
+        with project_switch(previous, project_path, token):
+            return await _switch_project_connection(
+                websocket, project_path, display_path=display_path,
+                initialize_watcher=initialize_watcher, switch_adapter_workspace=switch_adapter_workspace,
+                open_state_reason=open_state_reason, open_state_source=open_state_source,
+                before_switch=before_switch,
+            )
+    finally:
+        await release_project_switch(token)
+
+
+async def _switch_project_connection(
+    websocket: ExplorerConnection | None,
+    project_path: str,
+    *,
+    display_path: str | None = None,
+    initialize_watcher: bool,
+    switch_adapter_workspace: bool,
+    open_state_reason: str = "project_open",
+    open_state_source: str = "explorer_project_open",
+    before_switch: Callable[[], None] | None = None,
+) -> ExplorerProjectSwitchResult:
     if before_switch is not None:
         before_switch()
     sync_explorer_project, refresh_explorer_project = _get_explorer_project_hooks()
@@ -104,9 +133,12 @@ async def switch_project_connection(
             await _mark_adapter_workspace_switching(new_root)
             adapter_status = "switching"
             adapter_rpc = _get_adapter_rpc()
+            from ...workbench_document_initialization import build_initial_documents
+            initial_documents = await asyncio.to_thread(build_initial_documents, str(new_root))
+            _require_current_switch(new_root, project_generation)
             switch_response = await adapter_rpc(
                 "adapter.reconnect",
-                {"workspaceFolder": str(new_root)},
+                {"workspaceFolder": str(new_root), "initialDocuments": initial_documents},
                 75,
             )
             _require_switch_ack(switch_response, method="adapter.reconnect")

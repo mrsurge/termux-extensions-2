@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { QuickFixService } from '../extensions/intelligence/code-actions.mjs';
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -37,6 +38,7 @@ import {
 } from "../protocol/ext-host-dispatch.mjs";
 import {
   buildConfigurationInitData,
+  resolveWatcherExcludes,
   buildSettingsSchema,
   extractExtensionConfigDefaults,
   getVirtualVscodeContent,
@@ -237,6 +239,7 @@ const REPLY_NULL_METHODS = new Set(
 );
 const PARSE_ALL_ARGS = String(process.env.TE2_PARSE_ALL_ARGS || "") === "1";
 const PARSE_ARGS_ONLY_METHODS = new Set<string>([
+  "$unregister",
   // Provider registration + minimal main-thread contract methods.
   "$registerHoverProvider",
   "$registerDocumentSymbolProvider",
@@ -325,6 +328,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
 
   // Keep diagnostics/hover requests parseable when we need them later.
   "$changeMany",
+  "$clear",
   "$provideHover",
   "$provideDocumentSymbols",
 
@@ -773,6 +777,8 @@ export class WorkbenchClient {
   _mgmtIpc: MgmtIpcLike | null;
   _fsWatcherSub: WatchSubscriptionLike;
   _connecting: boolean;
+  private _documentInitialization: Promise<Record<string, unknown>> | undefined;
+  private _documentInitializationEpoch = 0;
   _openFilePending: number;
   _openingPaths: Map<string, number>;
   _extRequests: PendingExtRequestOwner;
@@ -802,6 +808,7 @@ export class WorkbenchClient {
   _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
+  _quickFixes: QuickFixService;
   _diagnosticSnapshots: DiagnosticsSnapshotStore;
   _semanticTokenProjections: SemanticTokenProjectionManager;
   _semanticTokenProviderSignatures: Map<string, string>;
@@ -985,11 +992,29 @@ export class WorkbenchClient {
       uriForPath: (filePath) => this._uriForPath(filePath),
       openWorkbenchResource: (uri, options) =>
         this._extensionEditorNavigation.openFromWorkbenchCommand(uri, options),
+      showLocations: (uri: unknown, position: unknown, locations: unknown) =>
+        this._extensionEditorNavigation.showLocationsFromWorkbench(uri, position, locations),
       syncSelection: (params) => this._syncExtensionCommandSelection(params),
       onEvent: (payload) => this.onEvent(payload),
       log: (...args) => console.log(...args),
     });
     this._providerRegistry = new ProviderRegistry();
+    this._quickFixes = new QuickFixService({
+      commandSupported: command => this._extensionCommands.canExecuteQuickFix(command),
+      registry: this._providerRegistry,
+      document: params => ({languageId:String(params.languageId || this.state.activeLanguageId || 'plaintext'),
+        scheme:this._useRemote ? 'vscode-remote' : 'file', authority:this._authority || DEFAULT_REMOTE_AUTHORITY, path:String(params.path || '')}),
+      uri: filePath => this._uriForPath(filePath, this._authority || DEFAULT_REMOTE_AUTHORITY),
+      request: async (method, args) => {
+        this._inlayHintsRuntime().ensureConnected();
+        const {promise} = this._sendExtPending(_rpcIds.ExtHostLanguageFeatures, method, args,
+          method !== '$releaseCodeActions', {timeoutMs:15000, timeoutMessage:'Quick Fix provider timed out'});
+        const reply = await promise;
+        if (isRecord(reply) && reply.type === 9) return reply.result;
+        if (isRecord(reply) && reply.type === 7) return undefined;
+        throw Error('Quick Fix provider request failed');
+      },
+    });
     this._diagnosticSnapshots = new DiagnosticsSnapshotStore({
       uriToString: (resource) => stringifyUriSafe(resource),
     });
@@ -1498,6 +1523,7 @@ export class WorkbenchClient {
 
   _workspaceLifecycleRuntime() {
     return createWorkspaceLifecycleRuntime({
+      getWatcherExcludes: (root) => resolveWatcherExcludes(this._configurationRuntime(), root),
       extProtocol: this.ext?.protocol ?? null,
       state: this.state,
       activeEditorId: this._activeEditorId,
@@ -2042,11 +2068,13 @@ export class WorkbenchClient {
       replyEmptyMethods: REPLY_EMPTY_METHODS,
       replyNullMethods: REPLY_NULL_METHODS,
       mainThreadConsoleRpcId: _rpcIds.MainThreadConsole,
+      mainThreadLanguageFeaturesRpcId: _rpcIds.MainThreadLanguageFeatures,
       mainThreadExtensionServiceRpcId: _rpcIds.MainThreadExtensionService,
       mainThreadLoggerRpcId: _rpcIds.MainThreadLogger,
       mainThreadOutputServiceRpcId: _rpcIds.MainThreadOutputService,
       mainThreadStatusBarRpcId: _rpcIds.MainThreadStatusBar,
       mainThreadStorageRpcId: _rpcIds.MainThreadStorage,
+      mainThreadDiagnosticsRpcId: _rpcIds.MainThreadDiagnostics,
       extHostWorkspaceRpcId: _rpcIds.ExtHostWorkspace,
       extensionActivity: this._extensionActivity,
       initializeExtensionStorage: (shared, extensionId) =>
@@ -2121,7 +2149,7 @@ export class WorkbenchClient {
     if (typeof payload.type === "string" && (
       payload.type.startsWith("provider/") || payload.type === "diagnostics/changeMany"
     )) this._startupMark(`intelligence.first.${payload.type}`);
-    if (payload.type === "diagnostics/changeMany") {
+    if (payload.type === "diagnostics/changeMany" || payload.type === "diagnostics/clear") {
       this._diagnosticSnapshots.apply(payload);
     }
     if (payload.type === "document/activeChanged" && typeof payload.path === "string") {
@@ -2240,6 +2268,7 @@ export class WorkbenchClient {
     this._semanticTokenProjections.clear(reason || "session_reset");
     this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
+    this._quickFixes.reset();
     this._diagnosticSnapshots.clear();
     this._webviews.clear(reason || "session_reset");
     this._extensionEditorNavigation.reset(reason || "session_reset");
@@ -2318,6 +2347,7 @@ export class WorkbenchClient {
     uri: unknown,
     options: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
+    await this._documentInitialization;
     return openLocalDocument(this._documentContentRuntime(), uri, options);
   }
 
@@ -2376,12 +2406,22 @@ export class WorkbenchClient {
     });
   }
 
-  async connect(
+  connect(params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    if (this._connecting) return Promise.reject(new Error("already connecting"));
+    const pending = this._connectPreparedDocuments(params);
+    this._documentInitialization = pending;
+    void pending.catch(() => {});
+    return pending;
+  }
+
+  private async _connectPreparedDocuments(
     params: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
     if (this._connecting) throw new Error("already connecting");
+    if (!isRecord(params.initialDocuments)) throw new Error("initial_documents_required");
     this._resetSessionCaches("connect");
     this._connecting = true;
+    const initializationEpoch = ++this._documentInitializationEpoch;
     try {
       const management = await spanTraceAsync("connect.management.total", () => connectManagementSession(
         this._managementRuntime(),
@@ -2391,6 +2431,11 @@ export class WorkbenchClient {
         this._extensionHostRuntime(),
         management,
       ));
+      if (initializationEpoch !== this._documentInitializationEpoch) throw new Error("document_initialization_superseded");
+      if (!isRecord(params.initialDocuments)) throw new Error("initial_documents_required");
+      this._documentRegistry.initializeDocuments(params.initialDocuments);
+      this._activateInitializedDocuments();
+      // Documents are present before primary-view activation or connect ACK.
       // Sidebar providers are independent of editor readiness. WebviewRuntime
       // fences their asynchronous continuation on session/workspace teardown.
       void spanTraceAsync("connect.primaryViews.activate", () => this._webviews.activatePrimaryViews())
@@ -2398,7 +2443,7 @@ export class WorkbenchClient {
       this._startupMark("connect.ready");
       return result;
     } finally {
-      this._connecting = false;
+      if (initializationEpoch === this._documentInitializationEpoch) this._connecting = false;
     }
   }
 
@@ -2515,6 +2560,7 @@ export class WorkbenchClient {
   }
 
   async openFile(params: unknown = {}): Promise<Record<string, unknown>> {
+    await this._documentInitialization;
     this._startupMark("document.firstOpen.begin");
     const requestedPath = isRecord(params) ? String(params.path ?? "") : "";
     const previousVersion = requestedPath
@@ -2558,6 +2604,19 @@ export class WorkbenchClient {
       this._openFilePending = Math.max(0, this._openFilePending - 1);
       this._trackOpeningPath(requestedPath, -1);
       this._completionWarmup.notify();
+    }
+  }
+
+  async initializeDocuments(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    await this._documentInitialization;
+    const result = this._documentRegistry.initializeDocuments(params);
+    this._activateInitializedDocuments();
+    return result;
+  }
+
+  private _activateInitializedDocuments(): void {
+    for (const language of new Set(this._documentRegistry.values().map(entry => entry.languageId))) {
+      void this.activateLanguage(language).catch(error => console.warn("[document_initialization] activation failed", language, error));
     }
   }
 
@@ -2833,6 +2892,10 @@ export class WorkbenchClient {
     return provideInlayHints(this._inlayHintsRuntime(), params);
   }
 
+  codeActions(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this._quickFixes.call(method, params);
+  }
+
   async resolveInlayHint(
     params: unknown = {},
   ): Promise<Record<string, unknown>> {
@@ -2954,6 +3017,7 @@ export class WorkbenchClient {
    * their analysis to the new project.  Also re-subscribes the file watcher.
    */
   async _switchWorkspace(newFolder: string): Promise<Record<string, unknown>> {
+    this._quickFixes.reset(true);
     this._webviews.clear("workspace_switch", false);
     const result = {
       ...(await switchWorkbenchWorkspace(
@@ -3019,6 +3083,8 @@ export class WorkbenchClient {
   }
 
   disconnect(): void {
+    this._documentInitializationEpoch += 1;
+    this._documentInitialization = undefined;
     disconnectSession(this._transportRuntime());
     this._resetSessionCaches("disconnect");
   }

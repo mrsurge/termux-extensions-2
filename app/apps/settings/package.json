@@ -1,0 +1,5 @@
+{
+  "name": "te2-settings", "private": true, "type": "module",
+  "scripts": { "typecheck": "tsc --noEmit", "build": "node build.mjs", "test": "node --test frontend.test.mjs" },
+  "devDependencies": { "esbuild": "^0.27.4", "typescript": "^5.7.0" }
+}

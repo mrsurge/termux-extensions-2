@@ -168,6 +168,12 @@ class ProjectSidecar:
         started = perf_counter_ns() if sidecar_profile.ENABLED else 0
         try:
             instance = cls(normalized)
+            # First worker-owned adoption only, not standalone projection reads
+            # or reload(). Recover interrupted autosave buffers in Draft Mode.
+            mode = _as_dict(instance._data.get("autosave"))
+            if instance._path.exists() and mode.get("enabled") is True and instance.list_project_drafts():
+                instance._data["autosave"] = {"enabled": False, "revision": _as_int(mode.get("revision"), 0) + 1}
+                instance.save()
         finally:
             if sidecar_profile.ENABLED:
                 sidecar_profile.record("load_or_create.cache_miss_inclusive", perf_counter_ns() - started)
@@ -203,6 +209,8 @@ class ProjectSidecar:
             # old per-path entry is evicted from the bounded map.
             "document_state_revision": 0,
             "document_revisions": {},
+            # Never inherit the legacy global autosave preference.
+            "autosave": {"enabled": False, "revision": 0},
             # Monotonic revision for sidecar-backed open-file events.
             "open_state_revision": 0,
             # Open directories in explorer tree (persisted across reloads).
@@ -475,6 +483,56 @@ class ProjectSidecar:
         # Return a shallow copy to prevent accidental mutation.
         return dict(entry)
 
+    def get_autosave_state(self) -> tuple[bool, int]:
+        """Project-owned mode; legacy global preferences never enable it."""
+        data = self._read_review_state() if self._path.exists() else self._data
+        mode = _as_dict(data.get("autosave"))
+        enabled = mode.get("enabled", False)
+        revision = mode.get("revision", 0)
+        if type(enabled) is not bool or type(revision) is not int or revision < 0:
+            raise ValueError("Invalid project autosave mode")
+        return enabled, revision
+
+    def set_autosave_mode(self, enabled: bool, expected_revision: int) -> int:
+        """Synchronous final compare/commit, after explicit draft resolution."""
+        current, revision = self.get_autosave_state()
+        if revision != expected_revision:
+            raise ValueError("Project autosave mode changed; refresh before retrying")
+        data = self._read_review_state() if self._path.exists() else self._data
+        if enabled and any(_as_dict(item).get("unsaved") for item in _as_dict(data.get("session_cache")).values()):
+            raise ValueError("Resolve project drafts before enabling autosave")
+        previous = self._data
+        self._data = data
+        try:
+            revision += int(current != enabled)
+            self._data["autosave"] = {"enabled": enabled, "revision": revision}
+            self.save()
+            return revision
+        except Exception:
+            self._data = previous
+            raise
+
+    def evict_review_draft(self, path: str, revision: int, sha256: str) -> None:
+        """Remove exactly the confirmed draft, never a concurrent replacement."""
+        data = self._read_review_state()
+        cache = _as_dict(data["session_cache"])
+        key = _make_file_cache_key(self.project_path, path)
+        entry = _as_dict(cache.get(key))
+        content = entry.get("content")
+        if (not isinstance(content, str) or entry.get("document_revision", 0) != revision
+                or hashlib.sha256(content.encode("utf-8")).hexdigest() != sha256):
+            raise ValueError("Draft changed; confirmation is stale")
+        previous = self._data
+        self._data = data
+        try:
+            cache.pop(key)
+            self._data["session_cache"] = cache
+            self.advance_document_revision(path)
+            self.save()
+        except Exception:
+            self._data = previous
+            raise
+
     def _document_revision_entries(self) -> dict[str, JsonDict]:
         raw = _as_dict(self._data.get("document_revisions"))
         return {key: _as_dict(value) for key, value in raw.items()}
@@ -519,6 +577,8 @@ class ProjectSidecar:
         worker_pid: int,
     ) -> DraftEntry:
         """Insert/update draft cache entry for file_path."""
+        from .project_autosave import require_draft_writable
+        require_draft_writable(self.project_path)
         cache_key = _make_file_cache_key(self.project_path, file_path)
         cache = _as_dict(self._data.get("session_cache"))
 
@@ -549,6 +609,8 @@ class ProjectSidecar:
 
     def clear_cached_document(self, file_path: str) -> bool:
         """Remove cached draft (if any) for file_path."""
+        from .project_autosave import require_no_transition
+        require_no_transition(self.project_path)
         cache_key = _make_file_cache_key(self.project_path, file_path)
         cache = _as_dict(self._data.get("session_cache"))
         existed = cache_key in cache
@@ -570,6 +632,69 @@ class ProjectSidecar:
             except Exception:
                 continue
         return results
+
+    def read_review_snapshot(self) -> tuple[int, list[DraftEntry]]:
+        """Read persisted membership strictly; failure is never an empty list.
+
+        Unlike reload's recovery semantics this is a projection read, not a
+        migration or repair. Do not mutate the shared sidecar cache here.
+        """
+        data = self._read_review_state()
+        revision = cast(int, data.get('document_state_revision', 0))
+        entries: list[DraftEntry] = []
+        for raw in _as_dict(data['session_cache']).values():
+            if not isinstance(raw, dict):
+                raise ValueError('Invalid draft review entry')
+            entry = _as_dict(raw)
+            if entry.get('unsaved'):
+                if not isinstance(entry.get('file_path'), str) or not isinstance(entry.get('content'), str):
+                    raise ValueError('Invalid draft review content')
+                entries.append(dict(entry))
+        return revision, entries
+
+    def _read_review_state(self) -> JsonDict:
+        decoded = cast(object, json.loads(self._path.read_text(encoding='utf-8')))
+        if not isinstance(decoded, dict):
+            raise ValueError('Invalid draft review sidecar')
+        data = _as_dict(decoded)
+        revision = data.get('document_state_revision', 0)
+        cache = data.get('session_cache')
+        if data.get('version') != self.VERSION or type(revision) is not int or not isinstance(cache, dict):
+            raise ValueError('Invalid draft review snapshot')
+        return data
+
+    def replace_review_draft(self, file_path: str, expected_revision: int,
+                            expected_sha256: str, content: str, disk_sha256: str,
+                            *, advance_base: bool = False) -> DraftEntry:
+        """Synchronous worker-owned compare/commit; propagate persistence errors."""
+        from .project_autosave import require_no_transition
+        require_no_transition(self.project_path)
+        data = self._read_review_state()
+        key = _make_file_cache_key(self.project_path, file_path)
+        cache = _as_dict(data['session_cache'])
+        entry = _as_dict(cache.get(key))
+        previous_content = entry.get('content')
+        if (not entry.get('unsaved') or not isinstance(previous_content, str)
+                or entry.get('document_revision', 0) != expected_revision
+                or hashlib.sha256(previous_content.encode('utf-8')).hexdigest() != expected_sha256):
+            raise ValueError('Draft changed; refresh the review before reverting')
+        previous_state = self._data
+        self._data = data
+        try:
+            digest = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            updated = dict(entry)
+            updated.update(content=content, content_length=len(content), content_sha256=digest,
+                           unsaved=digest != disk_sha256, document_revision=self.advance_document_revision(file_path),
+                           updated_at=_utc_timestamp())
+            if advance_base or digest == disk_sha256:
+                updated['base_sha256'] = disk_sha256
+            cache[key] = updated
+            self._data['session_cache'] = cache
+            self.save()
+            return updated
+        except Exception:
+            self._data = previous_state
+            raise
 
     def prune_clean_drafts(self) -> int:
         """Remove cached draft entries that are explicitly marked unsaved == False."""
@@ -594,6 +719,8 @@ class ProjectSidecar:
         return len(to_remove)
 
     def clear_session_cache(self) -> None:
+        from .project_autosave import require_no_transition
+        require_no_transition(self.project_path)
         cache = _as_dict(self._data.get("session_cache"))
         for value in cache.values():
             file_path = _as_dict(value).get("file_path")

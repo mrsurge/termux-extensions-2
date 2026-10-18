@@ -4,16 +4,17 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import Awaitable
-from typing import Any, TextIO
+from collections.abc import Awaitable, Callable
+from typing import Protocol, TextIO, cast, override
 
-import socketio
+import socketio  # pyright: ignore[reportMissingTypeStubs] -- narrow third-party boundary below
 
 from app.te2_console_log import (
     TE2_CONSOLE_LOG_DIR,
     TE2_CONSOLE_LOG_PATH,
     read_console_log_tail,
 )
+from app.libs.console_workers import ConsoleWorkers
 
 TE2_CONSOLE_NAMESPACE = "/te2_console"
 TE2_CONSOLE_SOCKET_PATH = "/te2_console_ws/socket.io"
@@ -29,46 +30,74 @@ if TE2_CONSOLE_LOG_PATH.exists():
 TE2_CONSOLE_LOG_PATH.touch()
 _log_fh: TextIO = open(TE2_CONSOLE_LOG_PATH, "a", encoding="utf-8")
 
-ConsolePayload = dict[str, Any]
+ConsolePayload = dict[str, object]
+
+
+class ConsoleServer(Protocol):
+    async def emit(self, event: str, data: object, *, namespace: str,
+                   room: str) -> None: ...
+
+
+class ConsoleNamespace(Protocol):
+    async def emit(self, event: str, data: object, *, room: str | None = None,
+                   to: str | None = None, skip_sid: str | None = None) -> None: ...
+    async def enter_room(self, sid: str, room: str) -> None: ...
+    async def leave_room(self, sid: str, room: str) -> None: ...
+    async def save_session(self, sid: str, session: ConsolePayload) -> None: ...
+    async def get_session(self, sid: str) -> object: ...
+
+
+def console_payload(value: object) -> ConsolePayload | None:
+    if not isinstance(value, dict):
+        return None
+    mapping = cast(dict[object, object], value)
+    if not all(isinstance(key, str) for key in mapping):
+        return None
+    return cast(ConsolePayload, value)
 
 _registered_workers: set[str] = set()
+_workers = ConsoleWorkers()
 _pending_eval_results: dict[str, asyncio.Future[ConsolePayload]] = {}
+_eval_owners: dict[str, tuple[str, str]] = {}
 
 
 class Te2ConsoleNamespace(socketio.AsyncNamespace):
-    async def trigger_event(self, event, *args):
+    @override
+    async def trigger_event(self, event: str, *args: object) -> object:
         normalized = event.replace(":", "_") if event else event
         handler = getattr(self, f"on_{normalized or ''}", None)
         if handler:
-            return await handler(*args)
-        return await super().trigger_event(event, *args)
+            return await cast(Awaitable[object], handler(*args))
+        fallback = cast(Callable[..., Awaitable[object]], getattr(super(), 'trigger_event'))
+        return await fallback(event, *args)
 
-    async def on_connect(self, sid, environ):
+    async def on_connect(self, sid: str, environ: object) -> None:
+        del environ
         print(f"[te2_console] connect sid={sid}", flush=True)
 
-    async def on_disconnect(self, sid, reason=None):
+    async def on_disconnect(self, sid: str, reason: object = None) -> None:
         print(f"[te2_console] disconnect sid={sid} reason={reason}", flush=True)
         await on_console_disconnect(self, sid)
 
-    async def on_console_register(self, sid, data):
+    async def on_console_register(self, sid: str, data: object) -> None:
         await on_console_register(self, sid, data)
 
-    async def on_console_unregister(self, sid, data):
+    async def on_console_unregister(self, sid: str, data: object) -> None:
         await on_console_unregister(self, sid, data)
 
-    async def on_console_log(self, sid, data):
+    async def on_console_log(self, sid: str, data: object) -> None:
         await on_console_log(self, sid, data)
 
-    async def on_console_eval(self, sid, data):
+    async def on_console_eval(self, sid: str, data: object) -> None:
         await on_console_eval(self, sid, data)
 
-    async def on_console_evalResult(self, sid, data):
+    async def on_console_evalResult(self, sid: str, data: object) -> None:
         await on_console_eval_result(self, sid, data)
 
-    async def on_console_replay(self, sid, data):
+    async def on_console_replay(self, sid: str, data: object) -> None:
         await on_console_replay(self, sid, data)
 
-    async def on_console_clear(self, sid, data):
+    async def on_console_clear(self, sid: str, data: object) -> None:
         await on_console_clear(self, sid, data)
 
 
@@ -77,7 +106,7 @@ TE2_CONSOLE_SIO = socketio.AsyncServer(
     cors_allowed_origins="*",
     max_http_buffer_size=8 * 1024 * 1024,
 )
-TE2_CONSOLE_SIO.register_namespace(Te2ConsoleNamespace(TE2_CONSOLE_NAMESPACE))
+cast(Callable[[object], None], getattr(TE2_CONSOLE_SIO, 'register_namespace'))(Te2ConsoleNamespace(TE2_CONSOLE_NAMESPACE))
 TE2_CONSOLE_ASGI_APP = socketio.ASGIApp(TE2_CONSOLE_SIO, socketio_path="")
 
 
@@ -90,11 +119,11 @@ def _append_log(data: ConsolePayload) -> None:
         pass
 
 
-async def _broadcast_workers(ns) -> None:
+async def _broadcast_workers(ns: ConsoleNamespace) -> None:
     await ns.emit("console:workers", sorted(_registered_workers), room="console:drawers")
 
 
-async def _replay_to_sid(ns, sid: str, max_lines: int | None = None) -> None:
+async def _replay_to_sid(ns: ConsoleNamespace, sid: str, max_lines: int | None = None) -> None:
     line_limit = _MAX_REPLAY_LINES if max_lines is None else max_lines
     tail = read_console_log_tail(
         TE2_CONSOLE_LOG_PATH,
@@ -115,14 +144,16 @@ async def _replay_to_sid(ns, sid: str, max_lines: int | None = None) -> None:
 
     for raw_line in tail.lines:
         try:
-            entry = json.loads(raw_line)
+            entry = cast(object, json.loads(raw_line))
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
         await ns.emit("console:log", entry, to=sid)
 
 
-def _normalize_tail_lines(value) -> int:
+def _normalize_tail_lines(value: object) -> int:
     try:
+        if not isinstance(value, (str, int, float, bytes, bytearray)):
+            return _DEFAULT_REPLAY_MAX_LINES
         parsed = int(value)
     except Exception:
         return _DEFAULT_REPLAY_MAX_LINES
@@ -146,47 +177,48 @@ async def request_console_eval(
     target = str(target_worker_id or "").strip()
     if not target:
         raise ValueError("target_worker_id is required")
-    if target not in _registered_workers:
-        raise LookupError(f"console worker not registered: {target}")
+    worker = _workers.lookup(target)
+    if len(_pending_eval_results) >= 256:
+        raise ValueError("console evaluation capacity reached")
 
     req_id = str(uuid.uuid4())
     loop = asyncio.get_running_loop()
     future: asyncio.Future[ConsolePayload] = loop.create_future()
     _pending_eval_results[req_id] = future
+    _eval_owners[req_id] = (worker.sid, worker.worker_id)
 
     payload = {
-        "targetWorkerId": target,
+        "targetWorkerId": worker.requested_id,
         "reqId": req_id,
         "code": str(code or ""),
         "timeoutSeconds": timeout_seconds,
     }
-    await TE2_CONSOLE_SIO.emit(
-        "console:eval",
-        payload,
-        namespace=TE2_CONSOLE_NAMESPACE,
-        room=f"console:{target}",
-    )
-
     try:
+        await cast(ConsoleServer, TE2_CONSOLE_SIO).emit(
+            "console:eval", payload, namespace=TE2_CONSOLE_NAMESPACE, room=worker.sid,
+        )
         result = await asyncio.wait_for(future, timeout=timeout_seconds)
-        if not isinstance(result, dict):
+        if not isinstance(cast(object, result), dict):
             raise TypeError("console eval result was not a dict payload")
         return result
     except asyncio.TimeoutError:
-        await TE2_CONSOLE_SIO.emit(
+        await cast(ConsoleServer, TE2_CONSOLE_SIO).emit(
             "console:evalCancel",
             {"reqId": req_id, "targetWorkerId": target},
             namespace=TE2_CONSOLE_NAMESPACE,
-            room=f"console:{target}",
+            room=worker.sid,
         )
         raise
     finally:
         _ = _pending_eval_results.pop(req_id, None)
+        _ = _eval_owners.pop(req_id, None)
 
 
-async def on_console_register(ns, sid, data):
-    if not isinstance(data, dict):
+async def on_console_register(ns: ConsoleNamespace, sid: str, data: object) -> None:
+    payload = console_payload(data)
+    if payload is None:
         return
+    data = payload
     role = data.get("role", "worker")
     worker_id = str(data.get("workerId") or "").strip()
 
@@ -200,14 +232,37 @@ async def on_console_register(ns, sid, data):
         return
 
     if worker_id:
-        await ns.enter_room(sid, f"console:{worker_id}")
-        await ns.save_session(sid, {"consoleWorkerId": worker_id})
-        _registered_workers.add(worker_id)
+        if len(worker_id) > 512:
+            raise ValueError("console worker identity is too long")
+        label = str(data.get("workerLabel") or worker_id.split(":", 1)[0])
+        client_id = str(data.get("clientInstanceId") or "").strip()
+        presentation_id = str(data.get("presentationId") or "").strip()
+        if len(client_id) > 512 or len(presentation_id) > 512:
+            raise ValueError("console presentation identity is too long")
+        previous = _workers.by_sid.get(sid)
+        previous_owner = _workers.by_id.get(worker_id) if data.get("qualifiedIdentity") is True else None
+        worker = _workers.register(sid, worker_id, label, client_id, presentation_id,
+                                   compact=data.get("compactIdentity") is True,
+                                   qualified=data.get("qualifiedIdentity") is True)
+        if previous_owner is not None and previous_owner.sid != sid:
+            _reject_worker_evals(previous_owner.sid)
+        if previous and previous is not worker:
+            _registered_workers.discard(previous.worker_id)
+            _reject_worker_evals(sid)
+        _registered_workers.add(worker.worker_id)
+        await ns.emit("console:registered", {"workerId": worker.worker_id,
+                      "requestedWorkerId": worker.requested_id}, to=sid)
         print(f"[te2_console] worker registered sid={sid} workerId={worker_id}", flush=True)
         await _broadcast_workers(ns)
 
 
-async def on_console_unregister(ns, sid, data):
+async def on_console_unregister(ns: ConsoleNamespace, sid: str, data: object) -> None:
+    payload = console_payload(data)
+    if payload is not None and payload.get("role") == "worker":
+        worker = _workers.by_sid.get(sid)
+        if worker is not None and payload.get("workerId") == worker.worker_id:
+            await on_console_disconnect(ns, sid)
+        return
     try:
         await ns.leave_room(sid, "console:drawers")
     except Exception:
@@ -215,45 +270,69 @@ async def on_console_unregister(ns, sid, data):
     print(f"[te2_console] drawer unregistered sid={sid}", flush=True)
 
 
-async def on_console_disconnect(ns, sid):
-    try:
-        session = await ns.get_session(sid)
-        worker_id = session.get("consoleWorkerId") if session else None
-    except Exception:
-        worker_id = None
-    if worker_id and worker_id in _registered_workers:
-        _registered_workers.discard(worker_id)
-        print(f"[te2_console] worker disconnected sid={sid} workerId={worker_id}", flush=True)
+async def on_console_disconnect(ns: ConsoleNamespace, sid: str) -> None:
+    worker = _workers.remove(sid)
+    _reject_worker_evals(sid)
+    if worker:
+        _registered_workers.discard(worker.worker_id)
+        print(f"[te2_console] worker disconnected sid={sid} workerId={worker.worker_id}", flush=True)
         await _broadcast_workers(ns)
 
 
-async def on_console_log(ns, sid, data):
-    if not isinstance(data, dict):
+def _reject_worker_evals(sid: str) -> None:
+    for req_id, (owner_sid, _) in list(_eval_owners.items()):
+        future = _pending_eval_results.get(req_id)
+        if owner_sid == sid and future is not None and not future.done():
+            future.set_exception(ConnectionError("console worker disconnected or re-registered"))
+
+
+async def on_console_log(ns: ConsoleNamespace, sid: str, data: object) -> None:
+    payload = console_payload(data)
+    if payload is None:
         return
+    worker = _workers.by_sid.get(sid)
+    if worker is None:
+        return
+    data = {**payload, "workerId": worker.worker_id, "workerLabel": worker.label}
     if not data.get("ts"):
         data = {**data, "ts": int(time.time() * 1000)}
     _append_log(data)
     await ns.emit("console:log", data, room="console:drawers", skip_sid=sid)
 
 
-async def on_console_replay(ns, sid, data):
+async def on_console_replay(ns: ConsoleNamespace, sid: str, data: object) -> None:
+    del data
     await _replay_to_sid(ns, sid)
 
 
-async def on_console_eval(ns, sid, data):
-    if not isinstance(data, dict):
+async def on_console_eval(ns: ConsoleNamespace, sid: str, data: object) -> None:
+    payload = console_payload(data)
+    if payload is None:
         return
+    data = payload
     target = data.get("targetWorkerId")
     if not target:
         return
-    await ns.emit("console:eval", data, room=f"console:{target}", skip_sid=sid)
+    try:
+        result = await request_console_eval(str(target), str(data.get("code") or ""))
+        await ns.emit("console:evalResult", {**result, "reqId": data.get("reqId")}, to=sid)
+    except (LookupError, ValueError, ConnectionError, asyncio.TimeoutError) as error:
+        await ns.emit("console:evalResult", {"reqId": data.get("reqId"), "ok": False,
+                      "error": {"message": str(error)}}, to=sid)
 
 
-async def on_console_eval_result(ns, sid, data):
-    if not isinstance(data, dict):
+async def on_console_eval_result(ns: ConsoleNamespace, sid: str, data: object) -> None:
+    payload = console_payload(data)
+    if payload is None:
         return
+    data = payload
     req_id = data.get("reqId")
-    future = _pending_eval_results.get(req_id) if req_id else None
+    owner = _eval_owners.get(req_id) if isinstance(req_id, str) else None
+    worker = _workers.by_sid.get(sid)
+    if owner is None or worker is None or owner != (sid, worker.worker_id):
+        return
+    data = {**data, "workerId": worker.worker_id}
+    future = _pending_eval_results.get(req_id) if isinstance(req_id, str) and req_id else None
     if future and not future.done():
         future.set_result(data)
     elif req_id:
@@ -261,14 +340,14 @@ async def on_console_eval_result(ns, sid, data):
             f"[te2_console] late eval result for reqId={req_id}, dropping",
             flush=True,
         )
-    await ns.emit("console:evalResult", data, room="console:drawers", skip_sid=sid)
 
 
-async def on_console_clear(ns, sid, data):
+async def on_console_clear(ns: ConsoleNamespace, sid: str, data: object) -> None:
+    del sid, data
     global _log_fh
     try:
         _log_fh.close()
-        TE2_CONSOLE_LOG_PATH.write_text("", encoding="utf-8")
+        _ = TE2_CONSOLE_LOG_PATH.write_text("", encoding="utf-8")
         _log_fh = open(TE2_CONSOLE_LOG_PATH, "a", encoding="utf-8")
     except Exception:
         pass

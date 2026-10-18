@@ -90215,8 +90215,8 @@ var init_listView = __esm({
         if (targetIndex === void 0) {
           return void 0;
         }
-        const relativePosition = browserEvent.offsetY / this.items[targetIndex].size;
-        const sector = Math.floor(relativePosition / 0.25);
+        const relativePosition2 = browserEvent.offsetY / this.items[targetIndex].size;
+        const sector = Math.floor(relativePosition2 / 0.25);
         return clamp(sector, 0, 3);
       }
       getItemIndexFromEventTarget(target) {
@@ -119445,8 +119445,7 @@ function resolveParsedTokenThemeRules(parsedThemeRules, customTokenColors) {
   return new TokenTheme(colorMap, root);
 }
 function normalizeColorHex(color) {
-  const hex = color.toString().toUpperCase().replace("#", "");
-  return hex.length >= 6 ? hex.substring(0, 6) : hex;
+  return Color.Format.CSS.formatHexA(color, true).substring(1).toUpperCase();
 }
 function findNearestColorIndex(hex, palette) {
   const r0 = parseInt(hex.substring(0, 2), 16);
@@ -119528,7 +119527,7 @@ var init_tokenization = __esm({
       }
     };
     colorRegExp = /^#?([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/;
-    ColorMap = class {
+    ColorMap = class _ColorMap {
       constructor() {
         this._lastColorId = 0;
         this._id2color = [];
@@ -119554,6 +119553,20 @@ var init_tokenization = __esm({
       }
       getColorMap() {
         return this._id2color.slice(0);
+      }
+      static fromIndexedColors(colors) {
+        const result = new _ColorMap();
+        for (let i2 = 1; i2 < colors.length; i2++) {
+          const color = colors[i2];
+          result._id2color[i2] = color;
+          if (color) {
+            const key = normalizeColorHex(color);
+            if (!result._color2id.has(key))
+              result._color2id.set(key, i2);
+          }
+        }
+        result._lastColorId = colors.length - 1;
+        return result;
       }
     };
     TokenTheme = class {
@@ -119626,17 +119639,9 @@ var init_tokenization = __esm({
             changed++;
           }
         }
-        if (changed === 0) {
-          return;
-        }
-        this._root.reindexColors(translation);
-        const colorMap = new ColorMap();
-        for (let i2 = 1; i2 < newColorMap.length; i2++) {
-          const color = newColorMap[i2];
-          if (color) {
-            colorMap.getId(normalizeColorHex(color));
-          }
-        }
+        const colorMap = ColorMap.fromIndexedColors(newColorMap);
+        if (changed !== 0)
+          this._root.reindexColors(translation);
         this._colorMap = colorMap;
         this._cache.clear();
       }
@@ -194690,6 +194695,7 @@ init_resources();
 init_strings();
 init_range();
 init_nls();
+init_actions();
 init_menuEntryActionViewItem2();
 init_actions2();
 init_contextkey();
@@ -194978,6 +194984,25 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
     const menu = this._menuService.getMenuActions(MarkerNavigationWidget_1.TitleMenu, this._contextKeyService);
     const actions = getFlatActionBarActions(menu);
     this._actionbarWidget.push(actions, { label: false, icon: true, index: 0 });
+    this._te2MentionAction = new Action(
+      "te2.problem.mention",
+      "Mention in conversation",
+      "codicon codicon-comment-discussion",
+      false,
+      () => {
+        const snapshot = this._te2MentionSnapshot;
+        const model = this.editor.getModel();
+        if (!snapshot || model !== snapshot.model || model.isDisposed() || model.getVersionId() !== snapshot.version) return;
+        const node = this.editor.getContainerDomNode();
+        const EventType3 = node?.ownerDocument.defaultView?.CustomEvent;
+        if (node && EventType3) node.dispatchEvent(new EventType3("te2:problem-mention", {
+          detail: snapshot
+        }));
+      }
+    );
+    this._te2MentionAction.tooltip = "Mention in conversation";
+    this._disposables.add(this._te2MentionAction);
+    this._actionbarWidget.push(this._te2MentionAction, { label: false, icon: true, index: 0 });
   }
   _fillTitleIcon(container) {
     this._icon = append(container, $(""));
@@ -194995,7 +195020,17 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
   show() {
     throw new Error("call showAtMarker");
   }
+  _te2CaptureMention(marker) {
+    const model = this.editor.getModel();
+    this._te2MentionSnapshot = model ? {
+      model,
+      version: model.getVersionId(),
+      marker: { ...marker }
+    } : void 0;
+    this._te2MentionAction.enabled = !!model;
+  }
   showAtMarker(marker, markerIdx, markerCount) {
+    this._te2CaptureMention(marker);
     this._container.classList.remove("stale");
     this._message.update(marker);
     this._severity = marker.severity;
@@ -195018,10 +195053,13 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
     this.editor.focus();
   }
   updateMarker(marker) {
+    this._te2CaptureMention(marker);
     this._container.classList.remove("stale");
     this._message.update(marker);
   }
   showStale() {
+    this._te2MentionSnapshot = void 0;
+    this._te2MentionAction.enabled = false;
     this._container.classList.add("stale");
     this._relayout();
   }
@@ -233169,6 +233207,10 @@ var AbstractGotoLineQuickAccessProvider = class _AbstractGotoLineQuickAccessProv
         this.clearDecorations(editor2);
         return;
       }
+      if (this.shouldPreviewPosition?.(editor2, inputText) === false) {
+        this.clearDecorations(editor2);
+        return;
+      }
       const range2 = this.toRange(lineNumber, column);
       editor2.revealRangeInCenter(
         range2,
@@ -233192,18 +233234,6 @@ var AbstractGotoLineQuickAccessProvider = class _AbstractGotoLineQuickAccessProv
     picker.toggles = [toggle];
     updatePickerAndEditor();
     disposables.add(picker.onDidChangeValue(() => updatePickerAndEditor()));
-    const codeEditor = getCodeEditor(editor2);
-    if (codeEditor) {
-      const options2 = codeEditor.getOptions();
-      const lineNumbers = options2.get(
-        76
-        /* EditorOption.lineNumbers */
-      );
-      if (lineNumbers.renderType === 2) {
-        codeEditor.updateOptions({ lineNumbers: "on" });
-        disposables.add(toDisposable(() => codeEditor.updateOptions({ lineNumbers: "relative" })));
-      }
-    }
     return disposables;
   }
   toRange(lineNumber = 1, column = 1) {
@@ -234951,6 +234981,72 @@ init_editor_api();
 init_editorExtensions();
 init_editorContextKeys();
 init_quickInput();
+
+// scripts/monaco_quick_access.mjs
+init_platform2();
+init_quickAccess();
+init_lifecycle();
+function relativePosition(editor2, value) {
+  const match2 = /^(\d+)(?::?)([jk])(?::(\d+))?$/i.exec(value.trim());
+  if (!match2) return null;
+  const model = editor2.getModel();
+  const origin = editor2.getPosition();
+  if (!model || !origin) return null;
+  const distance = Number(match2[1]);
+  const requestedColumn = match2[3] === void 0 ? 1 : Number(match2[3]);
+  if (!Number.isSafeInteger(distance) || !Number.isSafeInteger(requestedColumn)) return null;
+  const lineNumber = Math.max(1, Math.min(model.getLineCount(), origin.lineNumber + (match2[2].toLowerCase() === "j" ? distance : -distance)));
+  const column = Math.max(1, Math.min(model.getLineMaxColumn(lineNumber), requestedColumn));
+  return { lineNumber, column, label: `Press Enter to go to line ${lineNumber}, column ${column} (${distance} lines ${match2[2].toLowerCase() === "j" ? "down" : "up"}).` };
+}
+var Te2GotoLineProvider = class extends StandaloneGotoLineQuickAccessProvider {
+  shouldPreviewPosition(editor2, value) {
+    return editor2.getOptions?.().get(76)?.renderType !== 2 || relativePosition(editor2, value) !== null;
+  }
+  parsePosition(editor2, value) {
+    const relative2 = relativePosition(editor2, value);
+    if (relative2) return relative2;
+    if (/[jk]/i.test(value)) return { label: "Use :8:k or :8:j, optionally followed by :column." };
+    return super.parsePosition(editor2, value);
+  }
+};
+var Te2RootProvider = class extends HelpQuickAccessProvider {
+  provide(picker) {
+    const disposables = new DisposableStore();
+    const state = { enabled: false };
+    window.dispatchEvent(new CustomEvent("code-te2:relative-numbers-query", { detail: state }));
+    const picks = [
+      ...this.getQuickAccessProviders().filter((p) => p.prefix && p.prefix !== "?"),
+      { label: "rn", description: `Relative Line Numbers: ${state.enabled ? "On" : "Off"} \u2014 Toggle`, action: "relative-numbers" },
+      { label: "e", description: "Open / Focus Explorer", action: "explorer" }
+    ];
+    const update = () => {
+      const query = picker.value.trim().toLowerCase();
+      const exact = picks.filter((item) => item.label === query);
+      picker.items = exact.length ? exact : picks.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query));
+    };
+    update();
+    disposables.add(picker.onDidChangeValue(update));
+    disposables.add(picker.onDidAccept(() => {
+      const item = picker.selectedItems[0];
+      if (!item) return;
+      if (item.action) {
+        picker.hide();
+        window.dispatchEvent(new CustomEvent("code-te2:palette-action", { detail: item.action }));
+      } else this.quickInputService.quickAccess.show(item.prefix, { preserveValue: true });
+    }));
+    return disposables;
+  }
+};
+function installTe2QuickAccess() {
+  const registry = Registry.as(Extensions10.Quickaccess);
+  const goto = registry.getQuickAccessProvider(":");
+  if (goto?.prefix === ":") goto.ctor = Te2GotoLineProvider;
+  registry.registerQuickAccessProvider({ ctor: Te2RootProvider, prefix: "", helpEntries: [{ description: "Quick Access" }] });
+}
+
+// te2_monaco_bootstrap_entry.js
+installTe2QuickAccess();
 var Te2QuickAccessAction = class extends EditorAction {
   constructor() {
     super({

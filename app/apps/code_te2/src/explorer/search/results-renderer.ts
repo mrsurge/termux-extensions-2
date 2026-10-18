@@ -117,9 +117,9 @@ export function renderContentResults(
 
       const lineNum = document.createElement("span");
       lineNum.className = "fe-search-line-num";
-      lineNum.textContent = String(
-        typeof match.line === "number" ? match.line : 1,
-      );
+      const firstLine = typeof match.line === 'number' ? match.line : 1;
+      lineNum.textContent = typeof match.endLine === 'number' && match.endLine > firstLine
+        ? `${firstLine}–${match.endLine}` : String(firstLine);
       matchRow.appendChild(lineNum);
 
       const snippet = document.createElement("span");

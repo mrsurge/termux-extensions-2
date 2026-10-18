@@ -124,5 +124,59 @@ class DiagnosticsStormCoalescingTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+    async def test_owner_clear_is_a_pipe_barrier_not_an_empty_disposable_update(self) -> None:
+        dispatch = AsyncMock()
+        clear: dict[str, object] = {"type": "diagnostics/clear", "owner": "ty"}
+        with patch.object(wba_event_bridge, "dispatch_wba_pipe_event", dispatch):
+            for event in (
+                _diagnostics_event("file:///workspace/a.py", "old", owner="ty"),
+                clear,
+                _diagnostics_event("file:///workspace/a.py", "new", owner="ty"),
+            ):
+                adapter_manager._queue_push(_push(event), payload_bytes=100)
+            task = adapter_manager._push_drain_task
+            self.assertIsNotNone(task)
+            if task is not None:
+                await task
+        self.assertEqual(dispatch.await_count, 3)
+        self.assertEqual(dispatch.await_args_list[1].args[0], clear)
+        self.assertEqual(dispatch.await_args_list[0].args[0]["items"][0]["markers"][0]["message"], "old")
+        self.assertEqual(dispatch.await_args_list[2].args[0]["items"][0]["markers"][0]["message"], "new")
+
+    async def test_clear_dispatch_evicts_only_its_owner_and_projects_empty_counts(self) -> None:
+        from app.apps.code_te2.file_tabs_projection import _diagnostics_from_detail
+
+        emitted = AsyncMock()
+        detail = AsyncMock()
+        with (
+            patch.object(diagnostics_bridge, "_diagnostics_project_root", return_value="/workspace"),
+            patch.object(diagnostics_bridge, "_emit_diagnostics_to_explorer_and_ui", emitted),
+            patch.object(diagnostics_bridge, "_publish_diagnostics_detail_changed", detail),
+            redirect_stdout(StringIO()),
+        ):
+            await wba_event_bridge.dispatch_wba_pipe_event(
+                _diagnostics_event("file:///workspace/a.py", "ty stale", owner="ty"))
+            await wba_event_bridge.dispatch_wba_pipe_event(
+                _diagnostics_event("file:///workspace/b.py", "ty stale", owner="ty"))
+            await wba_event_bridge.dispatch_wba_pipe_event(
+                _diagnostics_event("file:///workspace/b.py", "other retained", owner="other"))
+            await wba_event_bridge.dispatch_wba_pipe_event({"type": "diagnostics/clear", "owner": "ty"})
+            self.assertEqual(set(diagnostics_bridge._diag_cache), {("/workspace/b.py", "other")})
+            await diagnostics_bridge._emit_diagnostics_debounced()
+            assert detail.await_args is not None
+            projected = detail.await_args.args[1]
+            self.assertEqual(set(projected), {"/workspace/b.py"})
+            self.assertEqual(_diagnostics_from_detail(projected), {"/workspace/b.py": {"errors": 1, "warnings": 0}})
+            for invalid_owner in (None, "", 123):
+                await wba_event_bridge.dispatch_wba_pipe_event({"type": "diagnostics/clear", "owner": invalid_owner})
+            self.assertEqual(set(diagnostics_bridge._diag_cache), {("/workspace/b.py", "other")})
+            await wba_event_bridge.dispatch_wba_pipe_event({"type": "diagnostics/clear", "owner": "other"})
+            await diagnostics_bridge._emit_diagnostics_debounced()
+            assert detail.await_args is not None
+            self.assertEqual(detail.await_args.args[1], {})
+            self.assertEqual(_diagnostics_from_detail(detail.await_args.args[1]), {})
+        self.assertEqual(emitted.await_count, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

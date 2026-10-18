@@ -67,6 +67,33 @@ def test_rejects_wrong_origin_target_correlation_and_unavailable_loop():
     assert [reply.error.code for reply in replies] == ["appIntent.untrustedOrigin", "protocol.wrongTarget", "appIntent.invalidCorrelation", "appIntent.unavailable"]
 
 
+def test_administrative_shortcut_requires_same_trusted_origin_and_domain_loop(monkeypatch):
+    import app.apps.code_te2.app_intent_pipe as module
+    mutation = AsyncMock(return_value={"ok":True})
+    monkeypatch.setattr(module,"add_framework_shortcut",mutation)
+    async def run():
+        loop=asyncio.get_running_loop()
+        done=asyncio.Event()
+        replies=[]
+        def reply(envelope):
+            replies.append(envelope)
+            if envelope.error is None:
+                loop.call_soon_threadsafe(done.set)
+        adapter=AppIntentPipe(identity=PipeIdentity(2100,"code_te2"),reply=reply,handler=dispatch_app_intent)
+        adapter.bind(loop)
+        bad=request();bad.method="app.mcp.sidebarShortcut.add";bad.origin_name="forged"
+        assert adapter.submit(bad)
+        assert replies[0].error.code=="appIntent.untrustedOrigin"
+        mutation.assert_not_awaited()
+        good=request();good.method="app.mcp.sidebarShortcut.add";good.params={"shortcut":{"app_id":"fixture"}}
+        assert adapter.submit(good)
+        await asyncio.wait_for(done.wait(),2)
+        mutation.assert_awaited_once_with(good.params)
+        assert replies[-1].result=={"ok":True}
+        adapter.close()
+    asyncio.run(run())
+
+
 def test_bounded_admission_and_shutdown_cancel_without_replay():
     async def run():
         started = asyncio.Event()

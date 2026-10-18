@@ -1,5 +1,9 @@
 # Client Runtime Polish Tracker
 
+Current release cut line and consolidated acceptance index:
+../release_0_2_354/PLAN.md and TRACKER.md. Branch/baseline references below are
+historical checkpoints, not current missing implementations or build approval.
+
 Plan: [PLAN.md](PLAN.md). Baseline: published TE2 0.2.351.
 Working branch: `feature/desktop-deb-packaging`; no new branch needed for planning.
 

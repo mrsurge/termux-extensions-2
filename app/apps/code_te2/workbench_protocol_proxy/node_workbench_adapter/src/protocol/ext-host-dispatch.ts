@@ -51,6 +51,8 @@ export interface ExtHostDispatchRuntime {
     deleteSentMeta: (req: number) => void;
   };
   rpcIds: {
+    MainThreadDiagnostics: number;
+    MainThreadLanguageFeatures: number;
     MainThreadConsole: number;
     MainThreadExtensionService: number;
     MainThreadLogger: number;
@@ -254,6 +256,7 @@ function logActivationLifecycle(runtime: ExtHostDispatchRuntime, msg: DecodedExt
 }
 
 function applyProviderRegistration(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
+  if (msg.method === '$unregister' && msg.rpcId !== runtime.rpcIds.MainThreadLanguageFeatures) return;
   if (msg.method && msg.method.startsWith("$register") && msg.method.endsWith("Provider")) {
     runtime.log(`[providers] ${msg.method} handle=${msg.args?.[0]} selector=${JSON.stringify(msg.args?.[1])?.slice(0, 300)}`);
   }
@@ -679,6 +682,18 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
     runtime.sendPayload(encodeExtAck(msg.req));
   } catch {
     // Preserve current behavior: continue best-effort even if the ACK send fails.
+  }
+
+  if (msg.rpcId === runtime.rpcIds.MainThreadDiagnostics && msg.method === "$clear") {
+    const owner = msg.args?.[0];
+    if (typeof owner === "string" && owner.length > 0) {
+      runtime.log(`[diagnostics] $clear owner=${owner}`);
+      runtime.onEvent({ type: "diagnostics/clear", ts_ms: runtime.nowMs(), owner });
+    } else {
+      runtime.log("[diagnostics] ignored $clear with invalid owner");
+    }
+    sendReplyPayload(runtime, msg.req, msg.method, encodeExtReplyOkEmpty(msg.req));
+    return true;
   }
 
   const webviewResult = runtime.handleWebviewRequest(msg);

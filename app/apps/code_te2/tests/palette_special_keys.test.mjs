@@ -71,6 +71,75 @@ test('one-shot Shift composes with Ctrl bytes, opens palette, and keeps palette 
   } finally { f.cleanup(); }
 });
 
+test('Android Ctrl-letter beforeinput is claimed before blur, replays once and preserves Shift', async () => {
+  const f = await fixture();
+  try {
+    const helperSource = await readFile('vendor/android-terminalapp-assets-js/ctrl_key_handler.js', 'utf8');
+    const append = document.head.appendChild.bind(document.head);
+    document.head.appendChild = element => {
+      if (element.tagName !== 'SCRIPT') return append(element);
+      queueMicrotask(() => {
+        vm.runInNewContext(helperSource, { window: f.win, CustomEvent: f.win.CustomEvent, HTMLTextAreaElement: f.win.HTMLTextAreaElement });
+        element.onload(new f.win.Event('load'));
+      });
+      return element;
+    };
+    await f.runtime.rebindVendoredCtrlHelper(f.editor, {});
+    const replay = [];
+    let nativeInsertions = 0;
+    f.input.value = 'guarded existing line';
+    f.input.setSelectionRange(5, 5);
+    f.input.addEventListener('keydown', event => {
+      if (event.ctrlKey && event.keyCode !== 229) {
+        replay.push({ key: event.key, shift: event.shiftKey });
+        // Model the focus-changing command that used to flush stray text.
+        if (event.key === 'g') {
+          assert.equal(f.input.value, 'guarded existing line');
+          f.editor.getAction('editor.action.gotoLine').run();
+        }
+      }
+    });
+    const transaction = async text => {
+      f.input.dispatchEvent(new f.win.KeyboardEvent('keydown', { keyCode: 229, bubbles: true, cancelable: true }));
+      const event = new f.win.InputEvent('beforeinput', { inputType: 'insertText', data: text, bubbles: true, cancelable: true });
+      f.input.dispatchEvent(event);
+      if (!event.defaultPrevented) nativeInsertions++;
+      await Promise.resolve();
+      f.input.dispatchEvent(new f.win.KeyboardEvent('keyup', { keyCode: 229, bubbles: true, cancelable: true }));
+      return event;
+    };
+    f.press('Control');
+    assert.equal((await transaction('g')).defaultPrevented, true);
+    assert.deepEqual(replay, [{ key: 'g', shift: false }]);
+    assert.deepEqual(f.commands, ['editor.action.gotoLine']);
+    assert.equal(nativeInsertions, 0);
+    assert.equal(f.input.value, 'guarded existing line');
+    f.input.focus(); f.press('Shift next key'); f.press('Control');
+    assert.equal((await transaction('o')).defaultPrevented, true);
+    assert.deepEqual(f.commands, ['editor.action.gotoLine', 'editor.action.quickOutline']);
+    assert.deepEqual(f.typed, []);
+    assert.equal(nativeInsertions, 0);
+    // No command replay for normal text, paste, noncancelable or non-ASCII input.
+    f.input.focus();
+    for (const options of [
+      { inputType: 'insertText', data: 'x', cancelable: true },
+      { inputType: 'insertFromPaste', data: 'g', cancelable: true },
+      { inputType: 'insertText', data: '漢', cancelable: true },
+      { inputType: 'insertText', data: 'g', cancelable: false },
+    ]) {
+      const event = new f.win.InputEvent('beforeinput', { bubbles: true, ...options });
+      f.input.dispatchEvent(event); assert.equal(event.defaultPrevented, false);
+    }
+    f.press('Control'); f.press('Control');
+    assert.equal(f.runtime.currentMobileEditorModifiers(f.win).ctrlLocked, true);
+    const commandCount = f.commands.length;
+    await transaction('g');
+    assert.equal(f.commands.length, commandCount + 1);
+    assert.equal(f.win.ctrl, true, 'Ctrl lock survives while its claimed 229 keyup cannot duplicate replay');
+    assert.equal(nativeInsertions, 0);
+  } finally { f.cleanup(); }
+});
+
 test('Shift affects committed text once, leaves composition alone and Sel stays sticky', async () => {
   const f = await fixture();
   try {

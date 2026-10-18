@@ -29,7 +29,7 @@ DebounceTasks = dict[str, asyncio.Task[None]]
 
 
 _explorer_event_loop: asyncio.AbstractEventLoop | None = None
-_draft_decorations_tasks: DebounceTasks = {}
+_draft_projection = LatestProjection('code_te2_draft_projection')
 _git_projection = LatestProjection("code_te2_git_projection")
 _git_content_revision = 0
 _git_published_content_revision = 0
@@ -274,7 +274,7 @@ def _git_tree_decorations(statuses: Mapping[str, str]) -> dict[str, object]:
 
 async def _broadcast_draft_decorations(project_path: str) -> None:
     try:
-        from .. import review
+        from .review_projection import owner
         from ...draft_index_sidecar import DraftIndexSidecar
 
         normalized_path = str(Path(project_path).resolve())
@@ -298,10 +298,10 @@ async def _broadcast_draft_decorations(project_path: str) -> None:
             source="runtime_notifications:draft_decorations",
         )
 
-        reviews = await review.list_reviews(Path(normalized_path), lightweight=False)
+        projection = await owner.snapshot(Path(normalized_path))
         await publish_review_state_changed(
             normalized_path,
-            {"entries": reviews},
+            projection,
             source="runtime_notifications:review_entries",
         )
     except Exception as exc:
@@ -319,15 +319,14 @@ def notify_draft_state_changed(project_path: str) -> None:
 
         mark_draft_cache_dirty(Path(project_path))
 
-        async def do_broadcast() -> None:
-            await _broadcast_draft_decorations(normalized_path)
+        generation = current_project_generation(normalized_path)
 
-        _schedule_debounce_task(
-            _draft_decorations_tasks,
-            f"drafts:{normalized_path}",
-            delay=0.5,
-            name="code_te2_draft_decorations",
-            callback=do_broadcast,
-        )
+        async def do_broadcast(current: Current) -> None:
+            await asyncio.sleep(0.5)
+            if current() and current_project_generation(normalized_path) == generation:
+                await _broadcast_draft_decorations(normalized_path)
+
+        # Coalesce pending updates without cancelling an off-loop disk/diff read.
+        _draft_projection.submit(do_broadcast)
 
     _ = _post_to_explorer_loop(_notify)

@@ -11,6 +11,7 @@ from typing import Protocol, cast
 from ..explorer.services.file_ops import get_project_root
 from ..sidebar_window_events import publish_sidebar_window_state_changed
 from ..stores import get_history_store, get_preferences_store
+from .sidebar_identity import sidebar_identities
 from .sidebar_projection_service import (
     SidebarProjection,
     build_client_state_projection,
@@ -380,13 +381,19 @@ async def emit_sidebar_mention_targeted(
         for sid, app_id in _app_ids_by_sid.items()
         if sid in _registered_iframes and sid != skip_sid and app_id
     }
+    proof = sidebar_identities.validate(_json_object(payload.get("target")))
+    registered_presentations = dict(_client_presentations)
+    if proof is not None:
+        registered_presentations[(proof.page.client_id, proof.host_id)] = proof.incarnation
     app_id, routed = resolve_targeted_sidebar_mention(
         payload,
         sidebar_state=_json_object(get_sidebar_window_state()),
         live_host_client_ids=live_host_client_ids,
         registered_peer_app_ids=registered_peer_app_ids,
-        registered_presentations=dict(_client_presentations),
+        registered_presentations=registered_presentations,
     )
+    if proof is not None:
+        routed["target"] = {**_json_object(routed.get("target")), **proof.payload(), "windowId": proof.page.window_id}
     sio = cast(SidebarNamespace, UI_IPC_SIO)
     await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
@@ -526,7 +533,7 @@ async def handle_sidebar_window_presentation_update_request(
     sid: str,
     params: JsonObject,
 ) -> JsonObject:
-    from .sidebar_window_state import activate_sidebar_window
+    from .sidebar_window_state import activate_sidebar_window, get_sidebar_window_state
 
     body = _json_object(params)
     if sid not in _registered_hosts:
@@ -542,7 +549,10 @@ async def handle_sidebar_window_presentation_update_request(
         raise ValueError("presentation identity is too long")
     key = (client_id, host_id)
     if not presentation_id:
+        sidebar_identities.forget(sid, host_id)
         _client_presentations.pop(key, None)
+        if _client_active_windows.get(client_id) == host_id:
+            _client_active_windows.pop(client_id, None)
         return {
             "ok": True,
             "client_id": client_id,
@@ -550,13 +560,33 @@ async def handle_sidebar_window_presentation_update_request(
             "registered": False,
         }
     _ = activate_sidebar_window({"host_id": host_id})
+    identity: JsonObject = {}
+    if sid in sidebar_identities.pages:
+        snapshot = get_sidebar_window_state()
+        slot = _json_object(_json_object(snapshot.get("slots")).get(host_id))
+        app_id = _norm(slot.get("app_id") or slot.get("appId"))
+        prefix = app_id
+        catalog = snapshot.get("catalog")
+        if isinstance(catalog, list):
+            for entry in cast(list[object], catalog):
+                app = _json_object(entry)
+                if app.get("id") == app_id:
+                    prefix = _norm(app.get("presentation_prefix")) or app_id
+                    break
+        identity = sidebar_identities.qualify(sid, host_id, presentation_id, prefix or "sidebar").payload()
     _client_presentations[key] = presentation_id
+    # Rehydrate client-local foreground after a worker/transport restart. Slot
+    # existence was checked above; this never creates/activates shared membership.
+    if body.get("active") is True:
+        _client_active_windows[client_id] = host_id
+        _client_active_shortcuts[client_id] = ""
     return {
         "ok": True,
         "client_id": client_id,
         "host_id": host_id,
         "presentation_id": presentation_id,
         "registered": True,
+        **identity,
     }
 
 
@@ -620,17 +650,31 @@ async def forward_agent_edit_decision_to_peers(
     return {"ok": True, "queued": True, "peers": peers}
 
 
-async def on_sidebar_register(ns: SidebarNamespace, sid: str, data: object) -> None:
+async def on_sidebar_register(ns: SidebarNamespace, sid: str, data: object) -> JsonObject:
     data = _json_object(data)
     role = str(data.get("role") or "host").strip().lower()
     if role not in {"host", "iframe"}:
         role = "host"
     client_id = _norm(data.get("client_id") or data.get("clientId")) or sid
+    from ..client_presentation import normalize_window_id
+
+    window_id = normalize_window_id(data.get("windowId") or data.get("window_id"))
+    try:
+        connection = _json_object(await ns.get_session(sid))
+    except Exception:
+        connection = {}
+    bound_client = _norm(connection.get("boundSidebarClientId"))
+    bound_window = normalize_window_id(connection.get("boundSidebarWindowId"))
+    if role == "host" and (window_id or bound_window):
+        if not bound_client or client_id != bound_client or (window_id and window_id != bound_window):
+            raise ValueError("main page registration does not match its connection identity")
+        window_id = bound_window
+    page = sidebar_identities.register_page(sid, client_id, window_id) if role == "host" and window_id else None
     app_id = _norm(data.get("app") or data.get("app_id") or data.get("appId"))
 
     await ns.enter_room(sid, "sidebar_ipc")
     await ns.enter_room(sid, _client_room(client_id))
-    session: JsonObject = {"sidebarRole": role, "clientId": client_id}
+    session: JsonObject = {**connection, "sidebarRole": role, "clientId": client_id}
     if app_id:
         session["appId"] = app_id
     await ns.save_session(sid, session)
@@ -653,16 +697,18 @@ async def on_sidebar_register(ns: SidebarNamespace, sid: str, data: object) -> N
         await ns.enter_room(sid, "sidebar:agent_edits")
 
     print(
-        f"[sidebar_ipc] register sid={sid} role={role} app={app_id or '-'} ts={int(time.time() * 1000)}",
+        f"[sidebar_ipc] register sid={sid} client={client_id} role={role} app={app_id or '-'} ts={int(time.time() * 1000)}",
         flush=True,
     )
     await _emit_presence(ns)
     await emit_sidebar_cwd_set(ns, to_sid=sid, reason="register")
     await _emit_client_state(ns, client_id, to_sid=sid)
     await _emit_sidebar_windows_changed(ns, client_id=client_id, to_sid=sid)
+    return {"ok": True, **({"mainPageId": page.page_id} if page else {})}
 
 
 async def on_sidebar_disconnect(ns: SidebarNamespace, sid: str) -> None:
+    sidebar_identities.disconnect(sid)
     removed = False
     was_host = sid in _registered_hosts
     if was_host:
@@ -673,9 +719,13 @@ async def on_sidebar_disconnect(ns: SidebarNamespace, sid: str) -> None:
         removed = True
     _agent_edit_peer_sids.discard(sid)
     client_id = _client_ids_by_sid.get(sid)
-    if was_host and client_id:
+    if was_host and client_id and not any(
+        other_sid in _registered_hosts and bound_client == client_id
+        for other_sid, bound_client in _client_ids_by_sid.items()
+    ):
         for key in [key for key in _client_presentations if key[0] == client_id]:
             _client_presentations.pop(key, None)
+        _client_active_windows.pop(client_id, None)
     _client_ids_by_sid.pop(sid, None)
     _app_ids_by_sid.pop(sid, None)
     if removed:
@@ -728,6 +778,11 @@ async def on_sidebar_mention(ns: SidebarNamespace, sid: str, data: object) -> Js
     data = _json_object(data)
     if not data:
         raise ValueError("missing mention payload")
+    from .sidebar_mention_routing import bind_sidebar_mention_client
+
+    if sid not in _registered_hosts:
+        raise ValueError("mention requires a registered host client")
+    data = bind_sidebar_mention_client(data, _client_ids_by_sid.get(sid, ""))
     path = data.get("path")
     print(
         f"[sidebar_ipc] mention from={sid} path={path}",
@@ -746,6 +801,7 @@ def require_live_sidebar_host(client_id: str) -> None:
 
 def resolve_sidebar_request_client(
     params: JsonObject, *, requester_app_id: str, require_presentation: bool = False,
+    allow_registered_inactive: bool = False,
 ) -> tuple[str, JsonObject]:
     """Shared live-client/slot/app proof for embedded app effects."""
     from .sidebar_file_open_routing import resolve_sidebar_file_open_target
@@ -755,13 +811,21 @@ def resolve_sidebar_request_client(
         client_id for host_sid, client_id in _client_ids_by_sid.items()
         if host_sid in _registered_hosts and client_id
     }
-    return resolve_sidebar_file_open_target(
+    proof = sidebar_identities.validate(_json_object(params.get("target")))
+    registered_presentations = dict(_client_presentations)
+    if proof is not None:
+        registered_presentations[(proof.page.client_id, proof.host_id)] = proof.incarnation
+    client_id, routed = resolve_sidebar_file_open_target(
         params, sidebar_state=_json_object(get_sidebar_window_state()),
         live_host_client_ids=live_host_client_ids,
-        registered_presentations=dict(_client_presentations),
+        registered_presentations=registered_presentations,
         active_windows=dict(_client_active_windows), requester_app_id=requester_app_id,
         require_presentation=require_presentation,
+        allow_registered_inactive=allow_registered_inactive,
     )
+    if proof is not None:
+        routed["target"] = {**_json_object(routed.get("target")), **proof.payload(), "windowId": proof.page.window_id}
+    return client_id, routed
 
 
 async def handle_sidebar_document_open(
@@ -771,6 +835,7 @@ async def handle_sidebar_document_open(
     from ..host.file_ops_backend import handle_host_open_request
     target_client_id, routed_params = resolve_sidebar_request_client(
         params, requester_app_id=requester_app_id, require_presentation=require_presentation,
+        allow_registered_inactive=True,
     )
     routed_params.setdefault("focus", False)
     opened = await handle_host_open_request(routed_params, source_name=target_client_id,
@@ -790,8 +855,7 @@ async def handle_sidebar_document_open(
 
 async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: str, params: JsonObject) -> object:
     if method == SIDEBAR_IPC_RPC_METHOD_REGISTER:
-        await on_sidebar_register(ns, sid, params)
-        return {"ok": True}
+        return await on_sidebar_register(ns, sid, params)
     if method == SIDEBAR_IPC_RPC_METHOD_CWD_GET:
         payload = _cwd_payload("request")
         print(f"[sidebar_ipc_rpc] cwd_get from={sid} cwd={payload.get('cwd') or ''}", flush=True)
@@ -801,7 +865,10 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
         await emit_sidebar_cwd_set(ns, reason=reason or "authoritative")
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_OPEN:
-        return await handle_sidebar_document_open(params, requester_app_id=_norm(_app_ids_by_sid.get(sid)))
+        return await handle_sidebar_document_open(
+            params, requester_app_id=_norm(_app_ids_by_sid.get(sid)),
+            require_presentation=True,
+        )
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_EDIT:
         from ..host.agent_edit_review_backend import handle_sidebar_file_edit_review_signal
 

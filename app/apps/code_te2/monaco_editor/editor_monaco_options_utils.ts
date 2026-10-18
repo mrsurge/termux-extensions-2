@@ -2,6 +2,7 @@ import { resolveMonacoThemeId } from './editor_theme_resolver_utils.ts';
 import { monacoThemeName } from './editor_theme_name_utils.ts';
 
 interface EditorPreferenceBag {
+  relativeLineNumbers?: boolean;
   showLineNumbers?: boolean;
   wordWrap?: boolean;
   readOnly?: boolean;
@@ -17,6 +18,7 @@ interface EditorPreferenceBag {
 }
 
 interface EditorPrefsStateLike {
+  relativeLineNumbers?: boolean;
   preferences?: { editor?: EditorPreferenceBag };
   editor?: EditorPreferenceBag;
   showLineNumbers?: boolean;
@@ -110,7 +112,7 @@ export function buildMonacoOptionsFromPrefsState(
     automaticLayout: true,
     contextmenu: false,
     readOnly,
-    lineNumbers: showLineNumbers ? 'on' : 'off',
+    lineNumbers: showLineNumbers ? (editorPrefs.relativeLineNumbers === true ? 'relative' : 'on') : 'off',
     showFoldingControls: 'always',
     wordWrap: wordWrap ? 'on' : 'off',
     minimap: { enabled: !!showMinimap },

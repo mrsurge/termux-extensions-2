@@ -19,6 +19,22 @@ async function importRuntime() {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
+test('showLocations uses the existing presentation hook and rejects changed active files', async () => {
+  const { createEditorExtensionNavigationRuntime } = await importRuntime();
+  const shown = [], replies = [];
+  const runtime = createEditorExtensionNavigationRuntime({
+    getCurrentPath: () => '/workspace/main.rs', getEditor: () => ({}),
+    showLocations: payload => shown.push(payload), rpcCall: async (_method, params) => replies.push(params),
+  });
+  const payload = { operationId: 'locations-1', operation: 'showLocations', path: '/workspace/main.rs', locations: [] };
+  await runtime.handle(payload);
+  assert.deepEqual(shown, [payload]);
+  assert.equal(replies[0].ok, true);
+  await runtime.handle({ ...payload, path: '/wrong.rs' });
+  assert.equal(shown.length, 1);
+  assert.equal(replies[1].ok, false);
+});
+
 test("frontend applies extension selections and acknowledges the exact operation", async () => {
   const { createEditorExtensionNavigationRuntime } = await importRuntime();
   const selections = [];

@@ -1221,6 +1221,7 @@ async function main(): Promise<void> {
     console.warn(`[te2-local] ${localFrameworkConfig.error}`);
   }
   localFrameworkController = new LocalFrameworkController({
+    waitIndefinitelyForStartup: true,
     getLaunchConfig: () => localFrameworkConfig,
     getSelectedOrigin: () => configuredFrameworkOrigin,
     selectLocal: async (port) => {

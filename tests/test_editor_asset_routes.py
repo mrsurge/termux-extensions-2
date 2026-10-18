@@ -2,6 +2,7 @@
 # pyright: strict
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 import subprocess
@@ -141,8 +142,16 @@ assert 'app.apps.code_te2.monaco_editor.editor_asset_routes' not in sys.modules
                                     capture_output=True, timeout=30, cwd=ROOT)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
 
-    def test_main_mounts_only_resources_from_editor_http_boundary(self) -> None:
+    def test_main_exports_domain_hooks_without_retired_python_http_mount(self) -> None:
         source = (ROOT / "app/apps/code_te2/main.py").read_text()
-        self.assertIn("TE2_ASGI_APP = build_code_te2_asgi_app(", source)
+        tree = ast.parse(source)
+        hooks = {node.name for node in tree.body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        self.assertTrue({"te2_pipe_dispatch", "te2_app_start", "te2_app_stop"} <= hooks)
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        self.assertNotIn("TE2_ASGI_APP", names)
+        self.assertNotIn("build_code_te2_asgi_app", names)
+        imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+        self.assertNotIn("http_app", imports)
         self.assertNotIn("include_router(editor_router)", source)
         self.assertNotIn("from .monaco_editor.editor_backend import", source)

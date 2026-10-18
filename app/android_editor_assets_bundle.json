@@ -3,6 +3,7 @@
   "exclude_extensions": [".map", ".bak", ".bak2", ".pyc"],
   "exclude_dirs": ["__pycache__", "node_modules"],
   "entries": [
+    { "kind": "tree", "src": "app/apps/als_rs/vendor/frontend", "dest": "apps/als_rs/frontend" },
     { "kind": "tree", "src": "app/static/fonts", "dest": "static/fonts" },
     { "kind": "tree", "src": "app/static/js", "dest": "static/js" },
     { "kind": "file", "src": "app/static/icon.png", "dest": "static/icon.png" },
@@ -146,6 +147,11 @@
       "kind": "file",
       "src": "app/apps/code_te2/template.html",
       "dest": "apps/code_te2/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/code_te2/extensions/sidebar_extension/manifest.json",
+      "dest": "apps/code_te2/extensions/sidebar_extension/manifest.json"
     },
     {
       "kind": "file",

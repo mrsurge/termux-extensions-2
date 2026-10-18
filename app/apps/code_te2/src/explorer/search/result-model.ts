@@ -46,6 +46,7 @@ function normalizeDtoMatch(
   const snippet = stringValue(match.snippet) || lineText || "";
   return {
     line: lineNumber,
+    endLine: numberValue(match.endLineNumber),
     column:
       typeof columnNumber === "number"
         ? Math.max(0, columnNumber - 1)
@@ -86,6 +87,7 @@ function normalizeProjectedFile(
   const matches = Array.isArray(value.matches)
     ? value.matches.filter(isRecord).map((match) => ({
         line: numberValue(match.line),
+        endLine: numberValue(match.endLine),
         column: numberValue(match.column),
         text: stringValue(match.text),
         snippet: stringValue(match.snippet) || stringValue(match.text) || "",

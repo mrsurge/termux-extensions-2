@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
+    "strict": true, "noEmit": true, "skipLibCheck": true,
+    "paths": {
+      "/static/vendor/codemirror.1/codemirror.bundle.js": ["./src/cm6.d.ts"],
+      "/static/js/te_guarded_navigation.mjs": ["./src/guarded_navigation.d.ts"],
+      "/static/js/te_file_editor_preferences.mjs": ["./src/preferences.d.ts"]
+    },
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*.ts"]
+}

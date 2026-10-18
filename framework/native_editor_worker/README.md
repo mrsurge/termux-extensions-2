@@ -228,11 +228,21 @@ cutover. The matching-ABI Pixel/Termux probe also built and imported all 135
 compiled wrappers; that initial probe did not switch the worker. See
 `docs/apps/client_runtime_polish/PLAN.md` §6 for evidence and gates.
 
-The native worker now accepts `CODE_TE2_MYPYC_DIR` pointing to a matching
-build's manifest/lib directory. The experimental shellspec selects
-`.codex-scratch/mypyc-active`; build/validate a snapshot and explicitly select it before starting
-the worker, or remove that shellspec environment entry to run interpreted.
-There is no automatic build or silent fallback. Startup reports the compiled
+The native worker accepts `CODE_TE2_MYPYC_DIR` pointing to a matching build's
+manifest/lib directory. Bootstrap supplies the shellspec selection. In editable
+installs, an absent automatic `.codex-scratch/mypyc-active` target (including a
+dangling symlink after deleting a snapshot) selects an empty value and interpreted
+imports in the same Rust/PyO3 worker. The selector is not rewritten or deleted.
+An existing target remains strict: missing/malformed manifests, missing libraries,
+ABI errors and permission failures are not silently bypassed. Explicit selections
+(including an intentionally empty value) retain their policy.
+
+`CODE_TE2_FORCE_INTERPRETED=1 te2` deliberately overrides editable domain selection,
+including an explicit path, without changing the worker binary or snapshot. A
+new normal framework invocation resumes normal selection. This is bootstrap-owned
+and does not change a live worker or a manually launched raw worker. Packaged
+installs reject the override and require the verified compiled payload.
+There is no automatic mypyc build. Startup reports the compiled
 module count. The overlay links source-owned resource directories into its lib
 layout because compiled modules resolve sibling assets relative to their `.so`.
 These development symlinks are not a portable wheel packaging solution.
@@ -293,12 +303,20 @@ python -B app/apps/code_te2/build_mypyc.py
 Publishes validated mypyc snapshots under the resolved
 `TE2_CACHE_HOME/code_te2/build/mypyc-snapshots/` (normally
 `~/.cache/te2/code_te2/build/mypyc-snapshots/`). The finished shared objects are in
-the snapshot's `lib/`, alongside its manifest/provenance. The existing cached
+the snapshot's `lib/`, alongside its manifest/provenance. New snapshots are named
+`domain-<sha256>` from startup source contents, toolchain/configuration and build
+recipe. An unchanged invocation inventories sources and verifies metadata/library
+checksums, then reuses the exact snapshot without mypyc code generation, C
+compilation or relinking. Different source/toolchain/recipe inputs produce a new
+immutable snapshot. A corrupt existing fingerprinted snapshot fails visibly;
+the builder does not overwrite or delete accepted snapshots. The existing cached
 build helper remains the authority; compiler intermediates stay in its existing
 `${TMPDIR:-<repo>/.codex-scratch}/mypyc-build-cache` to retain cache reuse.
 Default jobs is `MAX_JOBS`, otherwise one; override with `--jobs N`.
-The entrypoint requires `ccache` on PATH and exits with failure before inventory
-or compilation if missing. Install it, or explicitly opt into a slower build:
+The entrypoint checks `ccache --version` with a bounded timeout before inventory.
+If missing, unlaunchable (for example a libc++ linker mismatch), timed out or
+nonzero, it reports the actual failure and automatically falls back to uncached
+compilation. It does not disable ccache for Android as a platform. Explicit bypass:
 `python -B app/apps/code_te2/build_mypyc.py --no-cache` (equivalently
 `NO_CACHE=1 python -B app/apps/code_te2/build_mypyc.py`). These overrides disable
 compiler caching for that invocation, including a user-supplied ccache wrapper;
@@ -327,7 +345,9 @@ The installed setuptools recompiles a changed shared extension as a whole. When
 `ccache` is present, the workflow uses a dedicated **512 MB** compiler cache with
 content-based compiler checking; unchanged C/header/flag combinations reuse cached
 objects. The low-level probe can still run without ccache, but the preferred local
-entrypoint requires explicit opt-out instead of silently accepting that mode.
+entrypoint and low-level probe both diagnose unavailable/broken ccache and fall
+back; `--no-cache`/`NO_CACHE=1` skip probing. A user-supplied ccache `CC` wrapper is
+removed while uncached compilation runs, then restored in the caller's environment.
 On Termux, `pkg install ccache` supplies this **development** tool; it is
 not a runtime/user-install dependency. Shared generated-header changes can invalidate
 many objects. We retain a single shared compilation unit and `multi_file=True`.
@@ -340,6 +360,16 @@ checks ABI and snapshot checksums, atomically switches the active symlink and ke
 the former target at `mypyc-active-previous`. Neither action restarts a process;
 already-running workers retain old imports until an approved app-worker restart.
 Snapshot resource links still refer to editable source, as in the existing probe.
+
+`python -B app/apps/code_te2/build_mypyc.py --status` is read-only. It reports
+`current`, `stale`, `missing`, `incompatible`, or `unfingerprinted` for matching
+legacy snapshots without a build-recipe fingerprint. It verifies manifest/library
+checksums, source contents and toolchain/ABI without importing the worker or
+compiling. An already-running worker retains its old modules even after a new
+selection: status describes the selector, not the live process. This introduces
+no startup hashing or automatic runtime rebuild. Low-level developer scripts keep
+their legacy unique `--output` behavior unless `build --fingerprinted` is specified;
+`--activate-link` selects the actual published/reused snapshot only on success.
 
 No automatic deletion occurs. For new managed snapshots only:
 
@@ -376,21 +406,49 @@ native-worker tests.
 
 ### Framework bootstrap-managed native executable (source installs)
 
-Normal `te2` startup and `te2 --build-only` now prepare the workers listed in
-`app/native_worker_builds.json`. Each entry declares an app ID, framework-relative
-Cargo manifest, binary name, environment key and whether Python ABI participates
-in its build identity. The initial entry is Code TE2; do not add arbitrary launch
-commands to this registry.
+Normal source/editable `te2` startup and `te2 --build-only` use one native Cargo
+build pipeline. The framework declares its configuration in
+`framework/bootstrap/native_build.json`; built-in native workers are discovered
+from `app/apps/*/native_build.json`, initially Code TE2. The former central
+`app/native_worker_builds.json` registry is retired. Discovery does not scan
+arbitrary projects, external apps or runtime data for executable build commands.
+
+Each schema-1 manifest declares `appId`, `manifestBase` (`framework` or the owning
+`app` directory), relative `manifest` (the Cargo.toml), optional Cargo `package`,
+`binary`, exported `environmentKey`,
+`pythonAbi`, and `features`. `cache.root` is relative to `TE2_CACHE_HOME`;
+`targetDirectory` and `publishedDirectory` are relative to that root. An optional
+`targetDirectoryEnvironment` retains the framework's existing explicit target
+override. `fingerprint.policy` is `framework-source-v2`: source patterns are in
+`inputs` and source-root-contained shared files in `sharedInputs`. Identifiers,
+paths and owner IDs are validated. Code TE2 keeps its independent Cargo source
+under `framework/native_editor_worker`; another built-in native worker can declare
+`manifestBase: app` and own its Cargo tree directly inside its app directory.
 
 The Code TE2 executable publishes atomically under
 `$TE2_CACHE_HOME/code_te2/build/bin/<fingerprint>/<release|debug>/code-te2-worker`.
 Intermediates remain in `code_te2/build/cargo-target`. A per-app lock and the
-existing framework publication/pruning helpers protect the final cache; mypyc
-snapshots and checkpoints are not pruned. Rust source/lockfile, profile, platform,
-compiler identity/flags and invoking Python ABI determine reuse. `--force-build`
-also rebuilds configured workers. `--print-command` resolves paths without build
-or publication. Worker builds use `--locked` and the invoking `sys.executable`
-as `PYO3_PYTHON`, independently of the server's Cargo target cache.
+existing atomic framework publication helpers protect the final cache. Both use
+the established framework fingerprint bytes: workspace path, profile, sorted
+features, platform/architecture and selected source/lockfile/shared-file contents.
+The framework's existing fingerprint and cache paths remain unchanged, including
+reuse of valid binaries built before manifests existed. Python aliases,
+`rustc -vV` and inherited `CC`/`CFLAGS`/`RUSTFLAGS` do not change the key: this is
+the same policy the framework already used. Explicit toolchain/compiler changes
+requiring replacement should use `--force-build`.
+
+Python-linked builds have an adjacent `<binary>.build.json` runtime/ABI receipt.
+A missing, corrupt or incompatible receipt requires a build before reuse; it
+does not introduce a launcher-dependent fingerprint. Interpreter aliases sharing
+the same runtime/ABI reuse the receipt. Cargo uses the invoking `sys.executable`
+as `PYO3_PYTHON`. Source/runtime changes during compilation refuse publication.
+Both framework and worker builds use manifest-driven `cargo build`, feature and
+profile selection, locking and atomic publication; no worker-only Cargo policy.
+Explicit legacy `--cargo-manifest`/`--no-build-cache` server CLI escape hatches
+retain their direct-Cargo behavior. Normal manifest-managed binaries are retained
+instead of deleting another running framework's selected path. Mypyc snapshots,
+checkpoints and Cargo intermediates are untouched. `--print-command` does not
+build or publish; `--force-build` rebuilds both configured framework and workers.
 
 Bootstrap exports `CODE_TE2_WORKER_BIN` to the framework process. The app shellspec
 launches this exact raw executable directly with the existing project/port args;
@@ -407,8 +465,15 @@ renders the actual Code TE2 shellspec and checks the raw executable and inherite
 `PYTHONPATH`. Spawn failures log the full cause chain. Changes to this handoff
 require rebuilding the framework server, not only the worker.
 
-Mypyc compilation/activation is still explicit through `build_mypyc.py`; this
-slice does not build it automatically or replace its selected domain overlay.
+Mypyc compilation/activation is explicit through `build_mypyc.py`. For source
+installs only, absence of the default `.codex-scratch/mypyc-active` selection
+exports an empty `CODE_TE2_MYPYC_DIR`: the same native worker imports the Python
+domain interpreted. Bootstrap prints the build command. An existing selection
+(including a broken symlink) or explicit environment selection is preserved,
+so invalid compiled snapshots still fail visibly. An explicit empty value opts
+into interpreted mode. After first compilation/activation, launch a new framework
+to select the default snapshot; already-running frameworks retain their startup
+environment. Neither this choice nor the compiler script restarts a runtime.
 Source installs include the independent worker's Cargo manifest/lockfile/source.
 Binary release wheels require matched executable/domain/resources and ABI
 validation. Packaged bootstrap resolves that validated payload instead of this

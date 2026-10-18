@@ -58,12 +58,20 @@ android {
                 "proguard-rules.pro"
             )
         }
-        // Staging: non-debuggable but keeps minify off so Kotlin/Java
-        // stays readable in stack traces.
+        // Staging: production optimization trial; retain mapping.txt for traces.
+        // Pass -Pte2.gecko.optimize=false for the unoptimized comparison.
         // Excludes Vulkan validation layer (222MB debug-only artifact).
         create("staging") {
             isDebuggable = false
-            isMinifyEnabled = false
+            val optimize = providers.gradleProperty("te2.gecko.optimize")
+                .map { it.toBooleanStrict() }
+                .getOrElse(true)
+            isMinifyEnabled = optimize
+            isShrinkResources = optimize
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
         }
@@ -96,6 +104,18 @@ android {
 
 }
 
+// Download-size trial: only Gecko staging uses install-time native extraction.
+// Keep debug/release packaging unchanged. Pass false for a same-source baseline.
+androidComponents {
+    onVariants(selector().withBuildType("staging")) { variant ->
+        variant.packaging.jniLibs.useLegacyPackaging.set(
+            providers.gradleProperty("te2.gecko.compressNativeLibs")
+                .map { it.toBooleanStrict() }
+                .orElse(true)
+        )
+    }
+}
+
 dependencies {
     debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2024.02.01")
@@ -111,7 +131,12 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
-    implementation("io.socket:socket.io-client:2.1.1")
+    implementation("io.socket:socket.io-client:2.1.1") {
+        // Android provides org.json, including JSONObject.wrap used by Gecko.
+        // Socket.IO's transitive 20090211 JAR lacks that method; R8
+        // would rewrite platform calls to the bundled, renamed implementation.
+        exclude(group = "org.json", module = "json")
+    }
     implementation("org.msgpack:msgpack-core:0.9.12")
     add("geckoImplementation", "org.mozilla.geckoview:geckoview:144.0.20251027123126")
     debugImplementation("androidx.compose.ui:ui-tooling")

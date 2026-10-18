@@ -97,6 +97,7 @@ class ExplorerSessionHandlerContext:
 class ExplorerIntegrationHandlerContext:
     emit_personal: EmitPersonal
     broadcast: Broadcast
+    client_instance_id: str = ""
 
 
 @dataclass(frozen=True)

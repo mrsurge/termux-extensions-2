@@ -363,6 +363,36 @@ test('Sidebar registration and presentation RPCs are reliable across reconnects'
   }
 });
 
+test('Sidebar identity waits for host registration and names its main page console', async () => {
+  const { createUiIpcConnections } = await importTypeScript('main_page/frontend/connections/ui-ipc.ts');
+  const previousWindow = globalThis.window;
+  globalThis.window = { dispatchEvent: () => true, setTimeout, clearTimeout };
+  const starts = [];
+  try {
+    const socket = new FakeSocket();
+    socket.ackResponse = { result: { ok: true, mainPageId: 'f0f0', sidebarStateId: 'a1b2', sidebarWindowId: 'als:a1b2.f0f0' } };
+    const connections = createUiIpcConnections({
+      ensureSocketIoLoaded: async () => () => socket,
+      getSocketQuery: () => ({ client_instance_id: 'client_abcdefghijkl', window_id: 'window_abcdefghijklmnopqrst' }),
+      getClientId: () => 'client_abcdefghijkl', getConsoleWorkerId: () => 'old-long-console-id',
+      initConsoleBridge: (options) => { starts.push(options); return {}; },
+    });
+    const identity = connections.requestSidebarRpc('sidebar.window.presentation.update', { hostId: 'shared-host', presentationId: 'inc-a' });
+    await settlePromises();
+    assert.equal(socket.rawEmits.length, 0);
+    socket.trigger('connect');
+    assert.equal((await identity).sidebarWindowId, 'als:a1b2.f0f0');
+    await settlePromises();
+    assert.equal(socket.rawEmits[0].payload.params.window_id, 'window_abcdefghijklmnopqrst');
+    assert.equal(starts[0].workerId, 'main_page:f0f0');
+    assert.equal(starts[0].qualifiedIdentity, true);
+    socket.ackResponse = null;
+    const pending = connections.requestSidebarRpc('sidebar.window.presentation.update', { hostId: 'shared-host', presentationId: 'inc-b' });
+    socket.trigger('disconnect', 'transport close');
+    await assert.rejects(pending, /disconnected/);
+  } finally { globalThis.window = previousWindow; }
+});
+
 test('UI IPC requests host resync only after a genuine reconnect', async () => {
   const { createUiIpcConnections } = await importTypeScript(
     'main_page/frontend/connections/ui-ipc.ts',
@@ -590,7 +620,7 @@ test('required editor publications use request-response transport without volati
   );
   assert.match(
     editorSource,
-    /eventName === "editor_open_complete"[\s\S]{0,300}publishReliable\([\s\S]{0,200}openCompletePublish/,
+    /publishEditorControlResponse\(editorRpcTransport, eventName, payload\)/,
   );
 });
 

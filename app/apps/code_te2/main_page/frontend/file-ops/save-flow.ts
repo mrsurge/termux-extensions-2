@@ -7,10 +7,12 @@ interface SaveFileParams {
   currentPath?: string | null;
   currentPathExists?: boolean;
   isAutosave?: boolean;
+  autosaveIdentity?: { project: string; path: string; modeRevision: number };
   onMissingPath?: () => unknown | Promise<unknown>;
 }
 
 interface SaveFlowControllerDeps {
+  getCurrentPath(): string;
   clientId: string;
   getLastSha256: () => string | null;
   setLastSha256: (sha: string | null) => void;
@@ -73,11 +75,20 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
     deps.setStatus('Saving...');
     const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const payload: Record<string, unknown> = { client_id: deps.clientId, op_id: opId };
+    const project = deps.getCachedProjectRoot();
+    payload.project = project;
+    if (currentPath) payload.expected_path = currentPath;
+    if (isAutosave) {
+      if (!params.autosaveIdentity || params.autosaveIdentity.project !== project || params.autosaveIdentity.path !== currentPath) return false;
+      payload.is_autosave = true;
+      payload.autosave_revision = params.autosaveIdentity.modeRevision;
+    }
     if (currentPath && currentPathExists) payload.path = currentPath;
     const lastSha = deps.getLastSha256();
     if (lastSha && currentPath && currentPathExists) payload.base_sha256 = lastSha;
     try {
       const result = responseRecord(await deps.saveFileViaEditorSocket(payload));
+      if (deps.getCachedProjectRoot() !== project || deps.getCurrentPath() !== (currentPath || '')) return result.ok === true;
       if (!Object.keys(result).length) throw new Error('Invalid save response');
       if (result.ok === false) {
         const error = stringValue(result.error);
@@ -88,9 +99,11 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
         if (error === 'BASE_MISMATCH') {
           if (isAutosave) { deps.setStatus(''); return false; }
           if (await window.teUI.dialog.confirm('File was modified externally. Retry save and overwrite?')) {
-            const retryPayload: Record<string, unknown> = { client_id: deps.clientId, op_id: `${opId}_retry`, force: true };
+            if (deps.getCachedProjectRoot() !== project) return false;
+            const retryPayload: Record<string, unknown> = { ...payload, op_id: `${opId}_retry`, force: true };
             if (currentPath && currentPathExists) retryPayload.path = currentPath;
             const retryResult = responseRecord(await deps.saveFileViaEditorSocket(retryPayload));
+            if (deps.getCachedProjectRoot() !== project || deps.getCurrentPath() !== (currentPath || '')) return retryResult.ok === true;
             if (retryResult.ok) {
               const fileMeta = responseData(retryResult);
               if ((!currentPath || !currentPathExists) && typeof fileMeta.path === 'string' && fileMeta.path) {
@@ -102,7 +115,7 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
               }
               deps.setLastSha256(stringValue(fileMeta.sha256) || deps.getLastSha256());
               deps.setLastSavedContent('');
-              deps.markUnsaved(false);
+              deps.markUnsaved(fileMeta.unsaved === true);
               deps.setStatus('Saved');
               setTimeout(() => { if (!deps.getUnsaved()) deps.setStatus(''); }, 1500);
               return true;
@@ -126,7 +139,7 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
         }
         deps.setLastSha256(stringValue(fileMeta.sha256) || deps.getLastSha256());
         deps.setLastSavedContent('');
-        deps.markUnsaved(false);
+        deps.markUnsaved(fileMeta.unsaved === true);
         deps.setStatus('Saved');
         setTimeout(() => { if (!deps.getUnsaved()) deps.setStatus(''); }, 1500);
         return true;
@@ -142,19 +155,25 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
   }
 
   async function saveAsDialog(): Promise<void> {
+    const sourceProject = deps.getCachedProjectRoot();
+    const sourcePath = deps.getCurrentPath();
     const target = await deps.pickSaveTarget();
     if (!target || !target.path) return;
     if (target.existed && !(await window.teUI.dialog.confirm('File exists. Overwrite?'))) return;
+    if (deps.getCachedProjectRoot() !== sourceProject || deps.getCurrentPath() !== sourcePath) return;
     deps.setStatus('Saving...');
     const targetAbs = deps.toAbsolute(target.path, null, deps.homeDir);
     try {
       const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const response = responseRecord(await deps.saveFileViaEditorSocket({
         target_path: targetAbs,
+        expected_path: sourcePath || undefined,
+        project: sourceProject,
         client_id: deps.clientId,
         op_id: opId,
         force: true,
       }));
+      if (deps.getCachedProjectRoot() !== sourceProject || deps.getCurrentPath() !== sourcePath) return;
       if (!Object.keys(response).length) throw new Error('Invalid save response');
       if (response.ok === false) throw new Error(String(response.error || 'Save failed'));
 

@@ -13,6 +13,9 @@ test('opt-in broker coordinates idle cd, partial input and busy builtins without
   const target = path.join(root, "quotes' spaces\n$(literal)");
   const second = path.join(root, 'second');
   fs.mkdirSync(target); fs.mkdirSync(second);
+  for (const directory of [root, target, second]) {
+    fs.writeFileSync(path.join(directory, 'UNEXPECTED_LISTING'), '');
+  }
   fs.writeFileSync(path.join(root, '.bash_profile'), "PS1='BROKER_PROMPT> '\n");
   const child = spawn(process.execPath, ['terminal_stream_broker.mjs'], {
     cwd: process.cwd(),
@@ -63,6 +66,44 @@ test('opt-in broker coordinates idle cd, partial input and busy builtins without
     await state('idle');
     send({ type: 'directory.request', request_id: 'idle', path: target });
     assert.equal((await result('idle', 'applied')).cwd, target);
+
+    // Erased input must not require executing another command to follow CWD.
+    input('ls');
+    input('\x7f\x7f');
+    send({ type: 'directory.request', request_id: 'erased-before', path: second });
+    assert.equal((await result('erased-before', 'applied')).cwd, second);
+    await state('idle');
+    for (const [id, erase] of [['erased-pending', '\x7f\x7f'], ['cleared-pending', '\x15']]) {
+      const start = output.length;
+      input('ls');
+      send({ type: 'directory.request', request_id: id, path: target });
+      await result(id, 'pending');
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(messages.some(message => message.request_id === id && message.state === 'applied'), false);
+      input(erase);
+      assert.equal((await result(id, 'applied')).cwd, target);
+      await state('idle');
+      // A listing would prove that refresh Enter overtook the erasure.
+      assert.equal(output.slice(start).includes('UNEXPECTED_LISTING'), false);
+    }
+
+    input('ls');
+    send({ type: 'directory.request', request_id: 'cancelled-input', path: second });
+    await result('cancelled-input', 'pending');
+    input('\x03');
+    assert.equal((await result('cancelled-input', 'applied')).cwd, second);
+    await state('idle');
+
+    // Stress FIFO ordering without waiting for an input echo/round trip.
+    for (let index = 0; index < 12; index += 1) {
+      const id = `rapid-clear-${index}`, start = output.length;
+      input('ls');
+      send({ type: 'directory.request', request_id: id, path: index % 2 ? target : second });
+      input(index % 2 ? '\x15' : '\x7f\x7f');
+      await result(id, 'applied');
+      await state('idle');
+      assert.equal(output.slice(start).includes('UNEXPECTED_LISTING'), false);
+    }
 
     // Any partially typed line defers cd without erasing/executing that line.
     input("printf 'PRESERVED=%s\\n' original");

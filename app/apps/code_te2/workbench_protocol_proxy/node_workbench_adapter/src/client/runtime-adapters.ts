@@ -225,6 +225,7 @@ export interface CodeNavigationRuntimeDeps {
 }
 
 export interface WorkspaceLifecycleRuntimeDeps {
+  getWatcherExcludes: LifecycleRuntime["getWatcherExcludes"];
   extProtocol: unknown;
   state: LifecycleRuntime["state"];
   activeEditorId: string | null;
@@ -370,16 +371,19 @@ export interface ExtHostDispatchRuntimeDeps {
   replyEmptyMethods: ReadonlySet<string>;
   replyNullMethods: ReadonlySet<string>;
   mainThreadConsoleRpcId: number;
+  mainThreadLanguageFeaturesRpcId: number;
   mainThreadExtensionServiceRpcId: number;
   mainThreadLoggerRpcId: number;
   mainThreadOutputServiceRpcId: number;
   mainThreadStatusBarRpcId: number;
   mainThreadStorageRpcId: number;
+  mainThreadDiagnosticsRpcId: number;
   extHostWorkspaceRpcId: number;
   extensionActivity: ExtHostDispatchRuntime["extensionActivity"];
   initializeExtensionStorage: ExtHostDispatchRuntime["initializeExtensionStorage"];
   setExtensionStorageValue: ExtHostDispatchRuntime["setExtensionStorageValue"];
   handleWebviewRequest: ExtHostDispatchRuntime["handleWebviewRequest"];
+  handleCommandRequest: NonNullable<ExtHostDispatchRuntime["handleCommandRequest"]>;
   debugExtReqSeen: number;
   setDebugExtReqSeen: (value: number) => void;
   debugExtReplySeen: number;
@@ -611,6 +615,7 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
   let currentMgmtIpc = deps.mgmtIpc;
   let currentFsWatcherSub = deps.fsWatcherSub;
   return {
+    getWatcherExcludes: (root) => deps.getWatcherExcludes(root),
     ensureConnected: () => ensureConnected(deps.extProtocol),
     state: deps.state,
     session: {
@@ -791,18 +796,21 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
     providerRegistry: deps.providerRegistry,
     extRequests: deps.requestOwner,
     rpcIds: {
+      MainThreadLanguageFeatures: deps.mainThreadLanguageFeaturesRpcId,
       MainThreadConsole: deps.mainThreadConsoleRpcId,
       MainThreadExtensionService: deps.mainThreadExtensionServiceRpcId,
       MainThreadLogger: deps.mainThreadLoggerRpcId,
       MainThreadOutputService: deps.mainThreadOutputServiceRpcId,
       MainThreadStatusBar: deps.mainThreadStatusBarRpcId,
       MainThreadStorage: deps.mainThreadStorageRpcId,
+      MainThreadDiagnostics: deps.mainThreadDiagnosticsRpcId,
       ExtHostWorkspace: deps.extHostWorkspaceRpcId,
     },
     extensionActivity: deps.extensionActivity,
     initializeExtensionStorage: (shared, extensionId) => deps.initializeExtensionStorage(shared, extensionId),
     setExtensionStorageValue: (shared, extensionId, value) => deps.setExtensionStorageValue(shared, extensionId, value),
     handleWebviewRequest: (message) => deps.handleWebviewRequest(message),
+    handleCommandRequest: (message) => deps.handleCommandRequest(message),
     debug: {
       shouldEmitExtRequestEvent: () => currentDebugExtReqSeen < 200,
       markExtRequestEvent: () => {

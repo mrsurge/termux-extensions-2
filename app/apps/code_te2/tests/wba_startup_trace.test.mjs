@@ -42,10 +42,11 @@ test('startup trace records failure without exposing error contents', async () =
 });
 
 test('connection readiness does not wait for sidebar activation', async () => {
-  const method = source.slice(source.indexOf('  async connect('), source.indexOf('  private _captureClientEditorFacade'));
+  const method = source.slice(source.indexOf('  connect(params:'), source.indexOf('  private _captureClientEditorFacade'));
   let finishViews;
   const views = new Promise(resolve => { finishViews = resolve; });
   const context = vm.createContext({
+    isRecord: value => value !== null && typeof value === 'object',
     spanTraceAsync: (_name, fn) => fn(),
     connectManagementSession: async () => ({}),
     connectExtensionHostSession: async () => ({ ready: true }),
@@ -53,10 +54,12 @@ test('connection readiness does not wait for sidebar activation', async () => {
   vm.runInContext(transformSync(`class Subject { ${method} }; globalThis.Subject = Subject;`, { loader: 'ts' }).code, context);
   const subject = new context.Subject();
   Object.assign(subject, {
+    _documentInitializationEpoch: 0,
+    _documentRegistry: { initializeDocuments() {} }, _activateInitializedDocuments() {},
     _resetSessionCaches() {}, _managementRuntime() {}, _extensionHostRuntime() {},
     _startupMark() {}, _webviews: { activatePrimaryViews: () => views },
   });
-  const result = await subject.connect();
+  const result = await subject.connect({ initialDocuments: {} });
   assert.equal(result.ready, true);
   assert.equal(subject._connecting, false);
   finishViews();

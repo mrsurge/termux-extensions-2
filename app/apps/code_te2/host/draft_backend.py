@@ -57,6 +57,8 @@ async def handle_host_draft_discard_request(
     source_name: str,
 ) -> JsonMap:
     project = _active_project(data)
+    from ..project_autosave import require_project_idle
+    require_project_idle(project)
     target = _target_path(data, project)
     history = get_history_store()
     cleared = history.clear_cached_document(project, target)

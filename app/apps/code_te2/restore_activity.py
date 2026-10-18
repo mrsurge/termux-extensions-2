@@ -1,4 +1,8 @@
-"""Event-loop-owned explicit restore activity, independent of editor imports."""
+"""Event-loop-owned watcher fence for explicit restores and editor disk writes.
+
+The historical names remain shared with guarded restore/edit owners. Writers
+must publish their committed SHA before releasing this in-flight fence.
+"""
 from pathlib import Path
 
 active_paths: set[str] = set()

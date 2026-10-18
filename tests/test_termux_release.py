@@ -652,6 +652,26 @@ class PublicReleaseTests(unittest.TestCase):
             self.assertIn("0.2.338", arguments)
             self.assertIn("--uninstall", arguments)
 
+    def test_standalone_termux_shell_passes_pypi_version_without_archive_download(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            report = root / "report.json"
+            _write_public_download_fixture(root, (
+                b"from pathlib import Path\nimport json, os, sys\n"
+                b"Path(os.environ['TE2_TEST_REPORT']).write_text(json.dumps(sys.argv[1:]))\n"
+            ))
+            environment = {**os.environ, "PREFIX": "/data/data/com.termux/files/usr",
+                           "TE2_INSTALL_PYTHON": sys.executable,
+                           "TE2_RELEASE_BASE_URL": root.as_uri(), "TE2_TEST_REPORT": str(report)}
+            result = subprocess.run(["sh", "-s", "--", "--yes"], cwd=root, env=environment,
+                                    input=(ROOT / "release/installer/install-te2").read_bytes(),
+                                    capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            arguments = json.loads(report.read_text())
+            self.assertEqual(arguments[arguments.index("--release-version") + 1], "0.2.338")
+            self.assertIn("--yes", arguments)
+            # The fixture declares an archive but intentionally supplies no such file.
+
     def test_standalone_shell_rejects_download_checksum_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

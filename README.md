@@ -19,7 +19,7 @@ diff/review flows, and stateful sidebar apps.
 
 ## Install
 
-The current release is **0.2.352 alpha**: a normal GitHub Release under an
+The current release is **0.2.353 alpha**: a normal GitHub Release under an
 alpha moniker, available through `latest`.
 
 ### Command-line install: Linux or Termux
@@ -58,7 +58,7 @@ inside Termux, or connect to a remote framework.
 
 1. Install and open the compatible GitHub debug build of Termux once to initialize
    its userspace.
-2. Install the [TE2 Termux preview APK](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.352/te2-0.2.352-termux-staging-arm64.apk) and open **TE2 Termux**.
+2. Install the [TE2 Termux preview APK](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.353/te2-0.2.353-termux-staging-arm64.apk) and open **TE2 Termux**.
 3. If TE2 is not installed, choose **Install** in the launcher or the local-framework
    card in Settings, then confirm. Progress is shown in the app; no shell command
    needs to be pasted into Termux.
@@ -101,20 +101,41 @@ installs instead require the build toolchain described below.
 
 ### Termux pip installs
 
-Direct pip/source installation is also possible in Termux, but you must supply
-system dependencies and native build toolchains yourself. Dependencies without
-compatible Android wheels may compile from source, making installation lengthy.
-The recommended installer above uses our prebuilt GitHub release wheel archive
-and apt-supplied dependencies to avoid those builds.
+PyPI also provides the prebuilt TE2 wheel for Android ARM64 with CPython 3.14.
+Compatible Termux pip selects it automatically; there is no need to download or
+choose the wheel from GitHub. To install without the managed installer, supply
+the system packages first:
 
-Further dependency reduction is planned; it does not remove the current
-source-install prerequisites.
+```sh
+pkg update
+pkg install tur-repo
+pkg update
+pkg install python python-pip git nodejs-lts npm build-essential libarchive libgit2
+python -m pip install --only-binary=te2,agent-log-server,framework-shells,uvloop-te2 te2
+te2
+```
+
+Use ordinary CPython 3.14 on Android ARM64 and Node 24. `build-essential` supports
+the Terminal's first-use `node-pty` build and small Python dependency builds.
+The upcoming maintenance release removes the old heavyweight Python dependency
+stack and selects the prebuilt `uvloop-te2` package on Termux (upstream `uvloop`
+on Linux x86-64). Remaining small dependency source builds are supported.
+Published 0.2.353 still has the older dependency metadata; the reduced dependency
+set applies when the new release is published.
+
+The command above requires wheels for TE2/ALS/FWS/uvloop-te2, avoiding accidental
+Rust/runtime or uvloop compilation while allowing lightweight dependencies to
+build. Optional integrations also use `aria2` (Aria Downloader) and `watchexec`
+(polling watcher). The next-release managed script uses this same PyPI selection,
+adds staging/rollback and installs prerequisites for you; GitHub supplies the
+installer/release metadata, not the TE2 wheelhouse. The published 0.2.353 script
+still uses the older GitHub archive flow.
 
 For a pinned installation, use the matching tagged download URL instead of
 `latest` and set `TE2_RELEASE_TAG` for the script process:
 
 ```sh
-curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.352/install-te2 | TE2_RELEASE_TAG=0.2.352 sh -s -- --yes
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.353/install-te2 | TE2_RELEASE_TAG=0.2.353 sh -s -- --yes
 ```
 
 ## Remote-First Workspace
@@ -325,6 +346,61 @@ python -m venv .venv
 python -m pip install -e .
 te2
 ```
+
+Source/editable startup builds and caches both the Rust framework and Code TE2
+worker for the local architecture (not only x86-64). Install Rust/Cargo and the
+platform's compiler and Python development libraries first. This source-build
+route is separate from the release installer's supported prebuilt targets.
+The framework and native app workers share one manifest-driven build/cache flow;
+Code TE2 declares its worker in `app/apps/code_te2/native_build.json`. APK and
+CLI launches reuse the same source/profile/platform build rather than generating
+different keys from inherited compiler environment variables. The framework's
+existing cache identity is preserved; Python-linked workers also verify a runtime
+ABI receipt before reuse.
+
+On a fresh editable checkout, Code TE2 runs its Python domain interpreted inside
+the native Rust worker until a mypyc snapshot is built and activated. It keeps
+the same native networking and framework pipe; no alternate Python server is
+launched. To build the optimized domain, from the checkout root and the same
+Python environment used to launch TE2:
+
+```bash
+python -m pip install 'mypy==2.3.0' 'setuptools==84.0.0'
+python -B app/apps/code_te2/build_mypyc.py --jobs 4
+```
+
+Install working `ccache` for compiler reuse. If it is missing or cannot run, the
+script prints the diagnostic and automatically builds without it; `--no-cache`
+also bypasses it deliberately. Exact verified source/toolchain snapshot matches
+are reused without compilation. Check the selected domain with:
+
+```bash
+python -B app/apps/code_te2/build_mypyc.py --status
+```
+
+Reduce `--jobs` on memory-constrained devices. The script builds, validates and
+activates a snapshot; it does not restart running workers. Restart your framework
+after the first activation so bootstrap selects it. Subsequent source changes to
+compiled modules need a new build and worker activation. See the
+[native worker build guide](framework/native_editor_worker/README.md#cached-build-and-retention-workflow-current-developer-behavior)
+for artifact paths and cache details. A broken or explicitly selected snapshot
+is not silently bypassed; packaged releases always require their validated
+compiled payload.
+
+If the automatic `.codex-scratch/mypyc-active` link points to a snapshot that
+has been deleted, editable startup also runs interpreted; it leaves the link
+untouched. Present-but-broken snapshots and explicit `CODE_TE2_MYPYC_DIR` paths
+still fail clearly. To deliberately skip mypyc for an editable framework launch,
+even when a compiled snapshot exists:
+
+```bash
+CODE_TE2_FORCE_INTERPRETED=1 te2
+```
+
+This overrides the domain selection only, retaining the same Rust worker and
+Python ABI. It does not rebuild/delete snapshots or change an already running
+worker. Omit the flag on the next framework launch to resume normal selection.
+Packaged installs reject this editable-only override.
 
 For a package install directly from Git:
 

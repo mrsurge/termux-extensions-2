@@ -16,6 +16,8 @@ from ..stores import get_preferences_store
 
 SIDEBAR_WINDOW_STATE_PREF_KEY = "sidebarWindowState"
 SIDEBAR_WINDOW_STATE_VERSION = 2
+PRESENTATION_QUERY_KEYS = {"clientInstanceId", "windowId", "presentationId",
+                           "sidebarWindowId", "sidebarStateId", "mainPageId"}
 ALLOWED_READINESS_STATUSES = {"starting", "ready", "error", "stopped"}
 RUN_TARGET_TICKET_RE = re.compile(r"^[0-9a-f]{64}$")
 LEGACY_CODE_TE2_IDENTITY_RE = re.compile(
@@ -154,7 +156,7 @@ def _app_manifest(app_id: str) -> JsonObject | None:
 def _manifest_sidebar_state(manifest: JsonObject | None) -> JsonObject:
     sidebar_state = (manifest or {}).get("sidebar_state") if isinstance(manifest, dict) else None
     if isinstance(sidebar_state, dict):
-        return dict(sidebar_state)
+        return dict(cast(JsonObject, sidebar_state))
     return {}
 
 
@@ -190,6 +192,7 @@ def _launcher_app_catalog_entry(manifest: JsonObject) -> JsonObject:
         "base_url": base_url,
         "baseUrl": base_url,
         "stateful": stateful,
+        "presentation_prefix": _norm(sidebar_state.get("presentation_prefix")) or _console_worker_prefix(app_id, manifest),
         "sidebar_state": sidebar_state if stateful else {"enabled": False},
         "launch_url": base_url,
         "embed_url": f"{base_url}?embed=1",
@@ -534,7 +537,7 @@ def _with_url_params(raw_url: str, params: dict[str, str]) -> str:
 
 
 def _reserved_query_keys(manifest: JsonObject | None = None) -> set[str]:
-    return {
+    return PRESENTATION_QUERY_KEYS | {
         "embed",
         "te2_readiness_delay_ms",
         "readiness_delay_ms",
@@ -589,6 +592,10 @@ def _build_window_url(
     if declared_base_url and urlsplit(declared_base_url).path != urlsplit(base_url).path:
         raise ValueError(f"base_url must be {base_url}")
     raw_url = _norm(params.get("url")) or f"{base_url}?embed=1"
+    parsed_url = urlsplit(raw_url)
+    raw_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path,
+                         urlencode([(key, value) for key, value in parse_qsl(parsed_url.query, keep_blank_values=True)
+                                    if key not in PRESENTATION_QUERY_KEYS]), parsed_url.fragment))
     query_params = {
         key: str(value)
         for key, value in _query_state_from_params(params, "", manifest).items()
@@ -1160,6 +1167,8 @@ def open_sidebar_window_url(params: JsonObject) -> JsonObject:
         or _host_id_for(app_id, console_worker_id or token_id or _default_token_id(app_id, manifest))
     )
     existing_slot = _as_object(_as_object(state.get("slots")).get(host_id))
+    if re.fullmatch(r"[A-Za-z0-9_-]+:[A-Za-z0-9]{4}\.[A-Za-z0-9]{4}", console_worker_id):
+        console_worker_id = _norm(existing_slot.get("console_worker_id")) or console_worker_id.split(".", 1)[0]
     if not console_worker_id:
         console_worker_id = _norm(existing_slot.get("console_worker_id") or existing_slot.get("consoleWorkerId"))
     if not token_id:

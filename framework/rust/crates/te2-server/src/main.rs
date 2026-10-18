@@ -8,6 +8,20 @@ mod asset_gzip;
 mod framework_services;
 mod frontend_assets;
 mod launcher;
+#[cfg(feature = "native-mcp")]
+mod native_mcp;
+#[cfg(feature = "native-mcp")]
+mod native_mcp_console;
+#[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
+mod native_mcp_fws;
+#[cfg(feature = "native-mcp")]
+mod native_mcp_http_compat;
+#[cfg(feature = "native-mcp")]
+mod native_mcp_live_console;
+#[cfg(feature = "native-mcp")]
+mod native_mcp_scaffold;
+#[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
+mod native_mcp_sidebar;
 mod network_exposure;
 mod proxy_shell;
 mod proxy_transport;
@@ -62,10 +76,12 @@ const APP_ID: &str = "te2";
 const APPS_EVENT_CHANNEL_CAPACITY: usize = 64;
 const BUILD_INFO_SCHEMA_VERSION: u8 = 1;
 
-#[cfg(feature = "ferrous-framework-native")]
-const BUILD_FEATURES: &[&str] = &["ferrous-framework-native"];
-#[cfg(not(feature = "ferrous-framework-native"))]
-const BUILD_FEATURES: &[&str] = &[];
+const BUILD_FEATURES: &[&str] = &[
+    #[cfg(feature = "ferrous-framework-native")]
+    "ferrous-framework-native",
+    #[cfg(feature = "native-mcp")]
+    "native-mcp",
+];
 
 // Shared server state: config is immutable per process, while the reqwest
 // client owns reusable connection state for dynamic app proxying.
@@ -386,6 +402,11 @@ async fn main() -> Result<()> {
             .as_ref()
             .map(FerrousNativeHost::manager),
     );
+    #[cfg(feature = "native-mcp")]
+    let mcp_cancellation = tokio_util::sync::CancellationToken::new();
+    #[cfg(feature = "native-mcp")]
+    let app = build_router_with_mcp(state, mcp_cancellation.clone());
+    #[cfg(not(feature = "native-mcp"))]
     let app = build_router(state);
     let shutdown_notify = Arc::new(Notify::new());
     let mut servers = JoinSet::new();
@@ -408,6 +429,8 @@ async fn main() -> Result<()> {
 
     wait_for_shutdown_signal().await;
     info!("TE2 framework server shutdown signal received");
+    #[cfg(feature = "native-mcp")]
+    mcp_cancellation.cancel();
     shutdown_fws_tree(&fws_bridge_runtime).await;
     shutdown_notify.notify_waiters();
     match timeout(Duration::from_secs(10), async {
@@ -460,7 +483,23 @@ fn build_info() -> BuildInfo {
     }
 }
 
+#[cfg(feature = "native-mcp")]
+fn build_router_with_mcp(
+    state: AppState,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Router {
+    build_router_base_with_mcp(state, cancellation)
+}
+
+#[cfg(not(feature = "native-mcp"))]
 fn build_router(state: AppState) -> Router {
+    build_router_base_with_mcp(state)
+}
+
+fn build_router_base_with_mcp(
+    state: AppState,
+    #[cfg(feature = "native-mcp")] cancellation: tokio_util::sync::CancellationToken,
+) -> Router {
     let (socket_layer, io) = SocketIo::builder().with_state(state.clone()).build_layer();
     register_socket_namespaces(&io);
     let network_policy = state.config.network_policy.clone();
@@ -477,6 +516,8 @@ fn build_router(state: AppState) -> Router {
 
     #[cfg(feature = "ferrous-framework-native")]
     let router = router.merge(runtime_debug_http::router());
+    #[cfg(feature = "native-mcp")]
+    let router = router.merge(native_mcp::router(state.clone(), cancellation));
     app_proxy::register_sio_proxy_routes(router, state.sio_routes())
         .with_state(state)
         .layer(socket_layer)

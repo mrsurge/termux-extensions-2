@@ -42,3 +42,24 @@ test('same-line occurrences render as distinct logical hits', () => {
     assert.deepEqual([...container.querySelectorAll('.fe-search-line-num')].map(el => el.textContent), ['1', '1', '1']);
   } finally { win.happyDOM.abort(); }
 });
+
+test('multiline provider/projected hits retain the source line label and navigation', async () => {
+  const win = new Window();
+  Object.assign(globalThis, { window: win, document: win.document, HTMLElement: win.HTMLElement });
+  try {
+    const text = '# Caller disconnect/cancellation must not abandon post-write reconciliation.\nif len(self._operations) >= 64:';
+    for (const payload of [
+      { files: [{ relativePath: 'review_projection.py', matches: [{ lineNumber: 104, endLineNumber: 105, columnNumber: 9, lineText: text, snippet: text, matchText: text, snippetRanges: [{ start: 0, end: text.length }] }] }] },
+      { results: [{ rel: 'review_projection.py', matches: [{ line: 104, endLine: 105, column: 8, text, snippet: text, matchText: text, snippetRanges: [{ start: 0, end: text.length }] }] }] },
+    ]) {
+      const container = document.createElement('div'); document.body.append(container);
+      const opened = [];
+      renderContentResults(container, payload, { toast: () => {}, openFileAndMaybeJump: async (...args) => opened.push(args) });
+      assert.equal(container.querySelector('.fe-search-line-num').textContent, '104–105');
+      assert.ok(container.querySelector('.fe-search-snippet').textContent.includes('if len(self._operations) >= 64:'));
+      container.querySelector('.fe-search-match').click();
+      assert.equal(opened[0][1], 104);
+      container.remove();
+    }
+  } finally { win.happyDOM.abort(); }
+});

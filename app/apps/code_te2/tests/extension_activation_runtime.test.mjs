@@ -64,6 +64,28 @@ const EXPECTED_IMPLICIT_EVENTS = [
   "onWalkthrough:walkthrough",
 ];
 
+test("terminal profile activation skips malformed contributions without losing later events", () => {
+  for (const profiles of [undefined, null, "profile", {}, 42, true]) {
+    const events = activationEventsForExtension({
+      main: "./out/main.js",
+      contributes: {
+        terminal: [
+          { profiles },
+          { profiles: [null, "invalid", {}, { id: 1 }, { id: " valid " }] },
+          { profiles: [{ id: "later" }] },
+        ],
+        commands: [{ command: "sample.run" }],
+      },
+    });
+    assert.deepEqual(events, [
+      "onTerminalProfile:valid", "onTerminalProfile:later", "onCommand:sample.run",
+    ]);
+  }
+  assert.deepEqual(activationEventsForExtension({
+    main: "./out/main.js", contributes: { terminal: [{}, { profiles: [] }] },
+  }), []);
+});
+
 test("enriches admitted user extensions from canonical disk manifests", () => {
   const managementExtension = {
     identifier: { value: "openai.chatgpt" },

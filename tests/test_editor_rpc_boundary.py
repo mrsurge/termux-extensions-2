@@ -62,6 +62,18 @@ class EditorRpcMessageTests(unittest.TestCase):
 
 
 class EditorRpcBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dispatch_failures_keep_request_id_for_immediate_rejection(self) -> None:
+        for failure in (ValueError('transition busy'), PermissionError('denied'), RuntimeError('failure')):
+            namespace = adapter.EditorRpcSocketIONamespace('/rpc/editor')
+            received: list[object] = []
+            async def dispatch(*args: object, **kwargs: object) -> object:
+                raise failure
+            async def emit(target: str, event: str, payload: object) -> None:
+                received.append(payload)
+            with patch.object(adapter, 'dispatch_editor_runtime_request', dispatch), patch.object(namespace, '_client_id', return_value='client_a'), patch.object(namespace, '_emit_to_sid', emit):
+                await namespace.on_rpc('sid', {'jsonrpc': '2.0', 'id': 'request-7', 'method': 'editor.preference.update', 'params': {'key': 'readOnly', 'value': True}})
+            self.assertEqual(cast(dict[str, object], received[0])['id'], 'request-7')
+
     async def test_emit_wrappers_deliver_completed_builder_values(self) -> None:
         received: list[object] = []
         async def emit(event: str, payload: object) -> None:

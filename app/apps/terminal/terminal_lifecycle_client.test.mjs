@@ -18,6 +18,109 @@ function inputHarness() {
   return { state, frames, input: context.input };
 }
 
+function presentationHarness(query = {}, shells = []) {
+  const source = fs.readFileSync('src/main.ts', 'utf8');
+  const section = (startText, endText) => {
+    const start = source.indexOf(startText), end = source.indexOf(endText, start);
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end);
+  };
+  const modes = [], selected = [], resets = [], requests = [], statuses = [];
+  const ui = { title: { textContent: 'No shell selected' } };
+  const context = vm.createContext({
+    sidebarState: { initialShellId: '', initialNewSession: '', initialCwd: '', ...query },
+    initialSidebarStateApplied: false, state: { shellsReady: false, shells }, ui,
+    setMode: mode => modes.push(mode), setStatus: status => statuses.push(status),
+    selectShell: async id => selected.push(id), resetSidebarShellState: id => resets.push(id),
+    isShellAlive: rec => rec.status === 'running', applyShellSnapshot() {},
+    requireLifecycleClient: () => ({ request: async (method, params) => {
+      requests.push({ method, params });
+      if (query.failCreate) throw new Error('launch failed');
+      return { shell_id: 'created', snapshot: {} };
+    } }),
+    window: { location: { href: 'http://localhost/app/terminal?new_session=seed' }, history: { replaceState() {} } },
+    URL, console: { error() {} },
+  });
+  const functions = section('  function initializePresentation()', '  function openDrawer()')
+    + section('  async function applyInitialSidebarShellState()', '  async function listShells(');
+  vm.runInContext(transformSync(functions + '\nglobalThis.presentation = { initializePresentation, applyInitialSidebarShellState };', { loader: 'ts' }).code, context);
+  return { context, modes, selected, resets, requests, statuses, ui, ...context.presentation };
+}
+
+test('restoration has no drawer transition until a deliberate menu interaction', () => {
+  const source = fs.readFileSync('src/main.ts', 'utf8');
+  const start = source.indexOf('  function setMode(');
+  const end = source.indexOf('  function refocusTerm()', start);
+  const classes = new Set();
+  const root = { classList: {
+    add: (...names) => names.forEach(name => classes.add(name)),
+    remove: (...names) => names.forEach(name => classes.delete(name)),
+  } };
+  const context = vm.createContext({ root, state: {},
+    sidebarState: { initialShellId: 'existing' }, ui: { title: {} } });
+  vm.runInContext(transformSync(source.slice(start, end)
+    + '\nglobalThis.drawer = { initializePresentation, setMode, openDrawer, closeDrawer };', { loader: 'ts' }).code, context);
+  const { drawer } = context;
+  drawer.initializePresentation();
+  assert.deepEqual([...classes], ['mode-terminal']);
+  drawer.openDrawer();
+  assert.equal(classes.has('drawer-motion-enabled'), true);
+  assert.equal(classes.has('drawer-open'), true);
+  drawer.closeDrawer();
+  assert.equal(classes.has('drawer-open'), false);
+  assert.equal(classes.has('drawer-motion-enabled'), true, 'manual closing still animates');
+  drawer.setMode('list'); drawer.setMode('terminal');
+  assert.equal(classes.has('drawer-motion-enabled'), false, 'mode/session handoff is not a gesture');
+  const template = fs.readFileSync('template.html', 'utf8');
+  const baseRule = template.match(/\.mode-terminal #ta-list-container\s*\{([^}]+)\}/)[1];
+  assert.match(baseRule, /transition:\s*none;/);
+  assert.match(template, /\.mode-terminal\.drawer-motion-enabled #ta-list-container\s*\{\s*transition: transform 160ms ease;/);
+});
+
+test('query state chooses terminal layout before lifecycle readiness without opening a shell', async () => {
+  for (const query of [{ initialShellId: 'existing' }, { initialNewSession: 'seed' }]) {
+    const f = presentationHarness(query);
+    f.initializePresentation();
+    assert.deepEqual(f.modes, ['terminal']);
+    assert.equal(f.ui.title.textContent, 'Loading terminal…');
+    await f.applyInitialSidebarShellState();
+    assert.deepEqual(f.requests, []); assert.deepEqual(f.selected, []);
+  }
+  const f = presentationHarness(); f.initializePresentation();
+  assert.deepEqual(f.modes, ['list']);
+  assert.equal(f.ui.title.textContent, 'No shell selected');
+});
+
+test('restoration validates the shell snapshot; missing or exited identities return to list', async () => {
+  for (const status of ['running', 'exited', 'missing']) {
+    const f = presentationHarness({ initialShellId: 'existing' }, status === 'missing' ? [] : [{ id: 'existing', status }]);
+    f.initializePresentation(); f.context.state.shellsReady = true;
+    await f.applyInitialSidebarShellState(); await f.applyInitialSidebarShellState();
+    assert.deepEqual(f.requests, []);
+    if (status === 'running') {
+      assert.deepEqual(f.selected, ['existing']); assert.deepEqual(f.modes, ['terminal']);
+    } else {
+      assert.deepEqual(f.selected, []); assert.deepEqual(f.modes, ['terminal', 'list']);
+      assert.deepEqual(f.resets, ['existing']);
+    }
+  }
+});
+
+test('explicit fresh launch submits once after readiness and failure leaves a usable list', async () => {
+  for (const failCreate of [false, true]) {
+    const f = presentationHarness({ initialNewSession: 'seed', initialCwd: '/project', failCreate });
+    f.initializePresentation(); f.context.state.shellsReady = true;
+    await f.applyInitialSidebarShellState(); await f.applyInitialSidebarShellState();
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].method, 'shell.create');
+    assert.equal(f.requests[0].params.launch_id, 'seed');
+    assert.equal(f.requests[0].params.cwd, '/project');
+    assert.deepEqual(f.selected, failCreate ? [] : ['created']);
+    assert.deepEqual(f.modes, failCreate ? ['terminal', 'list'] : ['terminal']);
+    if (failCreate) assert.match(f.statuses[0], /Session launch failed/);
+  }
+});
+
 test('terminal input sends synchronously in event order, including held arrows and UTF-8 paste', () => {
   const { input, frames } = inputHarness();
   const chunks = ['a', 'b', ...Array(20).fill('\u001b[A'), '\u0003', '\r', 'hello 🌍\n'.repeat(2048)];

@@ -18,7 +18,8 @@
 // TODO(b/375326606): consider contribution on
 // upstream(https://github.com/xtermjs/xterm.js/issues/3727)
 const LONG_PRESS_MS = 450;
-const WHEEL_DRAG_SCALE = 0.4;
+// Touch distance gain only; xterm retains wheel/line-step and TUI ownership.
+const WHEEL_DRAG_SCALE = 1.0;
 const DOUBLE_TAP_MS = 280;
 const DOUBLE_TAP_PX = 24;
 const EDGE_SCROLL_PX = 32;
@@ -34,6 +35,99 @@ let gestureState = null;
 let handleDrag = null;
 const attachments = new WeakMap();
 const attachmentsByRoot = new WeakMap();
+
+const FLICK_WINDOW_MS = 80;
+const FLICK_MIN_SPEED = 0.35; // CSS pixels/ms, not distance/event.
+const FLICK_MIN_DISTANCE = 24;
+const FLICK_DECAY_MS = 280;
+const FLICK_MAX_PAGES = 4.5;
+const FLICK_MAX_PULSES_PER_FRAME = 16;
+let fling = null;
+
+function stopFling() {
+  if (fling?.raf != null) cancelAnimationFrame(fling.raf);
+  fling = null;
+}
+
+function terminalScrollIdentity(terminal) {
+  return { buffer: terminal.buffer?.active, mouse: terminal.modes?.mouseTrackingMode,
+    cursor: terminal.modes?.applicationCursorKeysMode };
+}
+
+function sampleFlick(state, point, now) {
+  const delta = state.lastY - point.clientY;
+  if (!delta) return;
+  const direction = Math.sign(delta);
+  if (state.flickDirection && state.flickDirection !== direction) {
+    state.flickSamples = [{ y: state.lastY, time: state.lastMoveAt }];
+  }
+  state.flickDirection = direction;
+  state.lastMoveAt = now;
+  state.flickSamples.push({ y: point.clientY, time: now });
+  state.flickSamples = state.flickSamples.filter(sample => now - sample.time <= FLICK_WINDOW_MS).slice(-12);
+}
+
+function beginFling(state) {
+  stopFling();
+  const now = performance.now();
+  const attachment = attachmentsByRoot.get(state.terminalRoot);
+  const first = state.flickSamples?.[0], last = state.flickSamples?.at(-1);
+  if (!attachment || !first || !last || now - last.time > FLICK_WINDOW_MS) return;
+  const elapsed = last.time - first.time;
+  const distance = (first.y - last.y) * WHEEL_DRAG_SCALE;
+  if (elapsed < 8 || Math.abs(distance) < FLICK_MIN_DISTANCE) return;
+  const velocity = distance / elapsed;
+  if (Math.abs(velocity) < FLICK_MIN_SPEED) return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const releaseGeometry = getScreenGeometry(attachment);
+  if (!releaseGeometry) return;
+  // Continuous force curve: 1 CSS px/ms throws 0.75 page; 2.5 throws 4.5.
+  // Geometry normalizes range across drawer sizes; dragging itself stays 1:1.
+  const pages = Math.min(FLICK_MAX_PAGES, 0.75 * Math.abs(velocity) ** 2);
+  const travel = pages * releaseGeometry.cellHeight * attachment.terminal.rows;
+  const identity = terminalScrollIdentity(attachment.terminal);
+  const motion = { attachment, velocity: Math.sign(velocity) * travel / FLICK_DECAY_MS, pending: 0,
+    start: now, previous: now, raf: null, target: state.wheelTarget,
+    point: buildPointerLike(state.point, state.wheelTarget) };
+  fling = motion;
+  const tick = () => {
+    if (fling !== motion) return;
+    // rAF's frame-start timestamp can precede the touch-end callback that
+    // scheduled it. Use the same monotonic clock as release and input samples.
+    const time = performance.now();
+    motion.raf = null;
+    const current = terminalScrollIdentity(attachment.terminal);
+    const geometry = getScreenGeometry(attachment), dt = time - motion.previous;
+    if (!helpersEnabled() || attachment.disposed || document.hidden || !geometry
+      || current.buffer !== identity.buffer || current.mouse !== identity.mouse || current.cursor !== identity.cursor
+      || dt < 0 || dt > 64 || time - motion.start > 2200) {
+      stopFling(); return;
+    }
+    // Analytic exponential integral: identical motion at 60/90/120 Hz.
+    const decay = Math.exp(-dt / FLICK_DECAY_MS);
+    motion.pending += motion.velocity * FLICK_DECAY_MS * (1 - decay);
+    motion.velocity *= decay;
+    motion.previous = time;
+    const buffer = current.buffer;
+    if ((!current.mouse || current.mouse === 'none') && buffer?.type === 'normal' && Number.isFinite(buffer.baseY)
+      && ((motion.pending < 0 && buffer.viewportY <= 0) || (motion.pending > 0 && buffer.viewportY >= buffer.baseY))) {
+      stopFling(); return;
+    }
+    // Keep xterm's wheel/TUI routing; each pulse is at most one row.
+    const step = Math.max(1, geometry.cellHeight);
+    for (let pulses = 0; pulses < FLICK_MAX_PULSES_PER_FRAME && Math.abs(motion.pending) > 0.001 && fling === motion; pulses++) {
+      const part = Math.sign(motion.pending) * Math.min(Math.abs(motion.pending), step);
+      dispatchWheel(part, motion.point, motion.target);
+      motion.pending -= part;
+    }
+    // Retain bounded residual motion instead of killing strong throws when a
+    // busy frame cannot emit their entire distance within the pulse budget.
+    if (Math.abs(motion.velocity) * FLICK_DECAY_MS < 0.5 && Math.abs(motion.pending) < 0.5) { stopFling(); return; }
+    motion.raf = requestAnimationFrame(tick);
+  };
+  motion.raf = requestAnimationFrame(tick);
+}
+
 
 function isMobileUserAgent() {
   if (navigator.userAgentData?.mobile === true) return true;
@@ -144,6 +238,7 @@ function dispatchWheel(deltaY, point, target) {
 }
 
 function startSelection(point) {
+  stopFling();
   if (!gestureState || gestureState.mode === 'select') return;
   clearLongPress();
   gestureState.mode = 'select';
@@ -194,6 +289,7 @@ function maybeSelectWord(point, root) {
 }
 
 function handleTouchStart(event) {
+  stopFling();
   if (!helpersEnabled() || isHandleTarget(event.target)) return true;
   if (!event.touches || event.touches.length !== 1) {
     resetGestureState();
@@ -212,6 +308,9 @@ function handleTouchStart(event) {
     touchId: point.identifier,
     mode: 'pending',
     lastY: point.clientY,
+    lastMoveAt: performance.now(),
+    flickDirection: 0,
+    flickSamples: [{ y: point.clientY, time: performance.now() }],
     point,
     terminalRoot,
     mouseTarget,
@@ -256,6 +355,7 @@ function handleTouchMove(event, isScrollGesture) {
     return false;
   }
   if (gestureState.mode === 'scroll') {
+    sampleFlick(gestureState, point, performance.now());
     const deltaY = (gestureState.lastY - point.clientY) * WHEEL_DRAG_SCALE;
     gestureState.lastY = point.clientY;
     dispatchWheel(deltaY, point, gestureState.wheelTarget);
@@ -280,6 +380,7 @@ function handleTouchEnd(event, isScrollGesture) {
     resetGestureState();
     return false;
   } else if (gestureState.mode === 'scroll') {
+    beginFling(gestureState);
     event.preventDefault();
     event.stopPropagation();
     resetGestureState();
@@ -299,6 +400,7 @@ function handleTouchEnd(event, isScrollGesture) {
 }
 
 function handleTouchCancel(event) {
+  stopFling();
   if (!gestureState) return true;
   const owned = gestureState.mode === 'select' || gestureState.mode === 'scroll';
   resetGestureState();
@@ -738,6 +840,7 @@ function finishHandleDrag(event) {
 }
 
 function beginHandleDrag(event, attachment) {
+  stopFling();
   if (attachment.disposed || event.button > 0) return;
   const selection = readSelection(attachment.terminal);
   if (!selection) return;
@@ -873,9 +976,15 @@ function attach(terminal) {
       }
     })();
   });
-  addDisposable(attachment, terminal.onSelectionChange?.(() => scheduleRender(attachment)));
+  addDisposable(attachment, terminal.onSelectionChange?.(() => {
+    if (fling?.attachment === attachment) stopFling();
+    scheduleRender(attachment);
+  }));
   addDisposable(attachment, terminal.onScroll?.(() => scheduleRender(attachment)));
-  addDisposable(attachment, terminal.onResize?.(() => scheduleRender(attachment)));
+  addDisposable(attachment, terminal.onResize?.(() => {
+    if (fling?.attachment === attachment) stopFling();
+    scheduleRender(attachment);
+  }));
   const schedule = () => scheduleRender(attachment);
   window.addEventListener('resize', schedule, { passive: true });
   attachment.disposables.push(() => window.removeEventListener('resize', schedule));
@@ -895,6 +1004,8 @@ function attach(terminal) {
   const dispose = () => {
     if (attachment.disposed) return;
     attachment.disposed = true;
+    if (fling?.attachment === attachment) stopFling();
+    if (gestureState?.terminalRoot === root) resetGestureState();
     if (handleDrag?.attachment === attachment) finishHandleDrag();
     if (attachment.renderRaf != null) cancelAnimationFrame(attachment.renderRaf);
     attachment.renderRaf = null;
@@ -909,7 +1020,10 @@ function attach(terminal) {
     attachments.delete(terminal);
     attachmentsByRoot.delete(root);
   };
-  attachment.publicDisposable = { dispose };
+  attachment.publicDisposable = { dispose, cancelGesture() {
+    if (fling?.attachment === attachment) stopFling();
+    if (gestureState?.terminalRoot === root) resetGestureState();
+  } };
   attachments.set(terminal, attachment);
   attachmentsByRoot.set(root, attachment);
   addDisposable(attachment, terminal.attachCustomTouchEventHandler(handleCustomTouchEvent));
@@ -924,5 +1038,9 @@ function attach(terminal) {
 
 const eventOptions = { capture: true, passive: false };
 
+window.addEventListener('touchstart', stopFling, { capture: true, passive: true });
+window.addEventListener('blur', stopFling);
+window.addEventListener('pagehide', stopFling);
+document.addEventListener('visibilitychange', stopFling);
 window.te2TerminalTouchSelection = Object.freeze({ attach });
 })();

@@ -3,7 +3,7 @@ import { isMirrorPayloadValid } from './editor_mirror_payload_valid_utils.js';
 import { shouldDropMirrorForSource } from './editor_mirror_source_drop_utils.js';
 import { shouldDropMirrorForPath } from './editor_mirror_path_drop_utils.js';
 import { shouldDropMirrorForNoModel } from './editor_mirror_model_drop_utils.js';
-import { shouldDropMirrorForSha } from './editor_mirror_sha_drop_utils.js';
+import { shouldDropMirrorForSha, matchesExpectedMirrorContent } from './editor_mirror_sha_drop_utils.js';
 import { shouldDropMirrorForHotWindow } from './editor_mirror_hot_drop_utils.js';
 import { applyMirrorContentToModel } from './editor_mirror_apply_content_utils.js';
 import { emitMirrorCacheState } from './editor_mirror_emit_cache_utils.js';
@@ -35,6 +35,7 @@ interface MonacoModelLike {
 }
 
 interface EditorMirrorPayloadLike {
+  expected_content_sha256?: unknown;
   path?: unknown;
   content?: unknown;
   base_sha256?: unknown;
@@ -45,6 +46,8 @@ interface EditorMirrorPayloadLike {
 }
 
 interface SaveMirrorSocketHandlerDeps {
+  setAutosaveTransitionReadOnly?(paused: boolean): void;
+  onGuardedDraftApplied?(path: string, content: string): void;
   rpcNotifications?: EditorRpcNotificationSource | null;
   getCurrentPath(): string | null;
   getModel(): unknown;
@@ -97,6 +100,7 @@ function handleEditorMirrorEvent(
     deps.syncMirrorDebug();
     return;
   }
+  if (!matchesExpectedMirrorContent(mirrorPayload?.expected_content_sha256, deps.getModel())) return;
   if (!acceptDocumentProjection(mirrorPayload?.path, mirrorPayload?.document_revision)) {
     return;
   }
@@ -112,20 +116,30 @@ function handleEditorMirrorEvent(
     deps.syncMirrorDebug();
     return;
   }
-  if (shouldDropMirrorForSha(mirrorPayload?.content_sha256, deps.getLastContentSha256(), model, mirrorPayload?.content)) {
+  const sameContent = shouldDropMirrorForSha(mirrorPayload?.content_sha256, deps.getLastContentSha256(), model, mirrorPayload?.content);
+  if (sameContent && mirrorPayload?.expected_content_sha256 === undefined) {
     deps.incrementMirrorState('drop_sha');
     deps.syncMirrorDebug();
     return;
   }
-  if (shouldDropMirrorForHotWindow(deps.getLastLocalEditAt(), Date.now(), deps.getMirrorHotWindowMs())) {
+  if (mirrorPayload?.expected_content_sha256 === undefined
+      && shouldDropMirrorForHotWindow(deps.getLastLocalEditAt(), Date.now(), deps.getMirrorHotWindowMs())) {
     deps.incrementMirrorState('drop_hot');
     deps.syncMirrorDebug();
     return;
   }
 
-  applyMirrorContentToModel(model as MonacoModelLike, mirrorPayload?.content, (value: boolean) => {
+  if (!sameContent) applyMirrorContentToModel(model as MonacoModelLike, mirrorPayload?.content, (value: boolean) => {
     deps.setApplyingRemote(!!value);
   });
+  if (!sameContent && mirrorPayload?.expected_content_sha256 !== undefined
+      && typeof mirrorPayload.path === 'string' && typeof mirrorPayload.content === 'string') {
+    deps.onGuardedDraftApplied?.(mirrorPayload.path, mirrorPayload.content);
+  }
+  if (mirrorPayload?.expected_content_sha256 !== undefined
+      && typeof mirrorPayload.base_sha256 === 'string' && /^[a-f\d]{64}$/.test(mirrorPayload.base_sha256)) {
+    deps.setBaseSha256(mirrorPayload.base_sha256);
+  }
 
   const contentSha = typeof mirrorPayload?.content_sha256 === 'string'
     ? mirrorPayload.content_sha256
@@ -134,7 +148,7 @@ function handleEditorMirrorEvent(
 
   deps.incrementMirrorState('ap');
   deps.syncMirrorDebug();
-  deps.applyLineNumberSizing();
+  if (!sameContent) deps.applyLineNumberSizing();
 
   const mirrorUnsaved = mirrorPayload?.unsaved === true;
   deps.setUnsavedTrace('mirror', mirrorUnsaved);
@@ -186,13 +200,14 @@ function handleEditorCacheStateEvent(
 function handleEditorSaveSnapshotRequestEvent(
   deps: SaveMirrorSocketHandlerDeps,
   payload: unknown,
+  freeze: string | null = null,
 ): void {
   handleSaveSnapshotRequest(
     asSaveSnapshotRequestPayload(payload),
     deps.getCurrentPath(),
     deps.getModel(),
     deps.getBaseSha256(),
-    deps.emitToHost,
+    (event, response) => deps.emitToHost(event, { ...response, autosaveFreeze: freeze }),
   );
 }
 
@@ -200,6 +215,11 @@ export function registerEditorSaveMirrorSocketHandlers(
   socket: EditorSocketLike,
   deps: SaveMirrorSocketHandlerDeps,
 ): void {
+  let autosaveFreeze: string | null = null;
+  socket.on('disconnect', () => {
+    autosaveFreeze = null;
+    deps.setAutosaveTransitionReadOnly?.(false);
+  });
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.mirrorUpdated, (payload) => {
       try {
@@ -219,7 +239,15 @@ export function registerEditorSaveMirrorSocketHandlers(
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.saveSnapshotRequest, (payload) => {
       try {
-        handleEditorSaveSnapshotRequestEvent(deps, payload);
+        if (typeof payload.autosaveFreeze === 'string' && deps.setAutosaveTransitionReadOnly) {
+          autosaveFreeze = payload.autosaveFreeze;
+          deps.setAutosaveTransitionReadOnly?.(true);
+        }
+        if (typeof payload.autosaveRelease === 'string' && payload.autosaveRelease === autosaveFreeze) {
+          autosaveFreeze = null;
+          deps.setAutosaveTransitionReadOnly?.(false);
+        }
+        handleEditorSaveSnapshotRequestEvent(deps, payload, autosaveFreeze);
       } catch (error) {
         console.warn('[Monaco] save snapshot response failed', error);
       }

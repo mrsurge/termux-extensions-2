@@ -140,12 +140,13 @@ def build_logical_document_snapshot(
         ):
             continue
 
+        descriptor: LogicalDocumentDescriptor
         cached = sidecar.get_cached_document(path)
         if cached and cached.get("unsaved") is True:
             content_sha = _draft_sha256(cached)
             if not content_sha:
                 continue
-            descriptor: LogicalDocumentDescriptor = {
+            descriptor = {
                 "path": path,
                 "contentIdentity": f"sha256:{content_sha}",
                 "baseSha256": _draft_base_sha256(cached),
@@ -543,8 +544,24 @@ class LogicalDocumentReconciler:
                 "openStateRevision": snapshot["openStateRevision"],
                 **materialized,
             }
+            method = "vscode.logicalDocuments.hydrate"
+            if request["reason"] == "missing":
+                # A pending foreground attach protects replacement, not the
+                # creation of a document that does not yet exist. Initialize
+                # without treating presentation ownership as initialization.
+                # Existing live-buffer replacements retain receipt guards.
+                text = materialized["text"]
+                assert isinstance(text, str)
+                materialized["contentSha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                hydrate_params = {
+                    "projectPath": snapshot["projectPath"],
+                    "projectGeneration": snapshot["projectGeneration"],
+                    "openStateRevision": snapshot["openStateRevision"],
+                    "documents": [materialized],
+                }
+                method = "vscode.documents.initialize"
             response = await self._adapter_call(
-                "vscode.logicalDocuments.hydrate",
+                method,
                 hydrate_params,
                 timeout=10.0,
             )

@@ -59,6 +59,17 @@ export class DiagnosticsSnapshotStore {
   }
 
   apply(event: unknown): boolean {
+    if (isRecord(event) && event.type === "diagnostics/clear") {
+      if (typeof event.owner !== "string" || !event.owner) return false;
+      let changed = false;
+      for (const [key, entry] of this.entries) {
+        if (entry.owner !== event.owner) continue;
+        this.entries.delete(key);
+        this.totalBytes -= entry.bytes;
+        changed = true;
+      }
+      return changed;
+    }
     if (!isRecord(event) || event.type !== "diagnostics/changeMany") return false;
     const args = Array.isArray(event.args) ? event.args : [];
     const owner = typeof args[0] === "string" ? args[0].trim() : "";

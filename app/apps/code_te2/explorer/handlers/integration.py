@@ -19,6 +19,9 @@ async def handle_mention_agent(
     del msg_id
     try:
         from ...ui_ipc.sidebar_ws import emit_sidebar_mention_targeted
+        from ...ui_ipc.sidebar_mention_routing import bind_sidebar_mention_client
+
+        params = bind_sidebar_mention_client(params, context.client_instance_id)
 
         path = cast(str, params["path"])
         mention_payload: JsonObject = {

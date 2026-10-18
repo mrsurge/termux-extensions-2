@@ -167,6 +167,18 @@ android {
     }
 }
 
+// TE2 Termux download-size trial. Native libraries already use compression;
+// compress DEX only for this consumer's staging variant, not ordinary Cefrium.
+if (termuxConsumer) androidComponents {
+    onVariants(selector().withBuildType("staging")) { variant ->
+        variant.packaging.dex.useLegacyPackaging.set(
+            providers.gradleProperty("te2.termux.compressDex")
+                .map { it.toBooleanStrict() }
+                .orElse(true)
+        )
+    }
+}
+
 configurations.all {
     exclude(group = "com.google.guava", module = "listenablefuture")
 }

@@ -40,7 +40,6 @@ import { initResponsiveLayout } from './main_page/frontend/ui/layout-manager.ts'
 import { createFileStatusController } from './main_page/frontend/ui/file-status.ts';
 import { createSettingsBootstrap } from './main_page/frontend/ui/settings-bootstrap.ts';
 import { createAutosaveModalController } from './main_page/frontend/ui/autosave-modal.ts';
-import { createAutosaveRuntimeController } from './main_page/frontend/ui/autosave-runtime.ts';
 import { configureProjectsModal, showProjectsDebugModal } from './main_page/frontend/ui/projects-debug-modal.ts';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './main_page/frontend/ui/watcher-settings.ts';
 import { createUiIpcConnections } from './main_page/frontend/connections/ui-ipc.ts';
@@ -116,6 +115,7 @@ interface SessionState extends UnknownRecord {
 
 interface SaveFileOptions {
   isAutosave?: boolean;
+  autosaveIdentity?: { project: string; path: string; modeRevision: number };
 }
 
 interface SidebarShortcutsLike {
@@ -680,25 +680,14 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   hostUiPrefsRuntime.installWindowHook();
   hostUiPrefsRuntime.drainPendingUiPrefs();
 
-  // Autosave timing; save replies and editor projections own acknowledgement state.
-  const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
-  const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
   const saveSocketController = createSaveSocketController({
     requestBackendFileSave: (payload) => uiIpcConnections.requestBackendFileSave(payload),
   });
-  const autosaveRuntimeController = createAutosaveRuntimeController({
-    idleDelayMs: AUTOSAVE_IDLE_DELAY,
-    activeDelayMs: AUTOSAVE_ACTIVE_DELAY,
-    getAutoSaveEnabled: () => !!editorViewState?.autoSave,
-    getNativeSelectionActive: () => false,
-    getUnsaved: () => !!unsaved,
-    getCurrentPath: () => currentPath,
-    getCurrentPathExists: () => !!currentPathExists,
-    saveFile: (opts: SaveFileOptions = {}) => saveFile(opts),
-    onAutosaveError: (err: unknown) => console.error('Autosave failed:', err),
-  });
 
   // ── Adapter dropdown (context menu on status indicator) ──────────────
+  window.addEventListener('code-te2:project-switching', () => {
+    if (editorViewState) editorViewState.autoSave = false;
+  });
   const adapterUi = createAdapterUiController({
     closeAllMenus: () => menuCoreController.closeAllMenus(),
     spinnerSetStep: (msg: string) => hostStateRuntime.spinnerSetStep(msg),
@@ -740,10 +729,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     cacheStateBadge.dataset.state = next ? cacheStateBadge.dataset.state || '' : '';
     unsaved = next;
     syncSessionPath();
-    if (!unsaved) autosaveRuntimeController.cancelAutosave();
-    if (unsaved && editorViewState?.autoSave) {
-      autosaveRuntimeController.scheduleAutosave();
-    }
   }
 
   // ---------- API helpers ----------
@@ -765,6 +750,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   // ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
   const preferencesController = createPreferencesController({
+    getProject: () => cachedProjectRoot,
     requestBackendEditorStateGet: () => uiIpcConnections.requestBackendEditorStateGet(),
     requestBackendEditorPreferenceUpdate: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorPreferenceUpdate(payload),
     getClientId: () => null,
@@ -794,11 +780,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   installPrefsSync({
-    getClientId: () => null,
-    setEditorViewState: (state: EditorViewState | null) => {
-      editorViewState = state;
-    },
-    applyStateToMenus: (state: EditorViewState | null) => preferencesController.applyStateToMenus(state),
+    apply: (payload: unknown) => preferencesController.applyPreferencesChangedPayload(payload),
   });
 
   const electronSecondEditor = (window as ElectronSecondEditorWindow).te2Electron;
@@ -1071,7 +1053,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     viewport: fileTabsViewport,
     track: fileTabsTrack,
     formatFileNameDisplay: (name: string) => formatFileNameDisplay(name),
-    openFile: (path: string) => openFile(path),
+    openFile: (path: string, options?: { keyboard: boolean }) => openFile(path, options?.keyboard ? { focus: true, placeCursor: true } : {}),
     openInSecondWindow: (
       typeof electronSecondEditor?.openSecondEditor === 'function'
       || mobileSecondEditor.supported
@@ -1132,6 +1114,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     getCachedProjectRoot: () => cachedProjectRoot,
     setCachedProjectRoot: (path: string | null) => {
       cachedProjectRoot = path;
+      if (editorViewState) editorViewState.autoSave = false;
+      void preferencesController.refreshMenuState();
       void sidebarShortcuts?.setProjectRoot?.(path || '');
       void syncSecondEditorProject(path);
     },
@@ -1242,6 +1226,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   }
 
   const saveFlowController = createSaveFlowController({
+    getCurrentPath: () => currentPath,
     clientId,
     getLastSha256: () => lastSha256,
     setLastSha256: (sha: string | null) => {
@@ -1290,6 +1275,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       currentPath,
       currentPathExists,
       isAutosave: !!(opts && opts.isAutosave),
+      autosaveIdentity: opts.autosaveIdentity,
       onMissingPath: () => saveFlowController.saveAsDialog(),
     });
   }
@@ -1331,7 +1317,12 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   // Autosave confirmation modal (constructed lazily)
-  const autosaveModalController = createAutosaveModalController();
+  const autosaveModalController = createAutosaveModalController({
+    getProject: () => cachedProjectRoot,
+    request: (payload) => uiIpcConnections.requestBackendEditorPreferenceUpdate(payload),
+    refresh: () => preferencesController.refreshMenuState(),
+    toast: (message) => host.toast(message),
+  });
 
   // Watcher UI
   initWatcherUI(appContext);
@@ -1346,6 +1337,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     setMenuChecked,
     emitSidebarUiRequest: _requestSidebarUiControl,
     requestSidebarUi: (method, payload) => uiIpcConnections.requestUiIpc(method, asUnknownRecord(payload)),
+    requestSidebarRpc: (method, payload) => uiIpcConnections.requestSidebarRpc(method, asUnknownRecord(payload)),
     emitSidebarRpcRequest: (method, payload) => {
       uiIpcConnections.emitSidebarRpcRequest(method, asUnknownRecord(payload));
     },
@@ -1532,7 +1524,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     setMenuChecked,
     getCurrentPath: () => currentPath,
     getCurrentPathExists: () => currentPathExists,
-    showAutosaveModal: (fileLabel: string, hasOtherDrafts: boolean) => autosaveModalController.showAutosaveModal(fileLabel, hasOtherDrafts),
+    showAutosaveModal: () => autosaveModalController.showAutosaveModal(),
     basename,
     getUnsaved: () => !!unsaved,
     saveFile: () => saveFile(),

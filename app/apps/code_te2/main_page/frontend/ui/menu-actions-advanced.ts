@@ -71,36 +71,10 @@ export function installAdvancedMenuActions(deps: any) {
       }
       return;
     }
-    const currentPath = deps.getCurrentPath();
-    if (!currentPath || !deps.getCurrentPathExists()) {
-      deps.toast('Open a file before enabling autosave');
-      return;
-    }
-    const confirmed = await deps.showAutosaveModal(deps.basename(currentPath), deps.getUnsaved());
+    const confirmed = await deps.showAutosaveModal();
     if (!confirmed) {
       return;
     }
-    if (deps.getUnsaved() && currentPath && deps.getCurrentPathExists()) {
-      const saved = await deps.saveFile();
-      if (!saved) {
-        deps.toast('Autosave not enabled: saving failed');
-        return;
-      }
-    }
-    try {
-      await deps.requestBackendDraftDiscard({ path: currentPath });
-    } catch (err) {
-      deps.toast('Autosave not enabled: draft discard failed');
-      console.warn('[Autosave] Draft discard failed', err);
-      return;
-    }
-    const success = await deps.updatePreference('autoSave', true);
-    if (!success) {
-      deps.toast('Failed to update preference');
-      return;
-    }
-    if (s()) s().autoSave = true;
-    deps.markUnsaved(false);
     if (anyTracking() && !s()?.readOnly) await disableAllEditTracking('Auto-track edits disabled (incompatible with autosave)');
   });
 

@@ -407,7 +407,7 @@ async def _handle_review_state_changed_event(event: WorkerEvent) -> None:
     await emit_project_explorer_rpc_notification(
         project,
         "explorer.review.entries.updated",
-        {"entries": _event_payload_object_list(event, "entries")},
+        dict(event['payload']),
     )
 
 

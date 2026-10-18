@@ -19,6 +19,21 @@ def payload() -> dict[str, object]:
 
 
 class ReplacementTests(unittest.IsolatedAsyncioTestCase):
+    def test_multiline_source_line_extent_survives_cache_and_projection(self) -> None:
+        raw: dict[str, object] = {'lineNumber': 104, 'endLineNumber': 105,
+            'columnNumber': 9, 'lineText': 'bounded preview', 'snippet': 'bounded preview',
+            'matchText': 'clipped', 'editTarget': {'sourceSha256': 'a' * 64, 'startByte': 10, 'endByte': 200}}
+        match = search_sessions._content_match(raw)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(search_sessions._project_match(match)['endLine'], 105)
+        self.assertEqual(search_sessions._provider_match_payload(match)['endLineNumber'], 105)
+        self.assertEqual(search_sessions._project_match(match)['editTarget'], raw['editTarget'])
+        _ = raw.pop('endLineNumber')
+        legacy = search_sessions._content_match(raw)
+        assert legacy is not None
+        self.assertEqual(search_sessions._project_match(legacy)['endLine'], 104)
+
     def test_contract_rejects_ambiguous_or_unbounded_selection(self) -> None:
         self.assertEqual(parse_search_replace_params(payload())['replacement'], '')
         for key, value in [('matchIndexes', []), ('matchIndexes', [True]),

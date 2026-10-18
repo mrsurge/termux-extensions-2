@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { createHash } from "node:crypto";
 
 import {
   WorkbenchClient,
@@ -43,6 +44,13 @@ async function createHarness() {
   client.state.workspaceFolder = root;
   client._useRemote = false;
   client._authority = "";
+  client._documentRegistry.initializeDocuments({
+    projectPath: root, projectGeneration: 1, openStateRevision: 1,
+    documents: [[mainPath, "value = 1\n"], [painPath, "value = 2\n"]].map(([path, text]) => {
+      const sha = createHash("sha256").update(text).digest("hex");
+      return { path, text, contentSha256: sha, contentIdentity: `sha256:${sha}`, baseSha256: null, dirty: false };
+    }),
+  });
   return { client, calls, root, mainPath, painPath };
 }
 

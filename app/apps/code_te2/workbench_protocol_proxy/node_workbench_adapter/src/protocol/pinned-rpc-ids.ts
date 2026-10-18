@@ -5,6 +5,7 @@ export const PINNED_CODE_SERVER_VERSION = "4.130.0";
 export const PINNED_CODE_SERVER_COMMIT = "197ef3e8da8ee99ed6ca8f1a630157527e6d448f";
 export const PINNED_RPC_IDS = Object.freeze({
   MainThreadConsole: 13,
+  MainThreadDiagnostics: 16,
   MainThreadCommands: 10,
   MainThreadLogger: 28,
   MainThreadMessageService: 29,

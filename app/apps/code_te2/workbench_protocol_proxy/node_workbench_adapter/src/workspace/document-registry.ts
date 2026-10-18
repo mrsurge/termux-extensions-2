@@ -1,4 +1,5 @@
 import * as nodePath from "node:path";
+import { createHash } from "node:crypto";
 
 import { semanticTextFingerprint } from "../extensions/intelligence/semantic-token-projections.mjs";
 
@@ -18,6 +19,7 @@ export interface WorkbenchDocumentEntry {
   projectGeneration: number | null;
   dirty: boolean;
   activeEpoch: number;
+  backendVersionId: number | null;
 }
 
 export interface DocumentRegistryRpcIds {
@@ -212,6 +214,26 @@ function isPathWithin(path: string, projectPath: string): boolean {
  * editor facade used for the active browser model.
  */
 export class WorkbenchDocumentRegistry {
+  private _initializationGeneration = -1;
+  private _initializationRevision = -1;
+  private readonly _initializationWaiters = new Map<string, Set<{ resolve: () => void; reject: (error: Error) => void }>>();
+
+  waitForInitialization(path: string, timeoutMs = 10000): Promise<void> {
+    if (this.getByPath(path)) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const waiters = this._initializationWaiters.get(path) ?? new Set();
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        waiters.delete(waiter);
+        if (!waiters.size) this._initializationWaiters.delete(path);
+        if (error) reject(error); else resolve();
+      };
+      const waiter = { resolve: () => finish(), reject: (error: Error) => finish(error) };
+      const timer = setTimeout(() => finish(new Error(`document_not_initialized: ${path}`)), timeoutMs);
+      waiters.add(waiter);
+      this._initializationWaiters.set(path, waiters);
+    });
+  }
   private readonly _byPath = new Map<string, WorkbenchDocumentEntry>();
   private readonly _byUri = new Map<string, WorkbenchDocumentEntry>();
   private _activeEpoch = 0;
@@ -247,6 +269,62 @@ export class WorkbenchDocumentRegistry {
     return this._byPath.size;
   }
 
+  initializeDocuments(params: Record<string, unknown>): Record<string, unknown> {
+    const project = normalizeAbsolutePath(params.projectPath);
+    const generation = requiredInteger(params.projectGeneration);
+    const revision = requiredInteger(params.openStateRevision);
+    const documents = params.documents;
+    if (!project || project !== this.runtime.workspacePath() || generation === null ||
+        revision === null || !Array.isArray(documents) || documents.length > 12) {
+      throw new Error("invalid_initial_documents");
+    }
+    if (generation < this._initializationGeneration ||
+        (generation === this._initializationGeneration && revision < this._initializationRevision)) {
+      throw new Error("stale_initial_documents");
+    }
+    if (this._logicalSnapshot && (generation < this._logicalSnapshot.projectGeneration ||
+        (generation === this._logicalSnapshot.projectGeneration && revision < this._logicalSnapshot.openStateRevision))) {
+      throw new Error("stale_initial_documents");
+    }
+    const seen = new Set<string>();
+    // Validate the complete backend handoff before sending any extension DTO.
+    const inputs = documents.map((raw: unknown): RetainDocumentInput => {
+      if (!isRecord(raw)) throw new Error("invalid_initial_document");
+      const path = normalizeAbsolutePath(raw.path);
+      const text = raw.text;
+      const identity = requiredString(raw.contentIdentity);
+      const base = nullableString(raw.baseSha256);
+      if (!path || !isPathWithin(path, project) || seen.has(path) ||
+          typeof text !== "string" || !identity || base === undefined || typeof raw.dirty !== "boolean") {
+        throw new Error("invalid_initial_document");
+      }
+      const sha = createHash("sha256").update(text, "utf8").digest("hex");
+      if (raw.contentSha256 !== sha || (raw.dirty && identity !== `sha256:${sha}`)) {
+        throw new Error("initial_document_hash_mismatch");
+      }
+      seen.add(path);
+      return { path, text: text.replace(/\r\n/g, "\n"), uri: this.runtime.uriForPath(path),
+        languageId: this.runtime.resolveLanguageId(path, text),
+        contentIdentity: identity, baseSha256: base, dirty: raw.dirty,
+        projectGeneration: generation, openStateRevision: revision };
+    });
+    const initialized: string[] = [];
+    const retained: string[] = [];
+    this._initializationGeneration = generation;
+    this._initializationRevision = revision;
+    for (const input of inputs) {
+      // Initialization is never an implicit edit or disk refresh. In particular,
+      // a late backend snapshot cannot erase newer, not-yet-persisted client text.
+      if (this.getByPath(input.path)) retained.push(input.path);
+      else {
+        const { entry } = this.retain(input);
+        entry.backendVersionId = entry.versionId;
+        initialized.push(input.path);
+      }
+    }
+    return { ok: true, initialized, retained };
+  }
+
   retain(input: RetainDocumentInput): {
     entry: WorkbenchDocumentEntry;
     added: boolean;
@@ -276,6 +354,7 @@ export class WorkbenchDocumentRegistry {
       projectGeneration: input.projectGeneration ?? null,
       dirty: input.dirty === true,
       activeEpoch: 0,
+      backendVersionId: null,
     };
     const addedDocument: AddedDocumentDto = {
       uri: entry.uri,
@@ -294,6 +373,7 @@ export class WorkbenchDocumentRegistry {
     );
     this._byPath.set(path, entry);
     this._byUri.set(uriKey, entry);
+    for (const waiter of [...(this._initializationWaiters.get(path) ?? [])]) waiter.resolve();
     addedDocument.lines = null;
     this._syncTabModel();
     this.runtime.log(
@@ -660,6 +740,7 @@ export class WorkbenchDocumentRegistry {
           projectGeneration: initial.projectGeneration,
           dirty: initial.dirty,
         }).entry;
+    if (provisional) provisional.backendVersionId = provisional.versionId;
     try {
       await this.runtime.activateLanguage(languageId);
     } catch (error) {
@@ -714,6 +795,7 @@ export class WorkbenchDocumentRegistry {
         isDirtyEvent: input.dirty,
       },
     );
+    if (replaced.ok) replaced.entry.backendVersionId = replaced.versionId;
     if (!replaced.ok) {
       return { ok: false, error: replaced.error, path: input.path };
     }
@@ -744,7 +826,7 @@ export class WorkbenchDocumentRegistry {
 
   releaseAll(): number {
     const entries = this.values();
-    if (entries.length === 0) return 0;
+    if (entries.length === 0) { this.clearLocal(); return 0; }
     try {
       this._byPath.clear();
       this._byUri.clear();
@@ -765,6 +847,12 @@ export class WorkbenchDocumentRegistry {
   }
 
   clearLocal(): number {
+    this._initializationGeneration = -1;
+    this._initializationRevision = -1;
+    for (const waiters of [...this._initializationWaiters.values()]) {
+      for (const waiter of [...waiters]) waiter.reject(new Error("document_initialization_reset"));
+    }
+    this._initializationWaiters.clear();
     const count = this._byPath.size;
     this._byPath.clear();
     this._byUri.clear();
@@ -864,17 +952,22 @@ export class WorkbenchDocumentRegistry {
     if (openStateRevision !== snapshot.openStateRevision) {
       return { ok: false, error: "stale_open_state_revision" };
     }
-    if (
+    const existing = this.getByPath(path);
+    const backendCanUpdate = snapshot.background.has(path) && !!existing && (
+      existing.backendVersionId === existing.versionId ||
+      (existing.charCount === text.length && existing.textFingerprint === semanticTextFingerprint(text))
+    );
+    if (!backendCanUpdate && (
       expectedActiveEpoch !== snapshot.activeEpoch ||
       expectedActiveEpoch !== this._activeEpoch
-    ) {
+    )) {
       return { ok: false, error: "stale_active_epoch" };
     }
-    if (
+    if (!backendCanUpdate && (
       path === snapshot.activePath ||
       snapshot.protectedPaths.has(path) ||
       this.runtime.isPathClientForeground(path)
-    ) {
+    )) {
       return { ok: false, error: "client_foreground_document_protected" };
     }
     const descriptor = snapshot.background.get(path);

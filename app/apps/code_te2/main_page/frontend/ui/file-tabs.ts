@@ -20,7 +20,7 @@ interface FileTabsControllerDeps {
   viewport: HTMLElement;
   track: HTMLElement;
   formatFileNameDisplay: (name: string) => string;
-  openFile: (path: string) => Promise<unknown>;
+  openFile: (path: string, options?: { keyboard: boolean }) => Promise<unknown>;
   openInSecondWindow?: (path: string) => Promise<unknown>;
   closeRecentFile: (path: string) => Promise<unknown>;
   resetToNewFile: () => void;
@@ -705,6 +705,18 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     if (installed) return;
     installed = true;
     installReorderAndScroll();
+    let cycling = false;
+    window.addEventListener('code-te2:cycle-file-tab', (event) => {
+      if (!(event instanceof CustomEvent) || (event.detail !== -1 && event.detail !== 1) || cycling || pendingClosePath) return;
+      const tabs = Array.from(deps.track.querySelectorAll<HTMLElement>('.fe-file-tab[data-exists="true"]'));
+      if (tabs.length < 2) return;
+      const index = tabs.findIndex(tab => tab.dataset.path === activePath);
+      if (index < 0) return;
+      const path = tabs[(index + event.detail + tabs.length) % tabs.length]?.dataset.path;
+      if (!path) return;
+      cycling = true;
+      void deps.openFile(path, { keyboard: true }).catch(error => console.warn('[file_tabs] cycle failed', error)).finally(() => { cycling = false; });
+    });
     window.addEventListener('code-te2:open-state-changed', (event) => {
       if (event instanceof CustomEvent) refreshOpenState(event.detail);
     });

@@ -1,5 +1,6 @@
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
+import { withDiffLineNumbers } from './editor_diff_line_numbers.ts';
 import { acceptDocumentProjection, isCurrentDocumentProjection } from './editor_document_revision_runtime.ts';
 import { traceInlineDiffInit } from './editor_inline_diff_init_trace.ts';
 import { updateComparisonBaselineFence } from './editor_git_baseline_runtime.ts';
@@ -296,8 +297,6 @@ export function registerEditorSocketConnectionHandlers(
           try {
             const requestId = file && file.request_id ? String(file.request_id) : ('diag_' + Date.now() + '_ssot');
             const nextActiveModel = deps.getModel();
-            const text = nextActiveModel && nextActiveModel.getValue ? nextActiveModel.getValue() : '';
-            deps.wbQueueDidChange(activePath, text, nextActiveModel && nextActiveModel.getLanguageId ? nextActiveModel.getLanguageId() : lang, ssotGeneration);
             deps.wbQueueSymbols(activePath, ssotGeneration);
             languageOpenPromise = deps.wbOpenFileFlow({
               path: activePath,
@@ -389,6 +388,12 @@ export function registerEditorSocketConnectionHandlers(
       const payloadRecord = asRecord(payload);
       const nextPrefs = payloadRecord && payloadRecord.preferences ? asRecord(payloadRecord.preferences) : null;
       if (!nextPrefs) return;
+      const currentPrefs = asRecord(asRecord(deps.getCachedPrefs())?.preferences);
+      const currentEditorPrefs = asRecord(currentPrefs?.editor);
+      const nextEditorPrefs = asRecord(nextPrefs.editor);
+      if (currentEditorPrefs?.autosaveProject !== undefined && nextEditorPrefs?.autosaveProject !== currentEditorPrefs.autosaveProject) return;
+      if (typeof currentEditorPrefs?.autosaveRevision === 'number' && typeof nextEditorPrefs?.autosaveRevision === 'number'
+        && nextEditorPrefs.autosaveRevision < currentEditorPrefs.autosaveRevision) return;
       const nextCachedPrefs = Object.assign({}, asRecord(deps.getCachedPrefs()) || {});
       nextCachedPrefs.preferences = nextPrefs;
       deps.setCachedPrefs(nextCachedPrefs);
@@ -397,7 +402,8 @@ export function registerEditorSocketConnectionHandlers(
       const diffEditor = deps.getDiffEditor();
       const model = deps.getModel();
       if (!editor) return;
-      const opts = deps.buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
+      const projectedOptions = deps.buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
+      const opts = diffEditor ? withDiffLineNumbers(projectedOptions) : projectedOptions;
       const nextPrefsEditor = asRecord(nextPrefs.editor);
       let theme = null;
       try { theme = nextPrefsEditor && nextPrefsEditor.theme ? nextPrefsEditor.theme : null; } catch (_) { theme = null; }

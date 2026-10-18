@@ -22,10 +22,26 @@ test("only inventory paths map into the installed tree", () => {
     "/apps/code_te2/template.html",
   );
   assert.equal(mapLocalAssetPath("/api/apps/catalog"), null);
+  assert.equal(mapLocalAssetPath("/api/app/als-rs/proxy/static/dist/codex_agent.js"), "/apps/als_rs/frontend/static/dist/codex_agent.js");
+  assert.equal(mapLocalAssetPath("/api/app/als-rs/proxy/static/vendor/tree-sitter-bash/tree-sitter-bash.wasm"), "/apps/als_rs/frontend/static/vendor/tree-sitter-bash/tree-sitter-bash.wasm");
+  assert.equal(mapLocalAssetPath("/api/app/als-rs/proxy/api/health"), null);
+  assert.equal(mapLocalAssetPath("/api/app/als-rs/proxy/socket.io/"), null);
+  assert.equal(mapLocalAssetPath("/api/app/als-rs/proxy/"), null);
   assert.equal(mapLocalAssetPath("/apps/by-id/file_explorer/main.js"), "/apps/file_explorer/main.js");
   assert.equal(mapLocalAssetPath("/apps/by-id/terminal/static/dist/main.js"), "/apps/terminal/static/dist/main.js");
   assert.equal(mapLocalAssetPath("/apps/by-id/als-rs/template.html"), "/apps/als_rs/template.html");
   assert.equal(mapLocalAssetPath("/apps/by-id/terminal/vendor/android-terminalapp-assets-js/ctrl_key_handler.js"), "/apps/terminal/vendor/android-terminalapp-assets-js/ctrl_key_handler.js");
   assert.equal(mapLocalAssetPath("/apps/file_explorer/file_explorer.py"), null);
   assert.equal(mapLocalAssetPath("/apps/by-id/custom/main.js"), null);
+});
+
+test("sidebar metadata and relative Monaco font are exact local resources", () => {
+  const sidebar = "/apps/code_te2/extensions/sidebar_extension/manifest.json";
+  assert.equal(mapLocalAssetPath(sidebar), sidebar);
+  assert.equal(mapLocalAssetPath("/apps/code_te2/extensions/sidebar_extension/private.json"), null);
+  assert.equal(
+    mapLocalAssetPath("/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/codicon-LN6W7LCM.ttf"),
+    "/static/vendor/monaco-editor-core/te2-lang/bootstrap/codicon-LN6W7LCM.ttf",
+  );
+  assert.equal(mapLocalAssetPath("/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/private.js"), null);
 });

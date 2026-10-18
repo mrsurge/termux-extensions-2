@@ -44,7 +44,7 @@ test('main editor loads and applies extension theme using its internal name', as
   const json = { colors: { 'editor.background': '#221a0f' } };
   await applyMonacoThemeRuntime({
     win: { monaco: { editor } },
-    doc: { documentElement: { classList: {
+    doc: { documentElement: { style: { setProperty() {} }, classList: {
       remove: (...names) => names.forEach((name) => classes.delete(name)),
       add: (name) => classes.add(name),
     } } },

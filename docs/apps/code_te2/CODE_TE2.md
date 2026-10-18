@@ -82,7 +82,8 @@ Rust/Axum framework process
   ├─ Owns Rust pipe services for filesystem, Git, search, settings/state, and shell orchestration
   ├─ Proxies app Socket.IO public path /api/app/code_te2/socket.io -> worker /socket.io/
   ├─ Proxies WBA Socket.IO public path /api/app/code_te2/services/wba/socket.io -> Node /wba_ws/socket.io
-  └─ Proxies TE2 console/FastMCP to the Python runtime sidecar
+  ├─ Owns native Streamable HTTP MCP at /te2_mcp_http (default native-mcp build)
+  └─ Proxies TE2 console to the Python runtime sidecar; old MCP SSE returns 410
 
 App worker process (app/apps/code_te2/main.py)
   ├─ HTTP routes: /api/app/code_te2/*
@@ -740,6 +741,19 @@ Representative notifications:
 - Open, mirror, cache, save/clean, discard, and external-change projections are fenced by `document_revision`. The backend owns revision assignment; frontend state is bounded and memory-only. This prevents delayed arrival from overwriting newer state but does not provide CRDT/OT same-file collaboration.
 
 ### Diagnostics and language features
+
+Diagnostic Quick Fixes use the direct WBA lane through
+`vscode.codeActions.provide/resolve/release`, distinct from trusted Markdown command
+links. WBA retains exact-client/path/version provider-cache receipts; only quickfix
+kinds are projected. Monaco's registered provider uses its existing marker-hover
+and action UI without awaiting actions in ordinary hover text. The single-use
+`te2.quickFix.apply` gateway validates model instance/version/generation and the
+whole resolved action before current-file executeEdits (normal undo/draft path)
+or admitted command-only execution. Multi-file/resource/notebook, snippet/EOL,
+overlapping and mixed edit+command actions are rejected, not partially applied.
+Web Worker mode stays exclusive. Provider/result/disconnect/model lifecycle
+releases retained caches; stale replies never apply. Technical and acceptance
+scope: `docs/apps/monaco_core/PLAN.md` and `TRACKER.md`.
 Primary editor diagnostics, hovers, completions, symbols, semantic tokens, folding, inlay hints, and similar language-intelligence calls use the direct `/wba` path. The `/rpc/editor` lane carries state/control and typed editor notifications.
 
 ---
@@ -827,14 +841,71 @@ When a file is edited:
    - `review:setEntries` with full review list (including diff hunks)
 4. Explorer UI applies `data-hasDraft="1"` attribute to file/folder nodes (CSS handles visual indicator)
 
+### Editor draft deletion markers
+
+`editor_draft_diff_runtime.ts` renders normal-editor deletion boundaries from the
+existing `del-draft` blocks in `editor.draftDiff.updated`. With draft insertion
+highlighting enabled and no full/inline diff editor, each consecutive deletion
+block adds one non-whole-line `linesDecorationsClassName` caret to the existing
+draft decoration collection only when the zero-context hunk has `newLines === 0`
+and no added lines. Replacements are modifications, including net-shrinking
+replacements: they retain blue insertion highlighting without a deletion caret,
+matching VS Code's empty-modified-range Delete classification.
+The range anchors at the preceding logical line's
+end (VS Code QuickDiffDecorator's MAX_VALUE-column pattern), so wrapping does not
+move it to that line's first visual row. A beginning-of-file deletion uses the top
+of line 1; EOF/empty documents retain valid model anchors. The inline-host CSS
+draws a translucent red, theme-variable-aware triangle without input interception.
+Expanded diff views keep their existing stock deletion widgets without duplicate
+carets. Existing collection replacement/clear removes markers on fresh or clean
+projections; no new backend diff, model text, WBA or persistence path is involved.
+
 ### Review panel flow
-1. User opens Review Edits tab -> frontend sends `review:list`
-2. Server calls `review.list_reviews(project, lightweight=False)` -> computes diff hunks per draft
-3. Server broadcasts `review:setEntries` with entries
-4. Live updates: `_broadcast_draft_decorations()` also broadcasts `review:setEntries`, so the review list auto-refreshes when drafts change
-5. User selects files and clicks Save/Discard:
-   - `review:save` -> `handle_review_save` -> writes to disk, clears caches, emits editor cache state through the editor backend hook
-   - `review:discard` -> `handle_review_discard` -> clears caches, reverts editor if file open, emits editor cache state through the editor backend hook
+
+The Drafts overlay requests `explorer.review.list` on its Explorer RPC lane.
+Initial requests, session bootstrap and live/post-mutation updates share
+`explorer/services/review_projection.py`. The owner builds complete snapshots
+off-loop, retaining unchanged per-file diffs by draft hash/disk stamp. Strict
+sidecar reads distinguish a real empty membership from a failed read and check
+the persisted document revision before/after building. Project-generation changes
+reject the result rather than publishing it under a new project.
+
+Snapshots carry project root/generation, projection ID, revision and `complete`.
+Live snapshots use `explorer.review.entries.updated`. The client rejects malformed,
+wrong-project and stale snapshots, atomically reconciles membership and retains
+unchanged row objects/DOM groups/selection. Only omissions from an accepted full
+snapshot remove items. Refresh/loading errors retain the last complete view.
+
+Save/Discard remain whole-file operations through `explorer.review.save/discard`;
+mutation replies have separate completion methods and never impersonate empty
+entries notifications. The backend still owns writes/cache clearing and editor
+notifications. Draft persistence stores full document content. Review-only hunks
+now include three context lines; shared inline-editor diffs retain zero context.
+Each review hunk has a confirmed `explorer.review.revertHunk` action. Backend
+projection/item, draft revision/hash and disk identity guards protect exact draft
+replacements; disk remains unchanged. Strict sidecar persistence has no
+success-shaped fallback. Conditional editor mirrors check prior model content
+before applying and update WBA through the existing document publisher.
+Bulk Save/Discard remain whole-file operations; selected hunk Save uses the
+separate guarded `explorer.review.saveHunks` method.
+Drafts uses the shared Explorer overlay file/hunk chrome with independent collapse
+and checkbox controls. Parent checkboxes select every hunk; partial selection is
+indeterminate. Selection belongs to the retained
+file identity and is cleared when it changes. Revert Selected sends hunk indexes
+together per file to the same guarded RPC for one draft commit; files are processed
+sequentially, without cross-file atomicity or mutation retries. File Discard remains
+independent of selection and available when preview hunks are suppressed.
+Save Selected converts retained hunks into exact UTF-8 byte edits for existing
+`fs.textEdits.apply`, then advances the latest full draft's base hash without
+changing its content. Newer edits survive; matching content/disk hashes become
+clean. Original-base admission, post-write disk validation and strict fresh-draft
+compare/commit guard reconciliation. A committed disk write is not rolled back if
+sidecar reconciliation fails; explicit result flags identify that case. Owned tasks
+finish after caller cancellation; attempted receipts prohibit replaying uncertain
+writes. Same-content conditional editor mirrors update base/dirty metadata without
+replacing model text. Existing pipe size/path/encoding limits remain; new files
+retain whole-file Save. Disk and sidecar are not a joint atomic transaction.
+Plan/tests/activation gates: `docs/apps/draft_overlay/PLAN.md` and `TRACKER.md`.
 
 ### Cross-surface communication (explorer -> editor)
 Explorer does not connect to the editor frontend directly. Cross-surface actions flow through backend hooks/services and then through the target surface notification lane:
@@ -846,6 +917,24 @@ Explorer frontend -> /rpc/explorer -> Explorer backend -> editor backend hook/se
 Used by review save/discard, open/jump, search highlighting, and project-switch notifications.
 
 ## 6.6) Search system (progressive Rust pipe provider)
+
+Content results use bounded UTF-8 display previews, not full source lines per
+occurrence. `lineText`, `snippet` and `matchText` are display data capped at
+4096 bytes each; `lineRanges`/`snippetRanges` address those previews. Original
+line/column and guarded `editTarget` source-byte coordinates remain independent.
+The Rust producer borrows matching input and retains the existing per-file
+snapshot/hash policy; previews do not add a read pass. Progressive results split
+into conservative 256 KiB batches appended to the same Python per-file record.
+Search progress is optional and coalesced to at most one frame per 50 ms;
+pressure on a live bounded pipe writer may drop progress without cancelling.
+Required results/completion/errors wait for queue capacity on the blocking
+search emitter, observing close; invalid frames and real transport failures
+still cancel the producer. Existing non-search send behavior is unchanged.
+Source-owned `endLineNumber` survives Python as `endLine` and gives multiline
+hits a source-line range label independent of clipped snippets. Shift+Enter
+inserts a query newline through the existing flexible input-box pipeline.
+This does not cap total result count or eliminate the input line
+buffer. See `docs/apps/search_memory/PLAN.md` for scope and limits.
 
 Explorer filename search has both its source-tree input and a separately created
 sticky-scope input. Set mobile input attributes, including `autocapitalize="off"`,
@@ -2041,6 +2130,57 @@ Primary implementation lives in:
 
 ## 13) Diff and draft stability invariants
 
+### Project save-mode ownership and switching
+
+`ProjectSidecar.autosave` owns `{enabled, revision}`. PreferencesStore projects
+it as `autoSave`, `autosaveProject`, and `autosaveRevision`; legacy global
+`editor.autoSave` is not runtime authority. Missing project choices default to
+Draft Mode. `project_autosave.py` owns the consent-bound Save All / Discard All /
+Cancel transition. A short-lived one-use receipt pins project generation, mode
+revision, draft watermark/content and exact connected-editor snapshots. Supporting
+editors acknowledge a temporary read-only pause before confirmation is applied.
+Pause/release are transient configuration changes and must not publish persisted
+`readOnly` preferences. Snapshot responses complete an outstanding backend
+operation, so they use the existing reliable, disconnect-fenced publisher rather
+than volatile notifications. They are never replayed across disconnect.
+New/changed clients, content, project or mode invalidate consent. Exact confirmed
+drafts alone are evicted; multi-file writes are sequential and report partial
+completion rather than pretending rollback or retrying uncertain operations.
+
+`project_autosave_runtime.py` owns normal autosave scheduling by project and file,
+not by whichever tab is active when a browser timer fires. Existing persisted
+full-model mirrors are pending-write safety buffers. Coalescing happens only
+before write admission. The existing guarded atomic writer preserves disk-base,
+Unicode/newline and mode semantics. Newer text received during a write remains
+pending with its base advanced; hash-conditional mirrors update matching clients.
+Bounded own-write ancestry repairs delayed mirror bases only with matching
+mode/generation and exact disk proof, never for unrelated external changes.
+Failure retains recoverable content, stops automatic admission for that mode
+revision and projects Draft Mode. There is no uncertain-write replay.
+
+Manual Save, autosave and enabling-mode Save All share `write_editor_file` in
+`save_service.py`. It fences the existing external-file watcher while the atomic
+write runs off-loop, then registers the exact committed content SHA before
+releasing that fence. Matching watcher notifications (including duplicates) do
+not emit `editor:open` or recreate Monaco models. The bounded last-own-write map
+retains 512 paths; a different observed disk SHA invalidates that path's receipt
+and follows normal external-change handling. This watcher receipt is separate
+from the autosave ancestry used to rebase delayed mirrors. Same-content save
+mirrors remain metadata-only; cursor/selection restoration is not a workaround
+for redundant model reopening.
+
+Project switching flushes the old autosave project's pending buffers before
+changing roots, retaining the editor pause through the handoff. A conflict stops
+the switch; Draft Mode switches do not save drafts. Accepted saves, mode changes
+and project switches use the same worker-owned admission fences. Destination
+preferences are restored from its sidecar; host/editor preference projections
+reject another project or older mode revision. On first worker-owned sidecar
+adoption, interrupted autosave buffers recover in Draft Mode without automatic
+save/discard. Standalone projection reads and normal reloads do not change modes.
+
+Activation requires matching Code TE2 Python/mypyc and host assets. No framework
+protocol, Android binary or WBA implementation change is needed for this slice.
+
 Inline Git and draft-diff presentation must preserve cursor stability under
 autosave and EOF edits:
 
@@ -2161,6 +2301,13 @@ code-server parcel watcher detects disk change
 
 ### VS Code watcher settings sync (dual-watcher suppression)
 The WBA/code-server side remains the primary watcher source. TE2 fallback watcher settings should avoid running a duplicate expensive watcher unless the native watcher path is unavailable or explicitly degraded.
+
+Code Server's settings-file synchronization and WBA's management-IPC recursive
+watch are separate consumers. WBA resolves its `excludes` from the existing
+configuration projection for every subscription/restart: VS Code resource
+defaults, User, then workspace boolean overrides, with Git lock suppression
+retained. Writing settings.json alone does not configure that explicit watch.
+Regression: `tests/watcher_exclusions.test.mjs` in Code TE2.
 
 ---
 
@@ -2475,6 +2622,22 @@ The old worker-owned `/ui_ipc` console relay has been removed from the live sour
 
 Console eval wraps results with `Promise.resolve`, maps JavaScript `undefined` to `null`, and races the Python timeout plus two seconds. Disconnect rejects pending evaluations; teardown removes owned listeners/sockets and pending work.
 
+`app/libs/console_workers.py` owns live SID/address registrations. Code TE2's
+Sidebar backend persists collision-checked four-character references for each
+shared state and client+window main page. It registers `main_page:f0f0` and
+qualifies the actual Sidebar URL as `als:a1b2.f0f0`; another main page rendering
+the same state gets `als:a1b2.c3d4`. The URL carries `mainPageId`, `sidebarStateId`
+and `sidebarWindowId`, and console registration preserves that qualified name.
+Shared restore state strips parent-specific fields. These references are not
+credentials: opens/mentions still require live SID, original client/slot and
+incarnation validation. Generic unqualified producers retain compact random
+handles. Rediscover live workers before eval.
+Duplicate legacy names remain separate registrations and ambiguous eval names
+reject. Eval/cancellation targets one SID; replies must match its captured
+registration. Disconnect/matching-handle unregister removes only that page.
+Log/result worker IDs come from the registry, not supplied labels. Sidebar
+effects continue to use separately validated client/slot/presentation tuples.
+
 ### Architecture overview
 
 ```text
@@ -2490,7 +2653,7 @@ main_page bridge --console:log--> framework TE2 console --console:log/replay/eva
 |---|---|
 | `app/te2_console_runtime.py` | Framework-owned Socket.IO console runtime and transcript storage. |
 | `app/te2_runtime_mounts.py` | Mounts `/te2_console_ws/socket.io`. |
-| `app/te2_mcp/te2_console_client.py` | MCP in-process eval/list bridge to the framework console runtime. |
+| `app/libs/native_console_owner.py` | Private console owner API used by native MCP. |
 | `app/cli/console_cli.py` | `te2 console` CLI implementation. |
 | `app/apps/code_te2/main_page/frontend/console_bridge.js` | Code TE2 browser console monkey-patcher; emits `console:log` and handles `console:eval` / `console:evalCancel`. |
 | `app/apps/code_te2/main_page/frontend/host-console-drawer.ts` | vConsole drawer client; registers as `role: "drawer"` on `/te2_console`. |
@@ -2499,11 +2662,12 @@ main_page bridge --console:log--> framework TE2 console --console:log/replay/eva
 
 | Event | Direction | Payload | Notes |
 |---|---|---|---|
-| `console:register` | client -> server | `{ role: "drawer" | "worker", workerId?, workerLabel?, tail_lines? }` | Drawers join `console:drawers`; workers join `console:<workerId>`. |
+| `console:register` | client -> server | `{ role: "drawer" | "worker", workerId?, workerLabel?, compactIdentity?, qualifiedIdentity?, clientInstanceId?, presentationId?, tail_lines? }` | Drawers join `console:drawers`; workers receive a SID-owned address. |
+| `console:registered` | server -> worker | `{ workerId, requestedWorkerId }` | Assigned handle; reconnect still sends original identity. |
 | `console:log` | worker -> server -> drawers | `{ workerId, workerLabel?, level, ts, args[] }` | Appended to the framework transcript and fanned out to drawers. |
-| `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code, timeoutSeconds }` | Routed only to `console:<workerId>`. |
+| `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code, timeoutSeconds }` | Routed to one resolved SID, never a shared worker-name room. |
 | `console:evalCancel` | server -> worker | `{ reqId, targetWorkerId }` | Sent when Python-side eval times out so the Code TE2 bridge can reject the pending Promise. |
-| `console:evalResult` | worker -> server -> drawers/MCP waiter | `{ workerId, reqId, ok, value|error, errorType? }` | Resolves pending evals and fans out to drawers. |
+| `console:evalResult` | worker -> server -> requester | `{ workerId, reqId, ok, value|error, errorType? }` | Owner-checked; resolves only the matching requester/waiter. |
 | `console:replay` | drawer -> server | `{ tail_lines? }` | Replays transcript entries from `$TE2_CACHE_HOME/console/te2_console_log.jsonl` after canonical root resolution. |
 | `console:clear` | drawer -> server -> drawers | `{}` | Clears transcript and drawer state. |
 
@@ -2523,7 +2687,7 @@ te2 console search "query" --worker <worker-id> --limit 100
 
 - vConsole is drawer-only. The producer bridge just patches browser `console.*`, serializes args, and ships events.
 - The drawer writes TE2 console rows through vConsole's `model.addLog(..., { noOrig: true })` path so replayed rows do not feed back into the framework console bridge.
-- The Code TE2 main-page bridge uses `workerLabel: "main_page"` plus `uniquePerWindow: true`; runtime inspection should target the exact generated worker id.
+- Code TE2 sends its original main-page identity plus parent-client context; inspection targets the server-assigned live handle.
 - The shared static bridge at `app/static/js/te2_console_bridge.js` is not necessarily at the same feature level as the Code TE2 main-page bridge. Do not document Code TE2-only timeout/cancel behavior as a shared bridge guarantee unless the shared bridge is updated too.
 
 ---
@@ -2577,6 +2741,12 @@ semantic style property. TextMate-derived rules remain the fallback when a
 theme has no explicit semantic style. This keeps encoded TextMate scopes,
 semantic-token rules, and visible Monaco theme state aligned without a
 separate built-in-theme parser.
+The Monaco token-theme reindexer must preserve external palette indices exactly,
+including duplicate RGB values and alpha. Color.toString() may return rgba(),
+not hexadecimal; use Color.Format.CSS for keys rather than slicing that string.
+Rebuild/publish only the required ESM modules when the source fork and vendored
+semantic-theme patches differ. Regression: `test/te2/theme-palette-alpha.mjs`
+in the fork, plus Code TE2's `tests/textmate_palette_alpha.test.mjs`.
 TextMate grammar catalog persistence is independent of selected-theme projection:
 the extension registry stores only bounded contribution descriptors, identities and
 filename/extension language associations, while raw grammar bodies are loaded on
@@ -2778,6 +2948,34 @@ command/handler registration rather than merely the separate bootstrap artifact.
 
 ## 33) Diagnostics owner-keyed markers
 
+### Mentions from diagnostic surfaces
+
+Explorer diagnostic rows and Monaco's inline Problems peek share
+`src/diagnostics/diagnostic-mention.ts` for severity/code/message/source and range
+formatting. The inline action uses the displayed marker, not the editor's current
+selection. `scripts/monaco_problem_mentions.mjs` adds the action to the pinned
+widget at bootstrap build time, with exact integration-point checks; vendored
+Monaco source remains unchanged. The widget captures model identity/version,
+updates its receipt when the displayed diagnostic changes, and clears it when
+the widget becomes stale.
+
+`editor_problem_mention_runtime.ts` binds the editor's stable container once and
+removes the listener at editor disposal. Monaco's `getDomNode()` is the transient
+model view, so neither widget dispatch nor binding may use it for this event.
+It rejects malformed ranges, stale model/version,
+path or active-model mismatches. Inline diff binds only the modified editor.
+Accepted intent goes through the existing `sendEditorMentionRequest` callback,
+which attaches exact-client Sidebar target proof and uses `editor.mention.request`;
+no new backend lane, global target or console-ID routing is introduced. Shared
+`editor_mention_request_runtime.ts` uses the existing acknowledged editor request
+and local host notification event for success/failure feedback for both inline
+Problems and editor code/line mentions; failed/disconnected requests never replay.
+Rebuild
+Monaco bootstrap then host, and publish/reload matching client assets. No Python,
+mypyc or WBA restart is required.
+
+### Owner-scoped projection
+
 Extension-host diagnostics preserve their original owner. Monaco marker writes are
 replace-all only within an owner, so sharing one owner would make a later
 TypeScript, ESLint, or other update erase earlier markers.
@@ -2787,6 +2985,24 @@ reprojects every owner for the active model, clears rendered owners when leaving
 a model, and aggregates toolbar counts from the retained marker state. A WBA
 resync replays the bounded owner/resource snapshot to a newly connected editor;
 there is no polling or frontend-to-frontend diagnostics relay.
+
+VS Code diagnostics have two distinct removal operations: `$changeMany` with an
+empty marker list clears one resource; `MainThreadDiagnostics.$clear(owner)`
+clears the owner's entire collection. The pinned Diagnostics actor is NID 16 for
+the managed Code Server build. Its arguments must be in WBA's decoding allowlist.
+WBA projects `$clear` as `diagnostics/clear` with the exact owner, evicts that
+owner from the retained resync snapshot before broadcast, and forwards the event
+over both the editor lane and backend pipe. The editor marker service clears
+only that owner and reprojects the active model, preserving other owners. Backend
+diagnostics clears the same owner and republishes the existing full detail/count
+projection for Explorer/Problems/file tabs. The distinct clear event is a pipe
+coalescing barrier, not an empty per-resource update; updates before and after it
+retain their order. Unknown/empty owners and `$clear` calls on other RPC actors
+must not clear diagnostic collections. No synthetic edits or diagnostic replay
+requests are used to repair a clear.
+
+The main Code TE2 build explicitly emits `pinned-rpc-ids.ts` along with WBA's
+other modules; editing a pin without regenerating its module is not activation.
 
 The backend normalization path is separate from that direct editor path:
 adapter stdout PUSH frames enter workbench_adapter_shell_manager.py, flow through
@@ -2863,20 +3079,65 @@ There are three distinct layers:
      Ctrl for the next command, a double tap locks it across dock and Gboard
      actions, and another tap releases it; the locked state is never represented
      by an unpaired synthetic keydown.
+     For an armed Ctrl on Android, the editor adapter claims cancelable ASCII
+     `insertText` before textarea mutation and replays its control chord in a
+     microtask guarded by editor/input/focus identity. The matching 229 keyup
+     cannot replay it again, including locked Ctrl. Shift's text transformer
+     yields to the Ctrl transaction. This prevents focus-changing commands from
+     flushing the shortcut letter as pending Android text on blur; ordinary
+     text/paste/non-ASCII and noncancelable input retain their existing paths.
    - The mobile special-key dock is visible by default and has two rows. The
      first provides Ctrl, Alt, persistent Select/Shift, and arrow navigation;
      the second provides one-shot Shift, Tab, Home, End, Page Up/Down, Cmd and Esc. Enter remains on the virtual keyboard, not duplicated in the dock.
      F1, Ctrl/Cmd+Shift+P and Ctrl/Cmd+colon open the unprefixed Quick Access help/options view through `editor.action.te2QuickAccess`, registered by the authored Monaco bootstrap builder. Ctrl+Shift+O retains the symbol picker; stock `editor.action.quickCommand` and typed `>` retain explicit commands. The bootstrap binds colon as Shift+Semicolon, while the editor-scoped key helper recognizes the actual colon key value for other layouts. Quick Access is a separate context-menu entry; Command Palette remains explicit commands. Extra keys preserve focused quick-input fields; caret defaults are explicit because synthetic keys do not perform native text navigation.
      One-shot Shift is separate from sticky Sel, composes with modifiers and is carried through guarded Ctrl-byte reconstruction. It uppercases only cancellable committed insertText, never active composition or guessed punctuation layouts.
      The implementation is in editor_quick_input_keys.ts and editor_mobile_special_keys_utils.ts; existing editor realms own their actions. Historical command restrictions stay unchanged.
+     TE2's root provider adds `rn` + Enter (Relative Line Numbers On/Off toggle)
+     and `e` + Enter (open/focus Explorer), without executing partial typed queries.
+     `scripts/monaco_quick_access.mjs` extends the existing help/Go to Line
+     providers; `:8:k` / `:8:j` jumps eight logical lines up/down, with optional
+     column such as `:8:k:4`. Absolute and offset syntax remain Monaco-owned.
+     Root rn/e entries follow the stock choices. The bootstrap's guarded
+     `scripts/monaco_preserve_relative_gutter.mjs` transform omits the pinned
+     Go to Line provider's temporary absolute-number override; relative gutters
+     remain visible while choosing a jump. Vendored source is not modified;
+     upstream block drift fails the build for review rather than silently patching.
+     The same guarded bundle path gates preview independently of acceptance:
+     relative gutters suppress absolute-number previews until Enter, while
+     complete j/k expressions still preview. Absolute gutter behavior is unchanged.
+     The existing preference service owns `relativeLineNumbers` (default false);
+     hidden line numbers still win.
+     Inline diff creation and live preference projection apply
+     `editor_diff_line_numbers.ts`: relative becomes absolute only for the diff
+     presentation, without persisting that override. Plain recreation restores
+     the saved relative choice; hidden gutters remain hidden.
+     Editor-focused Ctrl+Shift+Comma/Period cycles the displayed host tab order with wrap, through the existing open
+     owner, not a second file-state registry. Explorer keyboard presentation is
+     owned by `src/explorer/tree/keyboard.ts`: visible-row arrows, Space/Enter
+     click semantics, scoped Ctrl+F, search/tree Tab adjacency and two-stage Escape.
+     The open transaction owns bounded per-client cursor presentation memory
+     (`editor_cursor_memory.ts`, 100 paths, no cross-reload persistence). Desktop
+     opens or explicit focus/place-cursor intent restore a clamped cursor without
+     changing the separately restored scroll viewport; explicit line/column
+     navigation wins. Keyboard tab cycling uses existing focus/place_cursor fields;
+     keyboard Explorer click semantics pass focus=true, mobile touch passes false.
      When the Terminal drawer owns focus, navigation keys still use its established request bridge rather than another input path.
    - The four arrow buttons repeat after a 420 ms hold delay at a 55 ms cadence.
+     The editor dock replaces PgUp/PgDn with one Jmp button, invoking the existing
+     editor.action.gotoLine (`:` Quick Access) in the owning primary/secondary
+     editor. It consumes one-shot modifiers without inserting a literal colon
+     or changing terminal keys.
      Pointer capture preserves the gesture if the finger drifts outside the
      button, while release, cancellation, lost capture, window blur, document
      hiding, or runtime disposal stops it synchronously. The focused target and
      Ctrl/Alt/Shift state are snapshotted at pointer-down. One-shot modifiers
      apply to the complete hold gesture and are consumed once at its end;
      locked Ctrl and persistent Select/Shift retain their established behavior.
+   - The Ctrl adapter follows model/view replacement and
+     text focus as well as widget focus: setModel recreates the textarea without
+     necessarily changing widget focus. Pre-model-change, blur and disposal
+     remove the prior input listeners; unfocused attachment never claims another
+     editor, and old-editor cleanup cannot clear a replacement owner.
    - The host owns one viewport-wide dock across the primary and mobile
      secondary editors. Positive Monaco focus or pointer ownership selects the
      target; collapse, close, or hiding the secondary surface returns ownership
@@ -3558,6 +3819,17 @@ navigates the view, reconnects the trusted wrapper, or replaces the extension
 document's JavaScript heap. A main-page reload temporarily hides the retained
 view until the reconstructed host reports its current placement.
 
+Detached foreground and docked rendering are separate projections. Activating a
+detached icon continues to raise that window on every click, but the Sidebar
+keeps the most recently displayed eligible docked surface instead of an empty
+placeholder. Local rendering history is pruned against current visible/project
+membership; cold fallback uses existing MRU selection. It does not create another
+durable foreground owner. Actual focus in the displayed docked iframe activates
+it through the existing client selection path. Electron persistent views report
+focus with their exact surface/presentation identity; hidden, replaced or detached
+views cannot claim embedded focus. No background fallback changes mention routing
+or shared membership merely by being displayed.
+
 Ordinary user URL and Run Profile surfaces keep the prior reconstruction path:
 their detached frame starts at `about:blank`, receives the complete namespaced
 `window.name` marker, and then navigates to the final URL.
@@ -3782,6 +4054,44 @@ Host file-open intent does not preflight a boot snapshot. The frontend may use i
 - The direct WBA Socket.IO boundary authenticates and injects `clientInstanceId` plus metadata-only `windowId`. The worker editor and UI IPC lanes additionally carry the authenticated client role; WBA does not infer that role from a window. Request normalization must preserve the WBA identity through `vscode.openFile` into `WorkbenchClient.openFile`; otherwise the client facade cannot acknowledge the active document, leaving hover and semantic-token requests blocked even though shared extension-host diagnostic pushes can still arrive.
 - Draft-aware materialization is centralized in `monaco_editor/editor_backend_services/document_materialization_service.py`.
 
+### Draft-first WBA initialization
+
+`workbench_document_initialization.py` captures the bounded opened set using
+the existing sidecar snapshot/materializer. The existing local pipe
+`adapter.connect` / `adapter.reconnect` request carries `initialDocuments`:
+project path/generation, open-state revision and exact text, content SHA,
+content identity, base SHA and dirty state for each document. WBA validates the
+complete handoff and publishes those bodies as the first `addedDocuments` DTOs
+after the extension-host handshake, before connect completion. It does not
+open disk first and rely on a remote client to correct the text later.
+
+Ordinary backend file opens send `vscode.documents.initialize` over that same
+pipe using the already materialized editor payload before client notification.
+If intelligence is unavailable, the visible editor may still open; its WBA
+attach waits for initialization (bounded, reset-cancellable) and fails explicitly
+rather than substituting disk. Missing paths discovered by the existing
+metadata reconciliation use this initialization method as well. Initialization
+and logical hydration methods are not admitted from HTTP/browser RPC.
+
+Initialization is create-only: retained entries survive late/repeated payloads.
+Foreground `vscode.openFile` is a presentation attach, including force-refresh,
+new-generation and multi-client reopens. It cannot read disk or replace shared
+document text. Extension-host `$tryOpenDocument` also waits for the connect
+initialization barrier before checking the registry. Extension-requested files
+outside the already opened set retain their existing document-content behavior.
+Client initial-open, SSOT replay and reconnect no longer synthesize `didChange`
+to repair a disk-backed WBA model. Actual edits and guarded mirrors retain their
+existing direct intelligence path.
+
+Each registry entry records the version last established/acknowledged by the
+backend. Revision-scoped reconciliation may update an unchanged backend version
+even if presentations are attached; it may also acknowledge identical current
+text after draft persistence. A newer differing client edit remains protected.
+Thus draft updates, save/discard and disk invalidation do not rely on reopening
+the editor, and a stale backend snapshot cannot erase unpublished text.
+Project/generation/revision/hash admission and reset invalidation remain required.
+Matching Python domain, WBA outputs and client assets are one activation slice.
+
 ### Metadata-first reconcile
 
 `logical_document_reconciler.py` builds a metadata-only snapshot:
@@ -3805,8 +4115,10 @@ Hydration carries exact content, language, content/base identities, dirty state,
 
 Before WBA reconciles that Python snapshot, `WorkbenchClient` injects the exact
 union of every retained client facade path and every in-flight open. Those paths
-are protected from hydration replacement and release even though Python's
-metadata snapshot intentionally has no global active path.
+are protected from release and from overwriting newer client-owned text even
+though Python's metadata snapshot intentionally has no global active path.
+Presentation ownership alone does not prohibit initialization of a missing
+document or revision-guarded updates to an unchanged backend-owned version.
 
 ### Document and editor lifetime
 
@@ -4506,6 +4818,20 @@ the extension-webview runtime and lifetime rules.
 
 ### Per-host presentation
 
+Embedded app file opens name the originating URL's `clientInstanceId`, shared
+`te2_host_id` and ephemeral `presentationId`. ALS preserves this target through
+its own frontend/Rust RPC; it must not select a client from global last-focus
+state. Code TE2 admits only a live registered host, matching app slot, active
+client-local window and exact presentation. Shared document membership updates
+remain independent of the initiating client's foreground notification.
+
+Presentation registration republishes `active: true` for the locally foreground
+slot on reconnect. The backend restores only that client's transient active
+window, without changing shared slots. A delayed disconnect from an old SID
+cannot remove presentations while a replacement host SID for that client exists.
+Console worker labels identify observability, not delivery authority. See
+`docs/apps/sidebar_app_intents/PLAN.md` for matching activation requirements.
+
 Each host stores versioned local presentation state: dock order, foreground host,
 stable last-agent host, and embedded/hidden/detached mode. It retains a bounded
 most-recent project map. Ordinary browsers use stable origin-local storage, and
@@ -4695,7 +5021,7 @@ Before xterm opens, the drawer loads the vendored web-font addon and the templat
 
 ### Generic Worker Module Identity
 
-Built-in backend module identity comes from package path rather than public app id. Code TE2's branch-default native executable imports its domain module through PyO3; router-based apps retain explicit `TE2_APP_ROUTER` or legacy `<app_id>_bp` via lazy FastAPI assembly. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
+Built-in backend module identity comes from package path rather than public app id. Code TE2's branch-default native executable imports its domain module through PyO3; ordinary HTTP workers require callable `TE2_ASGI_APP`, with app-owned routes/mounts/lifespan. Legacy FastAPI router assembly (`TE2_APP_ROUTER`, `<app_id>_bp`, worker-level `SUBAPPS`) is retired and fails explicitly rather than importing FastAPI. Pipe-only workers retain dispatch without importing the web stack. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
 
 ### Framework Runtime And State
 
@@ -4804,10 +5130,22 @@ Built-in backend module identity comes from package path rather than public app 
   parser. Release construction rejects incomplete wheel payloads. Neither
   release path silently degrades to pure Python or Cargo.
 
-- TE2 pins `fastmcp==3.4.7`. FastMCP 4 selects MCP 2 and removes the
-  `mcp.server.fastmcp` API used by the current conversation-scoped
-  `agent-pty-blocks` stdio server; do not relax the pin until that server has a
-  tested MCP 2 migration.
+- New framework builds serve all 24 MCP tools natively through rmcp 3.5.1 at
+  `/te2_mcp_http`; root and trailing slash share sessions. Native status reports
+  `framework_owned_native`, and build-info lists `native-mcp`. Existing native
+  services/worker pipes own actions; private capability-protected loopback APIs
+  reach the existing Python console relay, scaffold and log-analysis owners.
+  No generic FastMCP forwarding or second manager is used. Legacy `/te2_mcp`
+  returns HTTP 410 naming the native endpoint; no Python MCP transport remains.
+  Matching worker/domain and framework/bridge activation is required; builds
+  do not change a running framework. See dependency_trim PLAN/TRACKER and
+  `framework/mcp_probe/README.md` for transport and acceptance gates.
+
+- TE2's direct FastMCP requirement and Python MCP implementation are removed.
+  ALS's separately packaged conversation-scoped `agent-pty-blocks` stdio server
+  still uses the Python MCP SDK and its own dependency declarations. That
+  coordinated migration and release-lock/wheelhouse regeneration remain necessary
+  before claiming Pydantic/cryptography disappear from clean installations.
 
 - Memory profiling is explicit through `te2 --memory-profile OUTPUT_DIR` and
   relies on Heaptrack plus opt-in process-separated Python/Node snapshots.
@@ -4978,7 +5316,35 @@ te2 framework eval --app code_te2 --shell SHELL_ID --instance INSTANCE_ID --code
 
 ## 48) Standalone Terminal Contracts
 
+An explicit `shell_id` or `new_session` query selects the initial terminal loading
+layout immediately, instead of rendering the session list until the first
+lifecycle snapshot arrives. Query state is presentation intent only: existing
+shell IDs still require a ready/live backend snapshot, and explicit creation
+retains its single-use launch ID and existing backend acknowledgement. No-query
+launches remain in list mode. Missing/exited shells, creation failure or lifecycle
+startup failure return to the list; no automatic creation/retry compensates for
+an invalid restored identity. This frontend change requires Terminal assets and
+client reload, not a Code TE2 mypyc build or worker restart.
+
+Terminal session-list drawer motion is opt-in per user interaction:
+`drawer-motion-enabled` is added by `openDrawer`, retained for manual closing,
+and cleared by every mode/session layout handoff. The base terminal-layout drawer
+has no transition. Otherwise app-shell template insertion can paint the list
+before initialization and animate it offscreen on full-page restoration, even
+when frame-only reload timing conceals that sequence. Both Terminal template and
+generated frontend must be updated together; no global shell transition policy
+or deliberate drawer animation is removed.
+
 The standalone Terminal is a separate app from Code TE2's Python/Pyte drawer (section 46). Its Node/headless-xterm ownership and local UI controls are preserved here for shared-input maintenance.
+
+Its Python `backend.py` exports `TE2_ASGI_APP`; app-owned `http_app.py` composes
+the retained HTTP shell routes, raw `/ws/terminal` stream and lifecycle
+`/socket.io` mount without FastAPI. `request_dtos.py` supplies four msgspec shapes
+shared by HTTP and binary lifecycle admission. Generic worker hooks retain
+listener-ready/service ownership. HTTP request bodies are bounded to 1 MiB;
+invalid/disconnected bodies cannot reach mutation handlers. Node stream/shell
+ownership, checkpoints and frontend protocols are unchanged. Framework-Shells'
+own dependency migration is separate from this Terminal-owned ASGI boundary.
 
 Both standalone and native drawer PTYs set `TERM=xterm-256color` explicitly at
 creation. The framework's parent may be tmux (`TERM=tmux-256color`), but that

@@ -1,5 +1,9 @@
 # Unified Linux And Termux Release Installer Tracker
 
+Current release gates and acceptance reconciliation are consolidated in
+../release_0_2_354/PLAN.md and TRACKER.md. Retain earlier versioned evidence below;
+historical unchecked matrices do not automatically reopen accepted releases.
+
 Last updated: 2026-10-05
 
 ## Program status
@@ -49,7 +53,7 @@ Last updated: 2026-10-05
   OTA, publication, commit or tag move is part of this trim validation.
 
 
-- [ ] Before release, add the Android keyboard support requirement to README:
+- [x] README already contains the Android keyboard support requirement:
   Gboard 18 or newer is required for supported operation. Older versions may
   work, but are unsupported. Wording is recorded in the client-runtime PLAN;
   no runtime keyboard detection or enforcement is planned.
@@ -2197,9 +2201,12 @@ Final publication evidence (2026-10-06):
   logs live in `~/.cache/te2-production-size-fixed-0.2.352/` as
   `installation.log`, `installation-repeat.log`, `installation-no-preload.log`.
 
-The editable-install Electron source-build wait issue is deferred by explicit
-user approval to a follow-up source tag; no further release version bump is
-requested. Validation-only artifacts are not promoted by renaming them.
+The editable-install Electron source-build wait issue was deferred by explicit
+user approval to a follow-up source tag; no further release version bump was
+requested. The follow-up source implementation and validation now live in
+`docs/apps/desktop_build_startup/PLAN.md` and `TRACKER.md`; live Desktop
+activation/acceptance remains separate. Validation-only artifacts are not
+promoted by renaming them.
 
 - [ ] Linux arm64 Electron package.
 - [ ] Non-APK artifact signing and automatic installer-channel publication.

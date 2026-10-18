@@ -12,3 +12,4 @@ h11==0.16.0
 idna==3.20
 wcwidth==0.9.1
 typing_extensions==4.16.0
+uvloop==0.23.0; sys_platform == "linux" and platform_machine == "x86_64"

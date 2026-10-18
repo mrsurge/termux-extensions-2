@@ -1,0 +1,240 @@
+:root {
+  --bg: #0d0f13;
+  --panel: #151821;
+  --panel-2: #10131b;
+  --text: #e6e6e6;
+  --muted: #9aa3b2;
+  --border: #2a2f3a;
+  --accent: #1f6feb;
+  --accent-2: #2ea043;
+  --warn: #d29922;
+  --danger: #f85149;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: radial-gradient(1200px 800px at 20% -10%, #202737 0%, #0d0f13 55%, #0b0d12 100%);
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Noto Sans", "Segoe UI", sans-serif;
+}
+
+.appshell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.topbar {
+  background: linear-gradient(135deg, #1a2030, #141a26 60%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.2px;
+}
+
+.brand small {
+  color: var(--muted);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel.wide {
+  background: var(--panel-2);
+}
+
+h2, h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+input, textarea {
+  border: 1px solid var(--border);
+  background: #0f121a;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  outline: none;
+  font-size: 14px;
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  background: #1d2433;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: #2b6ad6;
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.btn:hover { filter: brightness(1.1); }
+
+.timeline-wrap {
+  border: 1px dashed #2f3645;
+  border-radius: 12px;
+  padding: 10px;
+  min-height: 220px;
+  background: #0f121a;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.composer {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.composer textarea {
+  flex: 1;
+}
+
+.thread-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.thread-list li {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #222836;
+  background: #0f121a;
+  font-size: 13px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pill {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #1a2030;
+  border: 1px solid #2a3448;
+  font-size: 11px;
+}
+
+.pill.ok { color: #7ee787; border-color: #2ea043; }
+.pill.warn { color: #f2cc60; border-color: #d29922; }
+.pill.err { color: #ff7b72; border-color: #f85149; }
+
+.muted { color: var(--muted); }
+
+.footer {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (min-width: 900px) {
+  .appshell { padding: 16px 20px; }
+  .topbar {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .grid {
+    grid-template-columns: minmax(240px, 0.9fr) minmax(340px, 2fr) minmax(240px, 0.9fr);
+    align-items: start;
+  }
+  .composer textarea {
+    min-height: 160px;
+  }
+}
+
+@media (max-width: 480px) {
+  .composer {
+    flex-direction: column;
+  }
+  .btn {
+    width: 100%;
+    text-align: center;
+  }
+}

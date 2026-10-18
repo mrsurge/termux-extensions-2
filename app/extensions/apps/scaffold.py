@@ -194,13 +194,9 @@ def _rewrite_backend_stub(target_dir: Path, *, app_id: str, name: str) -> None:
     path = target_dir / "main.py"
     if not path.exists():
         return
-    safe_name = re.sub(r"[^a-zA-Z0-9_]+", "_", app_id).strip("_") or "proxy_shell"
     text = (
-        "from fastapi import APIRouter\n\n"
-        f"{safe_name}_bp = APIRouter()\n\n\n"
-        f"@{safe_name}_bp.get(\"/\")\n"
-        "async def status():\n"
-        f"    return {{\"ok\": True, \"data\": {{\"message\": \"{name} backend ready\"}}}}\n"
+        "from app.libs.te2_asgi.status import StatusASGI\n\n"
+        f"TE2_ASGI_APP = StatusASGI({(name + ' backend ready')!r})\n"
     )
     path.write_text(text, encoding="utf-8")
 

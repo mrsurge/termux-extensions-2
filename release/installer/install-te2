@@ -6,11 +6,9 @@ release_tag=${TE2_RELEASE_TAG:-latest}
 release_base_url=${TE2_RELEASE_BASE_URL:-}
 python_override=${TE2_INSTALL_PYTHON:-}
 yes_install=0
-action=install
 for arg in "$@"; do
     case "$arg" in
         -y|--yes) yes_install=1 ;;
-        --uninstall|--rollback) action=maintenance ;;
     esac
 done
 
@@ -192,11 +190,6 @@ elif key == "installer":
     if not isinstance(linux, dict):
         raise SystemExit("Linux release target is missing")
     print(linux.get("installer") or "")
-elif key == "termux_archive":
-    termux = targets.get("termux-android-aarch64")
-    if not isinstance(termux, dict):
-        raise SystemExit("Termux release target is missing")
-    print(termux.get("archive") or "")
 else:
     raise SystemExit(f"Unsupported release manifest key: {key}")
 PY
@@ -210,45 +203,10 @@ esac
 download "$release_base_url/$installer_name" "$scratch/$installer_name"
 verify_file "$installer_name"
 
-if [ "$is_termux" -eq 0 ]; then
-    "$python_bin" "$scratch/$installer_name" \
-        --payload-root "$scratch" \
-        --release-version "$version" \
-        "$@"
-    exit $?
-fi
-
-if [ "$action" = "maintenance" ]; then
-    "$python_bin" "$scratch/$installer_name" --payload-root "$scratch" "$@"
-    exit $?
-fi
-
-archive_name=$(manifest_value termux_archive)
-case "$archive_name" in
-    ''|*/*|*..*) printf '%s\n' 'Release manifest has an unsafe Termux archive filename.' >&2; exit 2 ;;
-esac
-download "$release_base_url/$archive_name" "$scratch/$archive_name"
-verify_file "$archive_name"
-payload_root=$(
-    "$python_bin" - "$scratch/$archive_name" "$scratch/payload" <<'PY'
-from pathlib import Path
-import sys
-import tarfile
-
-archive_path, destination = map(Path, sys.argv[1:])
-destination.mkdir()
-with tarfile.open(archive_path, "r:gz") as archive:
-    members = archive.getmembers()
-    for member in members:
-        path = Path(member.name)
-        if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
-            raise SystemExit(f"Unsafe Termux archive member: {member.name}")
-    archive.extractall(destination, members=members)
-roots = [path for path in destination.iterdir() if path.is_dir()]
-if len(roots) != 1 or not (roots[0] / "target-manifest.json").is_file():
-    raise SystemExit("Termux release archive has an invalid root")
-print(roots[0])
-PY
-)
-"$python_bin" "$scratch/$installer_name" --payload-root "$payload_root" "$@"
+# Both targets select their compatible wheels from PyPI. GitHub supplies only
+# the checksum-verified release metadata and installer, not a wheelhouse archive.
+"$python_bin" "$scratch/$installer_name" \
+    --payload-root "$scratch" \
+    --release-version "$version" \
+    "$@"
 exit $?

@@ -74,7 +74,7 @@ def parse_search_replace_params(payload: object) -> SearchReplaceParams:
         selected.append(index)
     if phase == 'prepare' and not selected:
         raise ExplorerSearchReviewContractError('Select at least one match')
-    return {'phase': phase,
+    return {'phase': cast(Literal['prepare', 'apply'], phase),
         'searchId': _required_string(raw.get('searchId'), 'searchId'),
         'projectGeneration': generation,
         'relativePath': _required_string(raw.get('relativePath'), 'relativePath'),
@@ -116,6 +116,29 @@ class ReviewListParams(TypedDict):
 
 class ReviewFilesParams(TypedDict):
     files: list[str]
+
+
+class ReviewRevertHunkParams(TypedDict):
+    rel: str
+    identity: str
+    hunkIndex: int
+    hunkIndices: list[int]
+
+
+def parse_review_revert_hunk_params(payload: object) -> ReviewRevertHunkParams:
+    raw = _as_object(payload)
+    rel = _required_string(raw.get('rel'), 'rel')
+    identity = _required_string(raw.get('identity'), 'identity')
+    indexes = raw.get('hunkIndices', [raw.get('hunkIndex')])
+    if (rel.startswith(('/', '\\')) or '..' in rel.split('/') or not isinstance(indexes, list)
+            or not 0 < len(cast(list[object], indexes)) <= 10000):
+        raise ExplorerSearchReviewContractError('Invalid draft hunk target')
+    selected: list[int] = []
+    for index in cast(list[object], indexes):
+        if type(index) is not int or not 0 <= index < 10000 or index in selected:
+            raise ExplorerSearchReviewContractError('Invalid draft hunk target')
+        selected.append(index)
+    return {'rel': rel, 'identity': identity, 'hunkIndex': selected[0], 'hunkIndices': selected}
 
 
 class SearchNameResultEntry(TypedDict):
@@ -165,6 +188,7 @@ def parse_content_edit_target(value: object) -> ContentEditTarget | None:
 class SearchContentMatch(TypedDict):
     editTarget: NotRequired[ContentEditTarget | None]
     line: int
+    endLine: NotRequired[int]
     column: int
     text: str
     snippet: str
@@ -212,6 +236,7 @@ class SearchTextRange(TypedDict):
 
 class SearchProviderContentMatch(TypedDict):
     lineNumber: int
+    endLineNumber: NotRequired[int]
     columnNumber: int
     lineText: str
     snippet: str
@@ -478,6 +503,7 @@ def project_search_content_result(
 def _project_provider_content_match(match: SearchProviderContentMatch) -> SearchContentMatch:
     return {
         "line": match["lineNumber"],
+        "endLine": match.get("endLineNumber", match["lineNumber"]),
         "column": max(0, match["columnNumber"] - 1),
         "text": match["lineText"],
         "snippet": match["snippet"],
@@ -517,7 +543,7 @@ def _parse_search_mode(value: object) -> SearchMode:
     if value is None:
         return "name"
     if value in ("name", "content", "changes"):
-        return value
+        return cast(SearchMode, value)
     raise ExplorerSearchReviewContractError("Invalid search mode")
 
 

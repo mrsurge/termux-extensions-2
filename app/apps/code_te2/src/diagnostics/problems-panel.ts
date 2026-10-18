@@ -15,6 +15,8 @@
  *   panel.show(); panel.hide();
  */
 
+import { buildDiagnosticMention } from './diagnostic-mention';
+
 // Monaco MarkerSeverity values (mirrored here to avoid runtime dep)
 const SEV_HINT    = 1;
 const SEV_INFO    = 2;
@@ -226,21 +228,7 @@ export function createProblemsPanel(options: ProblemsPanelOptions = {}): Problem
       mentionBtn.title = 'Mention in conversation';
       mentionBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const sevLabel = m.severity === SEV_ERROR ? 'error'
-          : m.severity === SEV_WARNING ? 'warning' : 'info';
-        let content = '[' + sevLabel + '] ';
-        const code = codeValue(m.code);
-        if (code) content += code + ': ';
-        content += m.message || '(no message)';
-        if (m.source) content += ' (' + m.source + ')';
-        onMention({
-          path: absPath,
-          lineNo: m.startLineNumber || 1,
-          col: m.startColumn || 1,
-          endLineNo: m.endLineNumber || m.startLineNumber || 1,
-          endCol: m.endColumn || m.startColumn || 1,
-          content: content,
-        });
+        onMention(buildDiagnosticMention(absPath, m));
       });
       item.appendChild(mentionBtn);
     }

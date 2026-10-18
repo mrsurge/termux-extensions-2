@@ -82,3 +82,63 @@ test('Terminal manifest cache query matches its declared version', () => {
   const manifest = JSON.parse(read('app/apps/terminal/manifest.json'));
   assert.equal(new URL(manifest.entrypoints.frontend_script, 'http://localhost/').searchParams.get('v'), manifest.version);
 });
+
+test('Sidebar metadata and the font relative to either Monaco CSS URL stay local', () => {
+  const sidebar = '/apps/code_te2/extensions/sidebar_extension/manifest.json';
+  assert.equal(packagedSource(sidebar), 'app' + sidebar);
+  assert.equal(desktopPath(sidebar), sidebar);
+  assert.equal(gecko(sidebar), sidebar);
+  assert.equal(cefEntries.get(sidebar), sidebar);
+  const canonicalCss = '/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css';
+  const aliasCss = '/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css';
+  const css = read(packagedSource(canonicalCss));
+  const font = css.match(/url\(["']?(\.\/codicon-[^"')]+\.ttf)["']?\)/)?.[1];
+  assert.ok(font, 'derive the font URL from shipped CSS rather than assume its hash');
+  for (const cssUrl of [canonicalCss, aliasCss]) {
+    const url = new URL(font, 'http://localhost' + cssUrl).pathname;
+    const mapped = desktopPath(url);
+    assert.equal(gecko(url), mapped);
+    assert.ok(mapped, `font not intercepted: ${url}`);
+    packagedSource(mapped);
+    assert.ok(cefSource.includes(`"${url}"`), `Cefrium/Termux font admission: ${url}`);
+  }
+  for (const url of ['/apps/code_te2/extensions/sidebar_extension/private.json',
+    '/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/private.js']) {
+    assert.equal(desktopPath(url), null);
+    assert.equal(gecko(url), null);
+  }
+});
+
+test('built-in literal static dependency graph is packaged after URL mapping', () => {
+  // This scans literal URLs/imports/CSS references, not arbitrary JS execution.
+  // Computed icon-family paths and ALS's full inventory have separate tests.
+  const queue = [...assets.map(asset => asset.canonical),
+    '/static/js/te_ui.js', '/static/js/file_picker.js',
+    '/static/js/ws_port.js', '/static/js/te_state.js'];
+  const visited = new Set();
+  while (queue.length) {
+    const url = queue.shift();
+    if (visited.has(url)) continue;
+    visited.add(url);
+    const mapped = desktopPath(url);
+    assert.ok(mapped, `Electron dependency not intercepted: ${url}`);
+    assert.equal(gecko(url), mapped, `Gecko dependency: ${url}`);
+    const source = packagedSource(mapped);
+    if (!/\.(?:m?js|html|css)$/.test(source)) continue;
+    const text = read(source).replace(/^\s*\/\/.*$/gm, '');
+    const references = [...text.matchAll(/["'`]((?:\/static\/|\/apps\/|\/api\/app\/code_te2\/ui\/)[^"'`\s<>${}]+)["'`]/g)].map(m => m[1]);
+    for (const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*\()["'](\.[^"']+)["']/g)) {
+      references.push(new URL(match[1], 'http://localhost' + url).pathname);
+    }
+    for (const match of text.matchAll(/url\(\s*["']?([^\s)"']+)["']?\s*\)/g)) {
+      if (!match[1].startsWith('data:')) references.push(new URL(match[1], 'http://localhost' + url).pathname);
+    }
+    for (const ref of references) {
+      const path = ref.split('?')[0].split('#')[0];
+      if (/\.(?:m?js|html|css|woff2?|ttf|svg|png|wasm|json)$/.test(path)) queue.push(path);
+    }
+  }
+  for (const dependency of ['/static/js/file_explorer_main.js', '/static/js/te_dialog.mjs',
+    '/static/vendor/codemirror.1/codemirror.bundle.js', '/static/vendor/xterm/xterm.js',
+    '/apps/code_te2/extensions/sidebar_extension/manifest.json']) assert.ok(visited.has(dependency));
+});

@@ -166,6 +166,7 @@ interface XtermTerminal {
 }
 
 interface XtermDisposable {
+  cancelGesture?(): void;
   dispose(): void;
 }
 
@@ -1008,6 +1009,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   }
 
   function emitTerminalRegister(requestedShellId = 'auto'): void {
+    touchSelectionDisposable?.cancelGesture?.();
     desiredShellId = String(requestedShellId || 'auto').trim() || 'auto';
     if (!socketConnected()) {
       socketRegistered = false;
@@ -1045,6 +1047,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     });
 
     socket.on('disconnect', (reason) => {
+      touchSelectionDisposable?.cancelGesture?.();
       console.log('Terminal Socket.IO disconnected', reason);
       socketRegistered = false;
       rejectPendingTerminalRequests(`Terminal socket disconnected: ${String(reason || 'disconnect')}`);
