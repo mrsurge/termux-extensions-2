@@ -39,7 +39,7 @@ TERMUX_APT_PACKAGES = (
     {"name": "git", "executables": ["git"]},
     {"name": "nodejs-lts", "executables": ["node"], "majorVersion": 24},
     {"name": "npm", "executables": ["npm"]},
-    # node-pty still builds on first use; Python package installation is binary-only.
+    # node-pty still builds on first use; small Python dependencies may build too.
     {"name": "build-essential", "executables": ["cc", "c++", "make"]},
     {"name": "libarchive", "libraries": ["lib/libarchive.so"]},
     {"name": "libgit2", "libraries": ["lib/libgit2.so"]},
@@ -550,7 +550,7 @@ def _relocate_linux_venv(source: Path, target: Path) -> None:
 
 
 def _materialize_termux_pypi_release(install_root: Path, prefix: Path, version: str) -> Path:
-    """Stage platform-selected PyPI wheels; never compile or alter the active tree."""
+    """Stage a prebuilt TE2 runtime plus dependencies before changing active state."""
     releases = install_root / "releases"
     releases.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=f".{version}.stage-", dir=releases))
@@ -564,14 +564,16 @@ def _materialize_termux_pypi_release(install_root: Path, prefix: Path, version: 
         try:
             subprocess.run(
                 [sys.executable, "-m", "pip", "--isolated", "install",
-                 "--index-url", "https://pypi.org/simple", "--only-binary=:all:",
+                 "--index-url", "https://pypi.org/simple",
+                 "--only-binary=te2,agent-log-server,framework-shells,uvloop-te2",
                  "--no-compile", "--target", str(python_tree), f"te2=={version}"],
                 env=env, cwd=stage, check=True,
             )
         except subprocess.CalledProcessError as exc:
             raise SystemExit(
-                "Termux PyPI binary installation failed. Check the pip error above for "
-                "missing compatible wheels; no source-build fallback was attempted. "
+                "Termux PyPI installation failed. Check the pip error above. "
+                "TE2, ALS, FWS and uvloop-te2 require compatible prebuilt wheels; "
+                "other dependencies may build from source. "
                 "The active TE2 release was not changed."
             ) from exc
         env["PYTHONPATH"] = str(python_tree)

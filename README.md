@@ -102,21 +102,34 @@ installs instead require the build toolchain described below.
 ### Termux pip installs
 
 PyPI also provides the prebuilt TE2 wheel for Android ARM64 with CPython 3.14.
-Compatible Termux environments select it automatically:
+Compatible Termux pip selects it automatically; there is no need to download or
+choose the wheel from GitHub. To install without the managed installer, supply
+the system packages first:
 
 ```sh
-python -m pip install te2
+pkg update
+pkg install tur-repo
+pkg update
+pkg install python python-pip git nodejs-lts npm build-essential libarchive libgit2
+python -m pip install --only-binary=te2,agent-log-server,framework-shells,uvloop-te2 te2
+te2
 ```
 
-You must still supply system dependencies yourself. Dependencies without
-compatible Android wheels may compile from source, making installation lengthy;
-unsupported interpreter/platform combinations can also fall back to a source
-installation and require native build toolchains.
-The recommended installer above uses our prebuilt GitHub release wheel archive
-and apt-supplied dependencies to avoid those builds.
+Use ordinary CPython 3.14 on Android ARM64 and Node 24. `build-essential` supports
+the Terminal's first-use `node-pty` build and small Python dependency builds.
+The upcoming maintenance release removes the old heavyweight Python dependency
+stack and selects the prebuilt `uvloop-te2` package on Termux (upstream `uvloop`
+on Linux x86-64). Remaining small dependency source builds are supported.
+Published 0.2.353 still has the older dependency metadata; the reduced dependency
+set applies when the new release is published.
 
-Further dependency reduction is planned; it does not remove the current
-source-install prerequisites.
+The command above requires wheels for TE2/ALS/FWS/uvloop-te2, avoiding accidental
+Rust/runtime or uvloop compilation while allowing lightweight dependencies to
+build. Optional integrations also use `aria2` (Aria Downloader) and `watchexec`
+(polling watcher). The next-release managed script uses this same PyPI selection,
+adds staging/rollback and installs prerequisites for you; GitHub supplies the
+installer/release metadata, not the TE2 wheelhouse. The published 0.2.353 script
+still uses the older GitHub archive flow.
 
 For a pinned installation, use the matching tagged download URL instead of
 `latest` and set `TE2_RELEASE_TAG` for the script process:

@@ -344,7 +344,8 @@ merely because a historical checkbox remains open.
 
 Approved 2026-10-18 source slice: ALS development bump/checkpoint/push; default
 target-exclusive uvloop requirements in ALS/TE2 and private Linux runtime;
-normal Termux installer switches to binary-only PyPI staging while preserving
+normal Termux installer switches to PyPI staging with prebuilt TE2/ALS/FWS/
+uvloop-te2 and permitted small dependency builds, while preserving
 offline payloads and activation/rollback. This does not authorize tags, uploads,
 device installation or heavy builds. Cleaned ALS wheels, remaining Android native
 dependency coverage and regenerated locks still gate release. Pixel is user-owned
@@ -360,6 +361,12 @@ approved merge/tag/GitHub/PyPI publication workflow. README already states Gboar
 18+ support; update release references at release time, not during this audit.
 
 ## Explicit next-version backlog
+
+Shared Rust library investigation is explicitly deferred until the next release
+(user direction 2026-10-18). Audit duplicated framework/Code TE2 worker crates and
+evaluate reusable dynamic libraries, including actual compressed wheel savings,
+ABI/toolchain compatibility, relocation/loader paths and Android/Linux deployment.
+No linking/build-layout change is part of this release; savings are not yet measured.
 
 First post-release investigation: browser-engine-backed Electromux runtime,
 using EdgeJS's experimental engine-free host-JS mode as a candidate. The root

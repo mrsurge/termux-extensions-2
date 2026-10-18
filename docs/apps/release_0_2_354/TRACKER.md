@@ -796,8 +796,8 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   restriction. ALS checkout and installed environments were not changed.
 - [x] User-approved correction/checkpoint/push removes TE2's ALS/FWS minimums;
   no release/version bump, native build or device mutation is part of this fix.
-- [x] R5 installer source: normal Termux launch uses binary-only PyPI staging
-  instead of a GitHub wheelhouse archive. Missing wheels fail before activation;
+- [x] R5 installer source: normal Termux launch uses prebuilt-runtime PyPI staging
+  instead of a GitHub wheelhouse archive. Missing required runtime wheels fail before activation;
   offline payloads and managed rollback/uninstall remain. New prerequisites omit
   crypto/Bun, retaining Node/npm/native libraries and node-pty build tools.
   Closure checks reject retired dependencies and verify uvloop-te2/native payload.
@@ -813,17 +813,29 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   metadata/bootstrap/wheel/loop tests (2 subtests) pass; shell syntax/diff checks
   pass. Existing setuptools warning remains. Installer ty reports two existing
   helper-return diagnostics and a contextmanager deprecation, not a clean pass.
-- [ ] R5 Android wheel coverage: current msgspec PyPI releases lack Android
-  wheels; ALS's stale watchfiles requirement was removed after a source audit
-  and 36 focused tests/2 subtests pass. Pixel confirms android/aarch64 CPython 3.14.6 and installed
-  uvloop-te2, but installed pip packages are not fresh-wheel evidence. No device
-  changes; user owns current Android compilation. Legacy lock regeneration waits
-  for the complete verified target closure and new ALS release.
+- [x] R5 Android dependency-build cost accepted by user (2026-10-18): upcoming
+  source dependencies cause no costly source installs; any remaining small
+  builds take roughly ten seconds or less. Missing an Android wheel alone is
+  not a blocker; do not reopen this practical acceptance based on msgspec tags.
+  Public TE2 0.2.353 still has the old dependencies and is not the tested source
+  set. No agent device/package mutation occurred.
+- [x] Align new Termux installer with accepted small source builds: only TE2,
+  ALS, FWS and uvloop-te2 require binary wheels; other dependencies may build.
+  Missing required runtime wheels still fail before activation. README includes
+  apt prerequisites and a direct PyPI alternative, distinguishing published
+  0.2.353 from the upcoming slim dependency set. GitHub hosts installer metadata,
+  not wheels for the new online path. No device install/build or publication.
+  Validation: 41 installer/release/dependency tests and 4 subtests pass; shell
+  syntax and authored whitespace checks pass. Changes remain uncommitted.
+  Legacy lock regeneration and cleaned ALS publication remain separate work.
 - [ ] R5: fresh target dependency closure, exclusive optional uvloop distributions,
   ordinary CPython/private runtime/native ABI, libarchive.file_reader smoke.
 - [ ] R5: matched Linux/Termux wheels (<100,000,000 bytes), assets and staging APKs.
 - [ ] R5: Debian and Android fresh-install/version/worker/WBA/console/MCP/app checks.
 - [ ] R5: separately approve merge/tag/publication; verify uploaded hashes.
+- [ ] Next release only: investigate shared Rust libraries for framework and
+  Code TE2 native worker to reduce duplicated compiled payloads. User explicitly
+  deferred this on 2026-10-18; no implementation or measured size claim now.
 
 ## Acceptance still needing bounded confirmation
 

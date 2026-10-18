@@ -5,16 +5,19 @@
 Normal source-installer execution now passes the release version to the Python
 installer on both targets. GitHub supplies checksum-verified release metadata
 and installer code, not a Termux wheelhouse archive. Termux stages PyPI wheels
-with `pip --isolated install --only-binary=:all: --target ... te2==VERSION`,
+with `pip --isolated install --only-binary=te2,agent-log-server,framework-shells,uvloop-te2 --target ... te2==VERSION`,
 verifies packaged runtime/loop selection, then reuses managed activation,
 rollback and uninstall. Explicit local offline payloads retain their old path.
 This does not change already-published installers.
 
-Missing wheels fail before activation, without source compilation. Full Android
-coverage remains a gate: TE2 0.2.353/FWS 0.2.65/uvloop-te2 have PyPI target wheels,
-but cleaned ALS is unpublished and current msgspec releases lack Android wheels.
-ALS's unused watchfiles requirement was removed after the source audit. Existing
-Pixel pip installations do not establish fresh coverage.
+The user has validated the upcoming source dependencies: no costly native builds,
+and any remaining small source builds take roughly ten seconds or less. Absence
+of an Android wheel alone is not a release blocker. Public TE2 0.2.353 retains
+the old dependency metadata and is not this tested source set. ALS's stale
+watchfiles requirement is removed. The installer allows source builds for small
+dependencies but requires prebuilt TE2/ALS/FWS/uvloop-te2; their missing wheels
+fail before activation rather than starting expensive runtime/uvloop builds.
+Cleaned ALS publication remains separate.
 Regenerate the legacy lock from a verified target closure, not pip freeze; the
 old schema/MCP lock is not consumed by the new PyPI path.
 

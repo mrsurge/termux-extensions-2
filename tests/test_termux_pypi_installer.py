@@ -19,7 +19,7 @@ SPEC.loader.exec_module(installer)
 
 
 class TermuxPyPIInstallerTests(unittest.TestCase):
-    def test_stages_binary_only_pypi_tree_and_validates_before_activation(self) -> None:
+    def test_stages_prebuilt_runtime_allowing_small_dependencies_before_activation(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             prefix = root / "prefix"
@@ -46,7 +46,10 @@ class TermuxPyPIInstallerTests(unittest.TestCase):
                 stage = installer._materialize_termux_pypi_release(root, prefix, "0.2.354")
             pip, environment = calls[0]
             self.assertIn("--isolated", pip)
-            self.assertIn("--only-binary=:all:", pip)
+            binary_options = [arg for arg in pip if arg.startswith("--only-binary=")]
+            self.assertEqual(binary_options, ["--only-binary=te2,agent-log-server,framework-shells,uvloop-te2"])
+            self.assertNotIn("--only-binary=:all:", pip)
+            self.assertNotIn("--no-binary=:all:", pip)
             self.assertIn("te2==0.2.354", pip)
             self.assertNotIn("--no-deps", pip)
             self.assertEqual(pip[pip.index("--index-url") + 1], "https://pypi.org/simple")
@@ -63,7 +66,7 @@ class TermuxPyPIInstallerTests(unittest.TestCase):
             current = root / "current"
             current.symlink_to("releases/previous")
             with patch.object(installer.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pip")):
-                with self.assertRaisesRegex(SystemExit, "no source-build fallback"):
+                with self.assertRaisesRegex(SystemExit, "require compatible prebuilt wheels"):
                     installer._materialize_termux_pypi_release(root, root / "prefix", "0.2.354")
             self.assertEqual(os.readlink(current), "releases/previous")
             self.assertEqual(list((root / "releases").iterdir()), [])
