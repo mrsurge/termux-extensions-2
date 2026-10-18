@@ -50,8 +50,8 @@ android {
         applicationId = if (termuxConsumer) "com.termux.extensions.te2termux" else "com.termux.extensions.cefrium"
         minSdk = 29
         targetSdk = 34
-        versionCode = 20353
-        versionName = if (termuxConsumer) "0.0.1-te2-termux-poc" else "1.0.8-r0.2.353-cefrium"
+        versionCode = 20354
+        versionName = if (termuxConsumer) "1.0.8-r0.2.354-termux" else "1.0.8-r0.2.354-cefrium"
         buildConfigField("boolean", "TE2_TERMUX", termuxConsumer.toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -59,3 +59,15 @@ def test_container_mounts_verified_reuse_input_readonly(tmp_path):
     assert command[-1] == 'builder'
     assert str(tmp_path/'old.whl') + ':/input-domain.whl:ro' in command
     assert 'TE2_REUSE_DOMAIN_WHEEL_SHA256=' + 'b'*64 in command
+
+
+@pytest.mark.parametrize('engine,expected', [('docker', False), ('podman', True)])
+def test_remote_identity_flag_matches_container_engine(tmp_path, engine, expected):
+    from scripts.build_linux_release_wheel import _container_run_command
+    command = _container_run_command(
+        engine=engine, image='builder', source=tmp_path, work=tmp_path,
+        output=tmp_path, cargo_home=tmp_path, cargo_target=tmp_path,
+        commit='a'*40, release_tag='validation-0.2.354', source_date_epoch='1',
+        keep_id=True,
+    )
+    assert ('--userns=keep-id' in command) is expected

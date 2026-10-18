@@ -104,7 +104,7 @@ documentation consolidation.
   smoke acceptance for composer/navigation/assets, not a separately enumerated
   mobile reconnect, multi-client or every-client artifact matrix.
 
-### ALS View-card range ribbons — source complete, activation pending
+### ALS View-card range ribbons — live accepted
 
 - [x] Preserve known same-file command ranges in the existing generic
   `view_range` DTO for semantic Codex reads; live and transcript fields match.
@@ -115,9 +115,9 @@ documentation consolidation.
   passed; four actual-renderer regressions passed. ALS ty, frontend typecheck
   and build pass. Technical contracts: ALS TRANSCRIPT_CARD_CONTRACTS.md and
   CODEX_COMMAND_ACTIONS.md.
-- [ ] Separately approve matching ALS runtime/client asset activation and obtain
-  live acceptance. ALS local checkpoint 7b5e551 contains this correction; no
-  restart, OTA/seed publication, version change or push performed.
+- [x] User confirms remaining live-acceptance items complete on 2026-10-18,
+  including range ribbons. Historical checkpoint 7b5e551 identifies the source
+  correction; final packaged artifacts remain separately gated under R5.
 
 ### Deferred — ALS composer dot ligatures on Chromium
 
@@ -284,12 +284,13 @@ Technical correction and activation gates are detailed in search_memory/PLAN.md.
 - [x] 44 composer tests, ALS frontend typecheck/build, focused ALS/TE2 Python
   type checks and authored source diff checks pass. ALS ty requires its checkout
   explicitly first in --extra-search-path to avoid the harness's TE2 import roots.
-- [ ] Matching Code TE2 mypyc activation/worker refresh and fresh ALS extension
-  adapter loading; source tests do not activate either runtime.
-- [ ] Checkpoint/publish updated cooldown assets when authorized. Current TE2
-  pinned ALS snapshot still points to fcc716b, before this three-issue slice.
-- [ ] Live slow-delete/read-card and actual project-switch/intermittent file-open
-  verification. Do not mark user note 6 fixed solely from source regressions.
+- [x] User confirms current compiled runtime and remaining live acceptance;
+  this is user-reported activation/behavior acceptance, not inferred from tests.
+- [x] Earlier cooldown-asset checkpoint/publication reminder superseded by the
+  updated vendored ALS snapshot and shared seed refresh; final APK payloads
+  remain separately gated, not presumed installed from source publication.
+- [x] Slow-delete/read-card and actual project-switch/intermittent file-open
+  verification included in the user's 2026-10-18 live-acceptance confirmation.
 
 Technical contracts: sibling ALS CODEX_COMMAND_ACTIONS.md / COMPOSER_INPUT_PLAN.md,
 and docs/apps/sidebar_app_intents/PLAN.md. No version bump, commit/push, runtime
@@ -315,7 +316,7 @@ User notes (commit this):
 This queue precedes remaining R4 cleanup and R5 packaging. Other workstream
 plans are retained as references; they do not replace this current checklist.
 
-- [ ] U1 / original note 1 — Detached Sidebar windows leave no blank space.
+- [x] U1 / original note 1 — Detached Sidebar windows leave no blank space.
   Show the last eligible docked iframe instead; the detached icon still raises
   its window on every click. Focusing the displayed docked iframe makes it the
   active Sidebar presentation.
@@ -329,7 +330,7 @@ plans are retained as references; they do not replace this current checklist.
     tests pass. Both TypeScript checks and host/Electron builds pass. Focus tests
     cover delayed iframe activeElement observation and disposal; native tests
     cover hidden/replaced/detached rejection and repeated window raising.
-  - [ ] Live acceptance after matching host assets and rebuilt Electron launch:
+  - [x] User live acceptance confirmed 2026-10-18:
     detach/activate repeatedly, focus fallback, close/hide fallback, reattach.
     Builds are not publication or activation; no shared framework restart done.
 - [x] U2 / original note 3 — **Draft-first initialization correction; live accepted**
@@ -631,10 +632,12 @@ mandatory full-device matrix is added for the latest smoke acceptance.
 - [x] R1 source audit: entrypoints, literal static dependency graph, computed
   icon families and pinned ALS inventory checked; two proven gaps fixed with
   approval. See STATIC_ASSET_AUDIT.md for limits, matrix and focused test evidence.
-- [ ] R1: confirm executing-client requests and final generated asset freshness;
-  source closure tests are not a live network capture or publication.
-- [ ] R1: publish matched assets and verify slow-connection multi-app Sidebar
-  delivery from native-local bytes; dynamic requests remain intentional.
+- [x] R1 current-client asset behavior/freshness live accepted by user on
+  2026-10-18. This records user acceptance, not a new agent network capture or
+  proof of future release artifact bytes.
+- [x] R1 current slow-connection multi-app Sidebar behavior live accepted by
+  user; source assets/shared seed refreshed. Dynamic requests remain intentional;
+  final release package checks remain under R5.
 - [x] R2 planning clarification (2026-10-16): optimize downloadable APK size;
   include useLegacyPackaging=true compressed native-library candidate, accepting
   installation-time extraction as a tradeoff. Documentation change only approved.
@@ -693,7 +696,8 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   inspection. Existing bundler publishes current 444-file seed; rebuilt APK
   verifies all seed hashes and all 148 ALS static files. Signature/alignment and
   12 asset regressions pass. No installation, data clearing or client OTA issued.
-- [ ] Live test refreshed-assets APK; same-version local tree requires explicit
+- [x] User includes the existing refreshed-assets APK behavior in remaining
+  live acceptance (2026-10-18); same-version local tree requires explicit
   force-update rather than assuming APK update reseeds. New candidate supersedes
   the stale-seed compression test for UI testing; see TERMUX_COMPRESSION_AUDIT.md.
 - [x] R2 APK Deflate comparison/implementation closed by user: same-source
@@ -903,22 +907,23 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   deprecation), not new errors. Authored whitespace check passes; generated host
   embeds upstream string whitespace and is not hand-edited to suppress it.
 - [x] User confirms live interpreted correction; no agent runtime transition.
-- [ ] Compiled execution acceptance after matching strict-policy snapshot;
-  user reported the preceding build passed but had not yet confirmed execution
-  of this follow-up source. No agent publication or domain activation performed.
+- [x] User confirms the current newly built mypyc extension runs well and asks
+  to retain accepted native artifacts (2026-10-18). No agent publication or
+  domain activation performed; final package identity remains separately checked.
 
 These are not blanket unimplemented features. Ask only about cases that remain
 relevant after final packaging; do not count unrun stress experiments as bugs.
 
-- [ ] Latest all-client ALS static interception/publication, especially Electron
-  and Gecko; Cefrium functional acceptance is already documented.
-- [ ] Settings and Archive Manager ordinary-worker/frontend acceptance after
-  migration; Archive Create/Add/Test capability gaps are separate deferred work.
-- [ ] File Explorer directory-sync zero-input erasure/wake in a fresh terminal.
-- [ ] Remaining Code Inspector/major UI/run-profile multi-client/lifecycle checks
-  not already covered by explicit owning-document acceptance.
-- [ ] Stop _setContext rejection spam and retain console registration after reload;
-  source fix exists, but the specific log/lifecycle checks are not separately proven.
+- [x] Latest all-client ALS static asset behavior live accepted by user, including
+  Electron/Gecko; final release publication/payload checks remain separate.
+- [x] Settings and Archive Manager ordinary-worker/frontend behavior live
+  accepted; Archive Create/Add/Test repair is implemented and separately accepted.
+- [x] File Explorer directory-sync zero-input erasure/wake in a fresh terminal:
+  user live accepted.
+- [x] Remaining Code Inspector/major UI/run-profile multi-client/lifecycle
+  behavior: user live accepted.
+- [x] _setContext rejection-spam correction and console registration after reload:
+  user includes these in remaining live acceptance (2026-10-18).
 - [ ] Final release artifact installation/client matrix; older wheels/APKs cannot
   accept source changes introduced since those artifacts were built.
 
@@ -981,15 +986,23 @@ relevant after final packaging; do not count unrun stress experiments as bugs.
   Termux packaging-container host, with native Termux fallback if needed.
   Read-only SSH preflight: x86_64, Docker available, 137 GiB free; system
   Python 3.13.5 is not the Code TE2 CPython 3.14 build interpreter.
-- [ ] Inventory privileged access, installed toolchains, existing checkout and
-  container capabilities; propose exact isolated setup/build procedure.
+- [x] Debian preflight: root SSH/Docker work, 137 GiB free, uv 0.11.26 and
+  managed CPython 3.14.6 installed. Existing checkout is old and contains an
+  untracked VSIX; preserve it. Existing private314 image has Python 3.14.6/Rust
+  1.94 but lacks current compiler dependencies, so rebuild the pinned recipe.
+- [x] User approves separate .354 candidates and independent local/remote
+  builds/hash comparison. Package, server, editor asset and APK version metadata
+  prepared for .354; accepted local binaries remain untouched. Release builder
+  now limits Podman's --userns=keep-id to Podman, not Docker; 7 regressions pass.
+  No local Cargo/mypyc/wheel/APK build: local free space is only about 1.6 GiB.
 - [ ] Pin source/submodules and toolchain/image provenance; build Linux wheel,
   validate native domain/private runtime, install/test in a fresh Debian venv.
 - [ ] Prove target Android aarch64 wheel/mypyc container compatibility, or use
   native Termux fallback; build staged APKs with matching current asset seed.
 - [ ] Independent rebuild/provenance/hash comparison and target acceptance.
-  No builds/provisioning, deployment or release publication performed by this
-  checkpoint; existing running builds are untouched.
+  Remote candidate build approved; live-validation groups are Linux wheel,
+  Android/Termux wheel, then all three APKs. Stop at major decisions or group
+  handoffs. No tags/uploads/release publication authorized by candidate builds.
 
 ## Deferred, not part of this release
 

@@ -174,7 +174,7 @@ def _container_run_command(
     selected_uid = os.getuid() if uid is None else uid
     selected_gid = os.getgid() if gid is None else gid
     command = [engine, "run", "--rm"]
-    if keep_id:
+    if keep_id and Path(engine).name == 'podman':
         command.extend(["--userns=keep-id"])
     command.extend(
         [
