@@ -66,6 +66,12 @@ async def handle_editor_preference_update_request(
     payload: JsonMap = dict(data)
     if source_client:
         payload["nicegui_client_id"] = source_client
+    if "project" in payload and payload["project"] != _history_store.get_active_project():
+        return {"ok": False, "error": "Project changed; refresh preferences"}
+    from ..project_autosave import require_project_idle
+    active = _history_store.get_active_project()
+    if active:
+        require_project_idle(active)
 
     def _collect_diff(project_root: Path, rel_path: str, base_ref: str) -> dict[str, object]:
         return _collect_diff_impl(project_root, rel_path, base_ref)
@@ -104,6 +110,18 @@ async def handle_editor_preference_update_request(
             )
         except Exception:
             pass
+
+    if payload.get("key") == "autoSave":
+        from ..project_autosave import transition
+        result = await transition(payload)
+        if "preview" in result or result.get("ok") is not True:
+            return result
+        view_state = _get_view_state_dict()
+        project = _history_store.get_active_project()
+        if project:
+            _emit_preferences_changed(project, "autoSave", payload.get("value"), view_state,
+                                      _preferences_store.get_preferences(project), source_client)
+        return {**result, "data": view_state}
 
     return await handle_update_preference(
         payload,

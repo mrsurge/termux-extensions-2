@@ -1,4 +1,5 @@
 interface EditorConfigChangeOptions {
+  suppressPersistence?: boolean;
   syncReadOnlyInputModeFn?: (editor: MonacoRuntimeEditorLike | unknown) => void;
   lastKnownReadOnly: boolean | null;
   setLastKnownReadOnlyFn?: (readOnly: boolean) => void;
@@ -21,7 +22,7 @@ export function onEditorConfigChanged(
       : undefined;
     const readOnly = editor.getOption(readOnlyOption);
     if (typeof readOnly !== 'boolean') return;
-    if (options.lastKnownReadOnly !== null && readOnly !== options.lastKnownReadOnly) {
+    if (!options.suppressPersistence && options.lastKnownReadOnly !== null && readOnly !== options.lastKnownReadOnly) {
       options.updatePreference({ key: 'readOnly', value: readOnly }).catch((error: unknown) => { console.warn('[Monaco] readOnly pref save failed', error); });
     }
     if (typeof options.setLastKnownReadOnlyFn === 'function') options.setLastKnownReadOnlyFn(readOnly);

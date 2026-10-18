@@ -113,7 +113,7 @@ class ServiceOutcomeTests(unittest.IsolatedAsyncioTestCase):
         store = Stores()
         self.assertEqual(await self.preference({"key": "comparisonMode", "value": "disk"}, store),
                          {"ok": True, "data": {"ready": True}})
-        self.assertEqual(store.updates, [{"showInlineDiffs": False, "showDraftDiffs": True, "autoSave": False}])
+        self.assertEqual(store.updates, [{"showInlineDiffs": False, "showDraftDiffs": True}])
         store.failure = RuntimeError("store offline")
         with self.assertRaises(EditorServiceError) as error:
             _ = await self.preference({"key": "showShading", "value": True}, store)

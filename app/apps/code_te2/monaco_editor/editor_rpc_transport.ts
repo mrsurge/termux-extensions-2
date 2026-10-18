@@ -1,5 +1,6 @@
 import {
   EDITOR_RPC_EVENT,
+  EDITOR_RPC_METHODS,
   EditorRpcMethodName,
   EditorRpcNotificationName,
   JsonRpcId,
@@ -12,6 +13,18 @@ import {
 import { messagePackRpcWireCodec, type RpcWireCodec } from '../src/rpc/codec.ts';
 import { inspectRpcFrame, RPC_CODEC_MSGPACK_GZIP_V1 } from '../src/rpc/gzip-codec.ts';
 import { createOrderedRpcReceiver } from '../src/rpc/ordered-receiver.ts';
+
+export function publishEditorControlResponse(
+  transport: { publishReliable(method: EditorRpcMethodName, params: Record<string, unknown>, opts?: { timeoutMs?: number }): boolean },
+  eventName: string,
+  payload: Record<string, unknown>,
+): boolean | null {
+  const method = eventName === 'editor_open_complete' ? EDITOR_RPC_METHODS.openCompletePublish
+    : eventName === 'editor_save_snapshot_response' ? EDITOR_RPC_METHODS.saveSnapshotResponse : null;
+  // These responses complete an outstanding backend operation. They are not
+  // disposable UI notifications; a busy socket must not silently drop them.
+  return method ? transport.publishReliable(method, payload, { timeoutMs: 10000 }) : null;
+}
 
 interface EditorRpcSocketLike {
   connected?: boolean;

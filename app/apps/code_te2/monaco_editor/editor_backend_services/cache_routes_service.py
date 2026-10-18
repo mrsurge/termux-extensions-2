@@ -97,6 +97,8 @@ async def handle_discard_draft(
     project_path = history_store.get_active_project()
     if not path or not project_path:
         return {"ok": False, "error": "No active document"}
+    from ...project_autosave import require_project_idle
+    require_project_idle(project_path)
 
     cleared = history_store.clear_cached_document(project_path, path)
     if cleared:

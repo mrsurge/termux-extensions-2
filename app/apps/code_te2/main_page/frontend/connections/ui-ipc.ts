@@ -502,7 +502,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
 
   async function requestBackendEditorPreferenceUpdate(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
-    return await connection.request(UI_IPC_RPC_METHODS.hostEditorPreferenceUpdate, payload || {}, 8000);
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorPreferenceUpdate, payload || {}, payload.key === 'autoSave' ? 120000 : 8000);
   }
 
   async function requestBackendRunActiveFile(payload: JsonObject = {}): Promise<unknown> {

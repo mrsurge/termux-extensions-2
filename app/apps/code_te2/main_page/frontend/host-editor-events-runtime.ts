@@ -204,10 +204,8 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
       restoredActive,
     });
 
-    const autoSave = boolField(data, 'auto_save') ?? boolField(data, 'autoSave');
-    if (typeof autoSave === 'boolean') {
-      deps.applyAutosavePreference(autoSave);
-    }
+    // Cache events describe documents, not project save-mode authority.
+    // Only the project-scoped preference projection may change autosave.
 
     if (normalizedPath) {
       window.dispatchEvent(new CustomEvent('code-te2:draft-updated', {

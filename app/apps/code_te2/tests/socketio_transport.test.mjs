@@ -620,7 +620,7 @@ test('required editor publications use request-response transport without volati
   );
   assert.match(
     editorSource,
-    /eventName === "editor_open_complete"[\s\S]{0,300}publishReliable\([\s\S]{0,200}openCompletePublish/,
+    /publishEditorControlResponse\(editorRpcTransport, eventName, payload\)/,
   );
 });
 

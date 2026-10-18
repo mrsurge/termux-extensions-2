@@ -143,27 +143,7 @@ async def handle_update_preference(
         elif key == "showDraftDiffs":
             value = bool(value)
         elif key == "autoSave":
-            value = bool(value)
-            project_path = history_store.get_active_project() or str(get_project_root())
-            current_file = get_current_file()
-            if value and project_path and current_file:
-                try:
-                    from app.apps.code_te2.explorer.services.runtime_notifications import (
-                        notify_draft_state_changed,
-                    )
-
-                    _ = history_store.clear_cached_document(project_path, current_file)
-                    notify_draft_state_changed(project_path)
-                except Exception as exc:
-                    print(f"[PREFERENCE] Failed to clear cache on autosave enable: {exc}", file=sys.stderr)
-                broadcast_cache_state(
-                    project_path,
-                    current_file,
-                    state="clean",
-                    unsaved=False,
-                    cache_entry=None,
-                    reason="autosave_on",
-                )
+            raise EditorServiceError(kind="invalid", detail="Use the project autosave transition")
         elif key == "trackAgentSidebarEdits":
             value = bool(value)
             print(f"[editor_app] trackAgentSidebarEdits set to {value}", file=sys.stderr)
@@ -190,6 +170,16 @@ async def handle_update_preference(
             editor_updates["autoSave"] = False
         elif key == "autoSave" and bool(value):
             editor_updates["showDraftDiffs"] = False
+        if "autoSave" in editor_updates:
+            from ...project_sidecar import ProjectSidecar
+            if editor_updates.pop("autoSave"):
+                raise EditorServiceError(kind="invalid", detail="Use the project autosave transition")
+            project = history_store.get_active_project()
+            from ...project_autosave import require_project_idle
+            if project:
+                require_project_idle(project)
+                sidecar = ProjectSidecar.load_or_create(project)
+                sidecar.set_autosave_mode(False, sidecar.get_autosave_state()[1])
         _ = preferences_store.update_preferences(editor=editor_updates)
 
         if key in ("showInlineDiffs", "showDraftDiffs", "autoSave", "comparisonMode"):

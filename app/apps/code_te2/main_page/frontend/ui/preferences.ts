@@ -1,5 +1,6 @@
 type State = Record<string, unknown>;
 interface PreferencesDeps {
+  getProject(): string | null;
   requestBackendEditorStateGet(): Promise<unknown>;
   requestBackendEditorPreferenceUpdate(payload: State): Promise<unknown>;
   getClientId(): string | null;
@@ -14,6 +15,15 @@ function record(value: unknown): State | null {
 
 // Preferences have one transport: owning host RPC plus pushed state projections.
 export function createPreferencesController(deps: PreferencesDeps) {
+  const modeRevisions = new Map<string, number>();
+  function accept(state: State): boolean {
+    const project = deps.getProject();
+    if (state.autosaveProject !== project || typeof state.autosaveRevision !== 'number') return false;
+    const key = project || '';
+    if (state.autosaveRevision < (modeRevisions.get(key) ?? -1)) return false;
+    modeRevisions.set(key, state.autosaveRevision);
+    return true;
+  }
   function setMenuItemLabel(el: unknown, label: string) {
     const node = el instanceof HTMLElement ? el : null;
     const labelNode = node ? node.querySelector('span') : null;
@@ -34,7 +44,7 @@ export function createPreferencesController(deps: PreferencesDeps) {
       item.removeAttribute('aria-checked');
       item.title = autoSave
         ? 'Switch to Draft Mode. Edits stay in the draft cache until saved.'
-        : 'Switch to Auto Save. Current drafts will be saved before autosave is enabled.';
+        : 'Switch to Auto Save. Choose whether to save or discard this project’s drafts.';
     }
   }
 
@@ -78,6 +88,7 @@ export function createPreferencesController(deps: PreferencesDeps) {
     const data = record(payload);
     const nextState = record(data?.view_state) || record(record(data?.preferences)?.editor);
     if (!nextState) return false;
+    if (!accept(nextState)) return false;
     deps.setEditorViewState(nextState);
     applyStateToMenus(nextState);
     return true;
@@ -86,13 +97,15 @@ export function createPreferencesController(deps: PreferencesDeps) {
   async function updatePreference(key: string, value: unknown) {
     try {
       console.log('[Preference] updatePreference request', key, value);
-      const body: { key: string; value: unknown; nicegui_client_id?: string } = { key, value };
+      const project = deps.getProject();
+      const body: State = { key, value, project, expected_revision: modeRevisions.get(project || '') };
       const clientId = deps.getClientId();
       if (clientId) body.nicegui_client_id = clientId;
       const resp = record(await deps.requestBackendEditorPreferenceUpdate(body));
+      if (deps.getProject() !== project) return false;
       if (!resp || resp.ok === false) throw new Error("Preference update failed");
       const viewState = record(resp.data);
-      if (viewState && typeof viewState === 'object' && Object.keys(viewState).length > 0) {
+      if (viewState && accept(viewState)) {
         deps.setEditorViewState(viewState);
         applyStateToMenus(viewState);
         console.log('[Preference] updatePreference applied', key, value);
@@ -107,8 +120,9 @@ export function createPreferencesController(deps: PreferencesDeps) {
   }
 
   async function refreshMenuState() {
+    const project = deps.getProject();
     const state = await fetchEditorState();
-    if (!state) return;
+    if (!state || deps.getProject() !== project || !accept(state)) return;
     applyStateToMenus(state);
     deps.setEditorViewState(state);
   }

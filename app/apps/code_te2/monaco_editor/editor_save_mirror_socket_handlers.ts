@@ -46,6 +46,7 @@ interface EditorMirrorPayloadLike {
 }
 
 interface SaveMirrorSocketHandlerDeps {
+  setAutosaveTransitionReadOnly?(paused: boolean): void;
   onGuardedDraftApplied?(path: string, content: string): void;
   rpcNotifications?: EditorRpcNotificationSource | null;
   getCurrentPath(): string | null;
@@ -199,13 +200,14 @@ function handleEditorCacheStateEvent(
 function handleEditorSaveSnapshotRequestEvent(
   deps: SaveMirrorSocketHandlerDeps,
   payload: unknown,
+  freeze: string | null = null,
 ): void {
   handleSaveSnapshotRequest(
     asSaveSnapshotRequestPayload(payload),
     deps.getCurrentPath(),
     deps.getModel(),
     deps.getBaseSha256(),
-    deps.emitToHost,
+    (event, response) => deps.emitToHost(event, { ...response, autosaveFreeze: freeze }),
   );
 }
 
@@ -213,6 +215,11 @@ export function registerEditorSaveMirrorSocketHandlers(
   socket: EditorSocketLike,
   deps: SaveMirrorSocketHandlerDeps,
 ): void {
+  let autosaveFreeze: string | null = null;
+  socket.on('disconnect', () => {
+    autosaveFreeze = null;
+    deps.setAutosaveTransitionReadOnly?.(false);
+  });
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.mirrorUpdated, (payload) => {
       try {
@@ -232,7 +239,15 @@ export function registerEditorSaveMirrorSocketHandlers(
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.saveSnapshotRequest, (payload) => {
       try {
-        handleEditorSaveSnapshotRequestEvent(deps, payload);
+        if (typeof payload.autosaveFreeze === 'string' && deps.setAutosaveTransitionReadOnly) {
+          autosaveFreeze = payload.autosaveFreeze;
+          deps.setAutosaveTransitionReadOnly?.(true);
+        }
+        if (typeof payload.autosaveRelease === 'string' && payload.autosaveRelease === autosaveFreeze) {
+          autosaveFreeze = null;
+          deps.setAutosaveTransitionReadOnly?.(false);
+        }
+        handleEditorSaveSnapshotRequestEvent(deps, payload, autosaveFreeze);
       } catch (error) {
         console.warn('[Monaco] save snapshot response failed', error);
       }

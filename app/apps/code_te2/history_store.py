@@ -854,6 +854,8 @@ class HistoryStore:
         """Update or insert cached session entry via the per-project sidecar."""
         normalized_project = self._normalize_project_path(project_path)
         content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        from .project_autosave import require_draft_writable
+        require_draft_writable(normalized_project)
         unsaved = content_sha256 != base_sha256
 
         print(

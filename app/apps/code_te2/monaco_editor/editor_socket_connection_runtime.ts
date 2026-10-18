@@ -388,6 +388,12 @@ export function registerEditorSocketConnectionHandlers(
       const payloadRecord = asRecord(payload);
       const nextPrefs = payloadRecord && payloadRecord.preferences ? asRecord(payloadRecord.preferences) : null;
       if (!nextPrefs) return;
+      const currentPrefs = asRecord(asRecord(deps.getCachedPrefs())?.preferences);
+      const currentEditorPrefs = asRecord(currentPrefs?.editor);
+      const nextEditorPrefs = asRecord(nextPrefs.editor);
+      if (currentEditorPrefs?.autosaveProject !== undefined && nextEditorPrefs?.autosaveProject !== currentEditorPrefs.autosaveProject) return;
+      if (typeof currentEditorPrefs?.autosaveRevision === 'number' && typeof nextEditorPrefs?.autosaveRevision === 'number'
+        && nextEditorPrefs.autosaveRevision < currentEditorPrefs.autosaveRevision) return;
       const nextCachedPrefs = Object.assign({}, asRecord(deps.getCachedPrefs()) || {});
       nextCachedPrefs.preferences = nextPrefs;
       deps.setCachedPrefs(nextCachedPrefs);

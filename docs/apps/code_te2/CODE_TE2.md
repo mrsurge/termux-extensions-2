@@ -2130,6 +2130,57 @@ Primary implementation lives in:
 
 ## 13) Diff and draft stability invariants
 
+### Project save-mode ownership and switching
+
+`ProjectSidecar.autosave` owns `{enabled, revision}`. PreferencesStore projects
+it as `autoSave`, `autosaveProject`, and `autosaveRevision`; legacy global
+`editor.autoSave` is not runtime authority. Missing project choices default to
+Draft Mode. `project_autosave.py` owns the consent-bound Save All / Discard All /
+Cancel transition. A short-lived one-use receipt pins project generation, mode
+revision, draft watermark/content and exact connected-editor snapshots. Supporting
+editors acknowledge a temporary read-only pause before confirmation is applied.
+Pause/release are transient configuration changes and must not publish persisted
+`readOnly` preferences. Snapshot responses complete an outstanding backend
+operation, so they use the existing reliable, disconnect-fenced publisher rather
+than volatile notifications. They are never replayed across disconnect.
+New/changed clients, content, project or mode invalidate consent. Exact confirmed
+drafts alone are evicted; multi-file writes are sequential and report partial
+completion rather than pretending rollback or retrying uncertain operations.
+
+`project_autosave_runtime.py` owns normal autosave scheduling by project and file,
+not by whichever tab is active when a browser timer fires. Existing persisted
+full-model mirrors are pending-write safety buffers. Coalescing happens only
+before write admission. The existing guarded atomic writer preserves disk-base,
+Unicode/newline and mode semantics. Newer text received during a write remains
+pending with its base advanced; hash-conditional mirrors update matching clients.
+Bounded own-write ancestry repairs delayed mirror bases only with matching
+mode/generation and exact disk proof, never for unrelated external changes.
+Failure retains recoverable content, stops automatic admission for that mode
+revision and projects Draft Mode. There is no uncertain-write replay.
+
+Manual Save, autosave and enabling-mode Save All share `write_editor_file` in
+`save_service.py`. It fences the existing external-file watcher while the atomic
+write runs off-loop, then registers the exact committed content SHA before
+releasing that fence. Matching watcher notifications (including duplicates) do
+not emit `editor:open` or recreate Monaco models. The bounded last-own-write map
+retains 512 paths; a different observed disk SHA invalidates that path's receipt
+and follows normal external-change handling. This watcher receipt is separate
+from the autosave ancestry used to rebase delayed mirrors. Same-content save
+mirrors remain metadata-only; cursor/selection restoration is not a workaround
+for redundant model reopening.
+
+Project switching flushes the old autosave project's pending buffers before
+changing roots, retaining the editor pause through the handoff. A conflict stops
+the switch; Draft Mode switches do not save drafts. Accepted saves, mode changes
+and project switches use the same worker-owned admission fences. Destination
+preferences are restored from its sidecar; host/editor preference projections
+reject another project or older mode revision. On first worker-owned sidecar
+adoption, interrupted autosave buffers recover in Draft Mode without automatic
+save/discard. Standalone projection reads and normal reloads do not change modes.
+
+Activation requires matching Code TE2 Python/mypyc and host assets. No framework
+protocol, Android binary or WBA implementation change is needed for this slice.
+
 Inline Git and draft-diff presentation must preserve cursor stability under
 autosave and EOF edits:
 

@@ -230,6 +230,15 @@ class PreferencesStore:
         with self._lock:
             data = self._read_from_disk()
             editor = _as_dict(data.get("editor"))
+            from .stores import get_history_store
+            from .project_sidecar import ProjectSidecar
+            effective_project = project_path or get_history_store().get_active_project()
+            enabled, mode_revision = (
+                ProjectSidecar.load_or_create(effective_project).get_autosave_state()
+                if effective_project else (False, 0)
+            )
+            editor.update(autoSave=enabled, autosaveRevision=mode_revision,
+                          autosaveProject=effective_project)
             ui = _as_dict(data.get("ui"))
             ui["webWorkersEnabled"] = self.intelligence_state.read().web_workers_enabled
             project_entry: JsonDict = {}
@@ -261,6 +270,8 @@ class PreferencesStore:
             if editor:
                 editor_store = _as_dict(data.get("editor"))
                 for key, value in editor.items():
+                    if key == "autoSave":
+                        raise ValueError("Autosave is project-owned; use its guarded transition")
                     if key in DEFAULT_EDITOR_PREFS:
                         editor_store[key] = value
                 data["editor"] = editor_store

@@ -13,6 +13,69 @@ silently accepted. User notes below are preserved verbatim, not inferred approva
 to implement every item. No version change, commit or push accompanies this
 documentation consolidation.
 
+### Project-scoped autosave and safe switching — source validation
+
+- [x] User approved project-scoped mode ownership, explicit Save All / Discard
+  All / Cancel, guarded resolution, stale-context rejection and safe actual
+  project switches. Additional approval covers backend-owned per-file scheduling
+  with existing mirrors retained only as recoverable pending-write buffers.
+- [x] Sidecar mode/revision defaults to Draft Mode without inheriting legacy
+  global true; normal projections expose project identity and mode revision.
+  Interrupted pending buffers recover in Draft Mode on first worker adoption.
+- [x] Confirmation uses bounded expiring one-use receipts and supporting-editor
+  pause acknowledgements. Exact draft eviction, conditional mirrors, CRLF/Unicode,
+  file permissions, stale consent, disk conflicts and partial failure are covered.
+- [x] Backend autosave follows each file across tab changes without an active-tab
+  snapshot round trip. Newer typing is retained/rebased; delayed own-write mirrors
+  require exact disk proof. Failure preserves buffers, publishes Draft Mode and
+  prevents automatic uncertain-write replay.
+- [x] Old-project autosave flush precedes project root mutation and holds the
+  pause through handoff. Shared save/switch/transition admission fences prevent
+  stale requests from writing into another project. Late preference projections
+  are fenced by project and monotonic mode revision.
+- [x] Final validation: 106 focused Python tests plus 3 subtests pass (including
+  23 autosave tests); 18 focused frontend tests pass. Strict mypy for both new
+  owners, focused ty, Code TE2 TypeScript check and frontend build pass. Diff
+  whitespace check passes with generated bundles excluded from diagnostic output.
+  Existing Node module-type warning remains visible. Native/mypyc compilation
+  was not run; only about 2 GiB free remains, and no caches/artifacts were deleted.
+- [x] User reports the updated slice tested live and accepted. Explicitly verified
+  project switching with autosave enabled does not save drafts in the destination
+  project, and Save All / Discard All / Cancel guards work. Activation is evidenced
+  by the user's live run, not independently audited artifact provenance.
+- [x] Live follow-up found acknowledgement defects: temporary read-only pause
+  invoked the normal configuration-preference publisher; the resulting regular
+  send could make the immediately following volatile snapshot reply drop on a
+  busy socket. Pause/release now suppress preference persistence, and snapshot
+  replies use the existing reliable/disconnect-fenced request publisher (no
+  reconnect replay). Composition regression covers the real configuration
+  listener, snapshot handler and congested transport, not only a fake pause setter.
+  RPC dispatch errors retain request IDs; snapshot errors name the client and
+  distinguish timeouts, and pre-mutation failures state that no files changed.
+  Python follow-up suite: 108 pass plus 3 subtests; matching frontend update/reload
+  is still required to accept the functional acknowledgement fix. Python error
+  diagnostics require a matching domain build; the frontend delivery fix does not.
+  Frontend typecheck/build and all five focused autosave tests pass. The broader
+  transport/autosave run passes 44/48; four TextMate tests fail on missing mocked
+  `location.search`, outside the changed acknowledgement path. Do not report that
+  broader suite as passing or treat these fixture failures as live acceptance.
+- [x] Autosave cursor follow-up: source inspection found autosave/Save All omitted
+  manual Save's own-write SHA registration; the watcher could treat saved text as
+  external and emit `editor:open`. All three now use one off-loop atomic-write
+  wrapper with the existing in-flight restore fence, publishing SHA before release.
+  Duplicate matching notifications no longer consume the receipt; a different
+  observed disk SHA still invalidates it and refreshes the exact foreground client.
+  No cursor restoration workaround or frontend/model-edit change was added.
+  Actual-watcher regressions cover old/new disk notifications during the write,
+  three delayed duplicates, genuine external edits and failed-write fence cleanup.
+  The full focused Python suite passes 112 tests plus 3 subtests; strict mypy passes
+  for both autosave owners and save_service. Existing newer-typing regression passes.
+- [x] User live acceptance after the watcher fix: reports everything tested live
+  and authorizes commit/push. No agent-performed runtime restart or publication.
+- [x] Full backend model projection is deferred to the next version as a possible
+  simplification; no projection redesign is included in this accepted slice.
+- [x] Checkpoint commit/push authorized; no version change in this slice.
+
 ### Accepted implementations and publication
 
 - [x] Desktop editable startup/progress/cancel, theme restoration/watch exclusions,

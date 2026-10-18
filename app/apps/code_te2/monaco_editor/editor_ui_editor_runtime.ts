@@ -30,6 +30,12 @@ type DirectionLike = unknown;
 export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
   let layoutObserver: ResizeObserver | null = null;
   let lastKnownReadOnly: boolean | null = null;
+  let transientReadOnlyDepth = 0;
+
+  function withTransientReadOnlyChange(update: () => void): void {
+    transientReadOnlyDepth += 1;
+    try { update(); } finally { transientReadOnlyDepth -= 1; }
+  }
 
   function getEditorContainer(): HTMLElement | null {
     try {
@@ -137,6 +143,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
 
   function onEditorConfigChangedRuntime(editor: unknown): void {
     onEditorConfigChanged(editor, {
+      suppressPersistence: transientReadOnlyDepth > 0,
       syncReadOnlyInputModeFn: syncReadOnlyInputModeRuntime,
       lastKnownReadOnly,
       setLastKnownReadOnlyFn(readOnly: boolean | null) { lastKnownReadOnly = readOnly; },
@@ -181,6 +188,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
     ensureTouchSelection,
     syncReadOnlyInputMode: syncReadOnlyInputModeRuntime,
     onEditorConfigChanged: onEditorConfigChangedRuntime,
+    withTransientReadOnlyChange,
     applyEditorTypography,
     applyLineNumberSizing,
   };

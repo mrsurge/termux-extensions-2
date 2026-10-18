@@ -389,7 +389,11 @@ async def editor_runtime_reload_disk_content_if_active(
 
 
 def editor_runtime_record_save_sha(abs_path: str, sha256: str) -> None:
+    abs_path = str(Path(abs_path).resolve())
+    _LAST_SAVE_SHA.pop(abs_path, None)
     _LAST_SAVE_SHA[abs_path] = sha256
+    if len(_LAST_SAVE_SHA) > 512:
+        _LAST_SAVE_SHA.pop(next(iter(_LAST_SAVE_SHA)))
 
 
 def editor_runtime_read_disk_text(path: str) -> str:
@@ -414,6 +418,7 @@ async def editor_runtime_request_save_snapshot(
     *,
     client_instance_id: str,
     timeout_s: float = 3.0,
+    extra: dict[str, object] | None = None,
 ) -> dict[str, object]:
     loop = asyncio.get_running_loop()
     fut: asyncio.Future[dict[str, object]] = loop.create_future()
@@ -422,7 +427,7 @@ async def editor_runtime_request_save_snapshot(
     try:
         await _emit_editor_rpc_notification_to_room(
             EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
-            {"requestId": request_id, "request_id": request_id, "requestedAtMs": int(time.time() * 1000)},
+            {"requestId": request_id, "request_id": request_id, "requestedAtMs": int(time.time() * 1000), **(extra or {})},
             room=client_presentation_room(client_instance_id),
         )
         return await asyncio.wait_for(fut, timeout=timeout_s)
@@ -936,8 +941,10 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
     # Suppress watcher event triggered by our own save
     suppressed_sha = _LAST_SAVE_SHA.get(active_norm)
     if suppressed_sha and suppressed_sha == disk_sha:
-        _ = _LAST_SAVE_SHA.pop(active_norm, None)
+        # Watchers can deliver multiple notifications for one atomic save.
+        # Keep the hash until a different disk version is actually observed.
         return False
+    _LAST_SAVE_SHA.pop(active_norm, None)
 
     # Check against cached draft / last known SHA
     cached = _history_store.get_cached_document(project, active_norm)

@@ -1,27 +1,8 @@
-// @ts-check
-
-/**
- * @param {{
- *   getClientId: () => string | null,
- *   setEditorViewState: (state: any) => void,
- *   applyStateToMenus: (state: any) => void
- * }} deps
- */
-export function installPrefsSync(deps: any) {
-  window.__codeTe2HandlePrefsChanged = function(payload: any) {
+// Compatibility ingress shares the project/revision-checked preference owner.
+export function installPrefsSync(deps: { apply(payload: unknown): boolean }) {
+  window.__codeTe2HandlePrefsChanged = function(payload: unknown) {
     try {
-      const viewState = payload && typeof payload === 'object'
-        ? (payload.view_state || payload.viewState || null)
-        : null;
-      if (!viewState || typeof viewState !== 'object') return;
-
-      try {
-        const clientId = deps.getClientId();
-        if (payload.source_client && clientId && String(payload.source_client) === String(clientId)) return;
-      } catch (_) {}
-
-      deps.setEditorViewState(viewState);
-      deps.applyStateToMenus(viewState);
+      deps.apply(payload);
     } catch (err) {
       console.warn('[PrefsSync] Failed to apply prefs_changed:', err);
     }

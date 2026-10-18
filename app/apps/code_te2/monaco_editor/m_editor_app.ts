@@ -104,6 +104,7 @@ import {
 import { applyGitBaselines as applyGitBaselinesRuntime } from "./editor_git_baseline_runtime.ts";
 import { createEditorLanguageBridgeProviders } from "./editor_language_bridge_providers.ts";
 import { registerEditorSaveMirrorSocketHandlers } from "./editor_save_mirror_socket_handlers.ts";
+import { getBooleanPref } from "./editor_pref_read_utils.ts";
 import { registerEditorRuntimeSocketHandlers } from "./editor_socket_runtime_handlers.ts";
 import { createEditorBreadcrumbRuntime } from "./editor_breadcrumb_runtime.ts";
 import { createEditorRpcHostActionRuntime } from "./editor_rpc_host_action_runtime.ts";
@@ -111,7 +112,7 @@ import { bootMonacoRuntime } from "./editor_monaco_boot_runtime.ts";
 import { registerEditorSocketConnectionHandlers } from "./editor_socket_connection_runtime.ts";
 import { createEditorWorkbenchLanguageCatalogRuntime } from "./editor_workbench_language_catalog_runtime.ts";
 import { createEditorWorkbenchRuntime } from "./editor_workbench_runtime.ts";
-import { createEditorRpcTransport } from "./editor_rpc_transport.ts";
+import { createEditorRpcTransport, publishEditorControlResponse } from "./editor_rpc_transport.ts";
 import {
   EDITOR_RPC_METHODS,
   EDITOR_RPC_NOTIFICATIONS,
@@ -1844,13 +1845,8 @@ interface MonacoBootWindowLike extends Window {
     eventName: string,
     payload: Record<string, unknown>,
   ): boolean {
-    if (eventName === "editor_open_complete") {
-      return editorRpcTransport.publishReliable(
-        EDITOR_RPC_METHODS.openCompletePublish,
-        payload,
-        { timeoutMs: 10000 },
-      );
-    }
+    const controlResponse = publishEditorControlResponse(editorRpcTransport, eventName, payload);
+    if (controlResponse !== null) return controlResponse;
     const eventMethodMap: Record<string, string> = {
       editor_cache_state: EDITOR_RPC_METHODS.cacheStatePublish,
       editor_draft_state: EDITOR_RPC_METHODS.draftStatePublish,
@@ -1858,7 +1854,6 @@ interface MonacoBootWindowLike extends Window {
       editor_ready: EDITOR_RPC_METHODS.readyPublish,
       "editor:iframe_ready": EDITOR_RPC_METHODS.readyPublish,
       editor_diagnostics_counts: EDITOR_RPC_METHODS.diagnosticsCountsPublish,
-      editor_save_snapshot_response: EDITOR_RPC_METHODS.saveSnapshotResponse,
       editor_issues_dump_response: EDITOR_RPC_METHODS.issuesDumpResponse,
     };
     const method = eventMethodMap[eventName];
@@ -2546,6 +2541,11 @@ interface MonacoBootWindowLike extends Window {
           },
           getMirrorHotWindowMs: function () {
             return prefRuntime.getMirrorHotWindowMs();
+          },
+          setAutosaveTransitionReadOnly: function (paused: boolean) {
+            uiEditorRuntime.withTransientReadOnlyChange(() => {
+              editor?.updateOptions?.({ readOnly: paused || getBooleanPref(cachedPrefs, 'readOnly') });
+            });
           },
           getClientInstanceId: function () {
             const value = fileEditorSocketQuery().client_instance_id;

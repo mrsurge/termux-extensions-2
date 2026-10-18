@@ -27,6 +27,54 @@ The ALS framework-pipe/Sidebar IPC migration is explicitly next-version work.
 
 ## Ordered remaining work
 
+### Project-scoped autosave and safe switching — approved 2026-10-17
+
+User requires save-mode ownership in each ProjectSidecar, not global preferences,
+and explicit Save All / Discard All / Cancel before enabling autosave. Projects
+without a stored choice start in Draft Mode; never inherit legacy global true.
+Confirmation captures the project, mode/draft revisions and connected editor
+snapshots, then rechecks them before mutation. Pause supporting editors during
+resolution; old assets without the acknowledgement cannot authorize mutation.
+Only exact confirmed draft entries may be evicted. Multi-file resolution is
+sequential, not transactional: report committed progress and never replay an
+uncertain mutation. Preserve Unicode, CRLF, file mode and disk-base checks.
+
+Additional approved prerequisite: keep existing full-model mirrors as durable
+pending-write safety buffers, but move autosave scheduling into the backend.
+The browser's active-tab timer cannot save a file after that tab changes.
+Coalesce pending work by project/file before execution, fence mode revision and
+project generation, and use the existing atomic writer without a snapshot round
+trip. Retain/rebase newer edits during accepted writes. Only known own-write
+ancestry with exact live disk proof may repair a delayed mirror's base; external
+writes remain conflicts. Failure stops autosave, retains recoverable drafts,
+publishes Draft Mode and blocks automatic replay of the failed admission.
+
+Actual project switches flush pending autosave content before root changes and
+retain the editor pause through the handoff. Draft Mode switches do not save
+drafts. In-flight saves, mode transitions and project switches exclude one
+another; conflicting/failed preparation must leave the switch unperformed.
+Destination sidecar preferences are projected independently, with project and
+monotonic mode-revision fences against late old-project responses. A cold worker
+adopting interrupted autosave buffers recovers them in Draft Mode, without
+saving/discarding; ordinary sidecar projection reads do not change modes.
+
+Source checks/builds are in scope. Matching Code TE2 mypyc/source worker and
+frontend publication/reload, live A→B→A/cold-start/Save/Discard/Cancel acceptance,
+commits and releases remain separately gated. No shared framework restart or
+Android changes are authorized by this slice.
+
+Approved cursor follow-up: unify Manual Save, autosave and Save All own-write
+watcher fencing. Suppress in-flight and duplicate own-write notifications rather
+than reopening an already-current Monaco model; preserve genuine different-hash
+external-change handling and newer pending buffers. Validate through the actual
+watcher and existing save/draft/project-switch regressions. Matching Python/domain
+activation and live cursor acceptance remain separate; no runtime restart.
+
+User subsequently accepted the slice live, explicitly including project-switch
+isolation and Save All / Discard All / Cancel. Full backend model projection is
+deferred to the next version for a separate design/approval pass, not required
+for this release and not additional mirroring work in this slice.
+
 ### Immediate user-note finish sequence — 2026-10-17
 
 These clarified user notes precede the remaining R4 cleanup and R5 packaging.
