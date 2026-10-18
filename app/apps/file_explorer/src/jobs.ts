@@ -76,7 +76,9 @@ function feedDto(value: unknown): Feed | null {
 }
 interface Tracking { meta: JobMetadata; lastStatus: string; cleaned: boolean; timer?: ReturnType<typeof setTimeout>; job: ObservedJob }
 export function createJobsController(options: JobsOptions) {
-  const client = options.client && typeof options.client === 'object' && !Array.isArray(options.client) ? objectDto(options.client, 'jobs client') : {};
+  const shared = options.client && typeof options.client === 'object' && !Array.isArray(options.client) ? objectDto(options.client, 'jobs client') : {};
+  const client = callable(shared.createJobClient)
+    ? objectDto(shared.createJobClient('/api/app/file_explorer/jobs'), 'app jobs client') : shared;
   let poller: Feed | null = null, stream: Feed | null = null, suspended = false, disposed = false;
   let feedEpoch = 0;
   const jobs = new Map<string, Tracking>();
@@ -195,7 +197,7 @@ export function createJobsController(options: JobsOptions) {
   }
   async function create(type: string, params: object): Promise<JobRecord> {
     if (disposed) throw new Error('File Explorer jobs controller is disposed');
-    const response = await options.fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, params }) });
+    const response = await options.fetch('/api/app/file_explorer/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, params }) });
     const raw: unknown = await response.json().catch(() => ({})), body = objectDto(raw, 'job response');
     if (!response.ok || body.ok === false) throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${response.status}`);
     return jobRecordDto(body.data ?? body);

@@ -18,7 +18,6 @@ __all__ = [
     "JobContext",
     "JobManager",
     "JobStatus",
-    "manager",
     "register_job_handler",
 ]
 
@@ -53,7 +52,7 @@ class Job:
     finished_at: Optional[float] = None
     _cancel_requested: bool = field(default=False, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
-    _process: Optional[subprocess.Popen] = field(default=None, init=False, repr=False)
+    _process: Optional[subprocess.Popen[bytes]] = field(default=None, init=False, repr=False)
 
     def to_public_dict(self) -> Dict[str, Any]:
         return {
@@ -63,7 +62,7 @@ class Job:
             "message": self.message,
             "result": self.result,
             "error": self.error,
-            "progress": self.progress,
+            "progress": dict(self.progress) if self.progress is not None else None,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -166,7 +165,7 @@ class JobContext:
         self.manager.save_state_async()
         self.manager.notify_job_update(self.job)
 
-    def attach_process(self, proc: subprocess.Popen) -> None:
+    def attach_process(self, proc: subprocess.Popen[bytes]) -> None:
         self.job._process = proc
 
     def detach_process(self) -> None:
@@ -193,7 +192,9 @@ class JobManager:
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.RLock()
         self._save_lock = threading.Lock()
-        self._listeners: List[Tuple[Queue, Optional[Set[str]]]] = []
+        self._save_pending = False
+        self._save_thread: threading.Thread | None = None
+        self._listeners: List[Tuple[Queue[dict[str, object]], Optional[Set[str]]]] = []
         self._load_state()
 
     # --- persistence -------------------------------------------------------
@@ -202,9 +203,8 @@ class JobManager:
             return
         try:
             data = json.loads(self._state_file.read_text())
-        except Exception:
-            self._state_file.unlink(missing_ok=True)
-            return
+        except Exception as exc:
+            raise RuntimeError(f'Cannot read job state: {self._state_file}') from exc
         now = time.time()
         for job_id, record in data.items():
             job = Job.from_state_dict(record)
@@ -216,20 +216,40 @@ class JobManager:
             self._jobs[job_id] = job
 
     def save_state_async(self) -> None:
-        threading.Thread(target=self._save_state, daemon=True).start()
+        with self._lock:
+            self._save_pending = True
+            if self._save_thread is None:
+                self._save_thread = threading.Thread(target=self._save_loop, daemon=True)
+                self._save_thread.start()
+
+    def _save_loop(self) -> None:
+        try:
+            while True:
+                with self._lock:
+                    if not self._save_pending:
+                        self._save_thread = None
+                        return
+                    self._save_pending = False
+                self._save_state()
+                time.sleep(0.1)
+        except BaseException:
+            with self._lock:
+                self._save_thread = None
+            raise
 
     def _save_state(self) -> None:
         with self._save_lock:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            snapshot = {job_id: job.to_state_dict() for job_id, job in self._jobs.items()}
+            with self._lock:
+                snapshot = {job_id: job.to_state_dict() for job_id, job in self._jobs.items()}
             tmp = self._state_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(snapshot, indent=2))
             tmp.replace(self._state_file)
 
     # --- listeners ---------------------------------------------------------
-    def add_listener(self, queue: Queue, job_ids: Optional[Iterable[str]] = None) -> Tuple[Queue, Optional[Set[str]]]:
+    def add_listener(self, queue: Queue[dict[str, object]], job_ids: Optional[Iterable[str]] = None) -> Tuple[Queue[dict[str, object]], Optional[Set[str]]]:
         job_filter = set(job_ids) if job_ids else None
-        listener: Tuple[Queue, Optional[Set[str]]] = (queue, job_filter)
+        listener: Tuple[Queue[dict[str, object]], Optional[Set[str]]] = (queue, job_filter)
         with self._lock:
             self._listeners.append(listener)
             snapshot = [
@@ -244,7 +264,7 @@ class JobManager:
                 pass
         return listener
 
-    def remove_listener(self, listener: Tuple[Queue, Optional[Set[str]]]) -> None:
+    def remove_listener(self, listener: Tuple[Queue[dict[str, object]], Optional[Set[str]]]) -> None:
         with self._lock:
             if listener in self._listeners:
                 self._listeners.remove(listener)
@@ -272,6 +292,8 @@ class JobManager:
             raise ValueError(f"Unknown job type: {job_type}")
         job = Job(job_type=job_type, params=params)
         with self._lock:
+            if sum(job.status in {JobStatus.PENDING, JobStatus.RUNNING} for job in self._jobs.values()) >= 4:
+                raise ValueError('Too many active jobs; wait or cancel an existing job')
             self._jobs[job.id] = job
             self._spawn(job)
             self._prune_finished(max_items=200)
@@ -342,9 +364,6 @@ class JobManager:
         finished.sort(key=lambda jid: self._jobs[jid].finished_at or 0)
         for job_id in finished[:-max_items]:
             self._jobs.pop(job_id, None)
-
-
-manager = JobManager()
 
 
 @register_job_handler("noop")

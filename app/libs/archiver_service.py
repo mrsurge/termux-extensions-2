@@ -1,8 +1,11 @@
 import stat
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from typing import cast
+import msgspec
+from starlette.exceptions import HTTPException
 
-from app.libs.jobs import register_job_handler
+from app.libs.jobs import JobContext, register_job_handler
 from app.libs.archiver import extract_streaming_with_progress, list_archive_entries
 from app.utils.paths import _resolve_user_path
 
@@ -14,7 +17,8 @@ def browse_archive(archive_path: Path, internal_path: str, show_hidden: bool) ->
     children: Dict[str, Dict[str, Any]] = {}
 
     for record in records:
-        entry_path = record.get("pathname", "").strip()
+        raw_path = record.get('pathname')
+        entry_path = raw_path.strip() if isinstance(raw_path, str) else ''
         if not entry_path:
             continue
 
@@ -35,7 +39,8 @@ def browse_archive(archive_path: Path, internal_path: str, show_hidden: bool) ->
         if not show_hidden and top_segment.startswith('.'):
             continue
 
-        is_directory = stat.S_ISDIR(record.get('mode', 0)) or len(relative_parts) > 1
+        mode = record.get('mode')
+        is_directory = (isinstance(mode, int) and stat.S_ISDIR(mode)) or len(relative_parts) > 1
         relative_internal = '/'.join((*internal_parts, top_segment))
 
         child = children.get(top_segment)
@@ -64,13 +69,47 @@ def browse_archive(archive_path: Path, internal_path: str, show_hidden: bool) ->
     return results
 
 
+class ExtractRequest(msgspec.Struct, forbid_unknown_fields=True):
+    archive_path: str
+    destination: str | None = None
+    items: list[str] = msgspec.field(default_factory=list)
+    options: dict[str, object] = msgspec.field(default_factory=dict)
+
+
+def extraction_params(payload: dict[str, object]) -> dict[str, object]:
+    try:
+        request = msgspec.convert(payload, type=ExtractRequest, strict=True)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    from app.libs.archive_operations import archive_path
+    archive = archive_path(request.archive_path, must_exist=True)
+    destination = archive_path(request.destination or str(archive.parent), must_exist=False)
+    if not archive.is_file():
+        raise HTTPException(422, 'Select an archive file')
+    if any(not name or name.startswith(('/', '\\')) or '..' in name.replace('\\', '/').split('/') for name in request.items):
+        raise HTTPException(422, 'Unsafe archive selection')
+    options = request.options
+    if any(key not in {'overwrite', 'password'} for key in options) or options.get('password') not in (None, ''):
+        raise HTTPException(422, 'Unsupported extraction option or encrypted archive')
+    policy = options.get('overwrite', 'rename')
+    if policy is True:
+        policy = 'replace'
+    elif policy is False:
+        policy = 'error'
+    if policy not in ('rename', 'skip', 'replace', 'error'):
+        raise HTTPException(422, 'Invalid overwrite policy')
+    return {'archive_path': str(archive), 'destination': str(destination), 'items': request.items,
+        'options': {'overwrite': policy}}
+
+
 @register_job_handler("extract_archive")
-def job_extract_archive(ctx, params):
+def job_extract_archive(ctx: JobContext, params: dict[str, object]) -> None:
     """Background job handler for archive extraction (libarchive)."""
-    raw_archive_path = params.get("archive_path")
-    items = params.get("items") or []
-    destination_raw = params.get("destination")
-    options = params.get("options") or {}
+    params = extraction_params(params)
+    raw_archive_path = cast(str, params['archive_path'])
+    items = cast(list[str], params['items'])
+    destination_raw = cast(str, params['destination'])
+    options = cast(dict[str, object], params['options'])
 
     if not isinstance(raw_archive_path, str) or not raw_archive_path.strip():
         raise ValueError("archive_path is required")
@@ -104,6 +143,7 @@ def job_extract_archive(ctx, params):
         dest_dir=destination,
         include=filtered_items,
         on_progress=handle_progress,
+        overwrite=cast(str, options['overwrite']),
     )
 
     ctx.set_progress(completed=total_bytes, total=total_bytes, detail="100%")

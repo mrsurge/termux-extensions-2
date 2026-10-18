@@ -13,6 +13,9 @@ from urllib.parse import parse_qsl
 
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse, Response
+from app.libs.app_jobs import AppJobs
+from typing import cast
+from starlette.types import Scope as StarletteScope, Receive as StarletteReceive
 from app.libs.te2_asgi import asgi_bytes as _bytes, asgi_text as _string
 from app.libs.te2_asgi import noop_lifespan, read_json_object, redirect_to, require_method, resolve_http_response
 Scope = MutableMapping[str, object]
@@ -30,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 
 class FileExplorerHTTP:
-    def __init__(self, *, query_handler: QueryHandler, commands: Mapping[str, CommandHandler]) -> None:
+    def __init__(self, *, query_handler: QueryHandler, commands: Mapping[str, CommandHandler], jobs: AppJobs | None = None) -> None:
+        self.jobs = jobs
         self.query_handler: QueryHandler = query_handler
         self.commands: dict[str, CommandHandler] = dict(commands)
         # Construct once: mypyc's frozenset | dict_keys specialization returns
@@ -51,6 +55,8 @@ class FileExplorerHTTP:
 
     async def _dispatch(self, scope: Scope, receive: Receive) -> Response:
         path = _string(scope['path'])
+        if self.jobs is not None and (path == '/jobs' or path.startswith('/jobs/')):
+            return await self.jobs.dispatch(cast(StarletteScope, scope), cast(StarletteReceive, receive))
         method = _string(scope['method'])
         known = self.paths
         if path not in known:

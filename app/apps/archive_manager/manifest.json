@@ -3,7 +3,7 @@
   "name": "Archive Manager",
   "icon_emoji": "🗜️",
   "version": "0.2.353",
-  "description": "Browse and manage archives using 7-Zip (7zz) with Termux integration.",
+  "description": "Browse and extract archives with libarchive; create and update ZIP archives.",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"
   },

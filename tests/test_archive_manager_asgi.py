@@ -113,12 +113,12 @@ def test_extraction_calls_real_job_signature_and_retains_job_envelope(archive, h
         def create_job(self, job_type, params):
             calls.append((job_type, params))
             return Job(job_type=job_type, params=params, id="job-test")
-    monkeypatch.setattr(backend, "job_manager", Manager())
+    monkeypatch.setattr(backend.JOBS, "_manager", Manager())
     response = request("POST", "/archives/extract", json={"archive_path": str(archive), "items": ["visible.txt"], "destination": str(home / "output"), "options": {"overwrite": True}})
     assert response.status_code == 200
     assert response.json()["data"]["id"] == "job-test"
     assert response.json()["data"]["type"] == "extract_archive"
-    assert calls == [("extract_archive", {"archive_path": str(archive), "items": ["visible.txt"], "destination": str(home / "output"), "options": {"overwrite": True}})]
+    assert calls == [("extract_archive", {"archive_path": str(archive), "items": ["visible.txt"], "destination": str(home / "output"), "options": {"overwrite": 'replace'}})]
     assert request("POST", "/archives/extract", json={}).status_code == 400
     assert len(calls) == 1
 
@@ -144,7 +144,7 @@ def test_invalid_command_bodies_do_not_create_jobs(path, body, monkeypatch):
     class Manager:
         def create_job(self, job_type, params):
             pytest.fail("invalid request created a job")
-    monkeypatch.setattr(backend, "job_manager", Manager())
+    monkeypatch.setattr(backend.JOBS, "_manager", Manager())
     assert request("POST", path, content=body).status_code == 422
 
 

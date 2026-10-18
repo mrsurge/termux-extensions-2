@@ -12,7 +12,7 @@ from starlette.types import Receive, Scope, Send
 from app.libs.te2_asgi import noop_lifespan, read_json_object, redirect_to, require_method, resolve_http_response
 
 MAX_BODY_BYTES = 1024 * 1024
-ROUTES = {"/ping": "GET", "/browse": "GET", "/archives/launch": "POST", "/archives/extract": "POST"}
+ROUTES = {"/ping": "GET", "/browse": "GET", "/archives/launch": "POST", "/archives/extract": "POST", "/archives/create": "POST", "/archives/test": "POST"}
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +38,8 @@ class ArchiveManagerASGI:
         from . import backend
 
         original = scope["path"]
+        if original == '/jobs' or original.startswith('/jobs/'):
+            return await backend.JOBS.dispatch(scope, receive)
         path = original.rstrip("/")
         expected = ROUTES.get(path)
         if expected is None:
@@ -57,6 +59,9 @@ class ArchiveManagerASGI:
                 hidden=_query_bool(query, "hidden"), archive=_query_bool(query, "archive"))
         else:
             body = await read_json_object(scope, receive, max_bytes=MAX_BODY_BYTES)
-            handler = backend.launch_archive if path == "/archives/launch" else backend.extract_archive
+            handler = {"/archives/launch": backend.launch_archive,
+                "/archives/extract": backend.extract_archive,
+                "/archives/create": backend.create_archive,
+                "/archives/test": backend.test_archive}[path]
             result = await asyncio.to_thread(handler, body)
         return JSONResponse(result)

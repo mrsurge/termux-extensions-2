@@ -22,7 +22,8 @@ configuration:
 - `terminal_drawer.ts`: existing independent terminal controller/transport.
 - `src/api.ts`: validates host-unwrapped app HTTP DTOs and exposes named file
   operations. Nullable listing metadata becomes absent; legacy array listings
-  remain supported. Global jobs/bookmarks and intents retain their own boundary.
+  remain supported. Jobs use the app-owned /api/app/file_explorer/jobs boundary;
+  bookmarks and intents retain their own boundary.
 - `src/tab_protocol.ts` and `src/tab_client.ts`: validate backend tab/terminal
   DTOs over existing MessagePack Socket.IO, with serialized mutation and
   disconnect/selection fences. Uncertain mutations are never replayed; resync

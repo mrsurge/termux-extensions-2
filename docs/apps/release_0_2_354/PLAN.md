@@ -27,6 +27,24 @@ The ALS framework-pipe/Sidebar IPC migration is explicitly next-version work.
 
 ## Ordered remaining work
 
+### Archive compatibility repair — approved 2026-10-18
+
+User reports Archive Manager create 404 and broken archive jobs in File Explorer.
+Source confirms missing create/test handlers, retired global /api/jobs callers,
+nonexistent /archives/expand fallback and stale 7-Zip creation defaults.
+Approved bounded repair: app-owned job HTTP endpoints/state using a neutral
+shared library, ZIP create/update plus libarchive read/test/extract, progress and
+cancel, explicit overwrite/error handling and path/link safety. Reuse existing
+dependencies only; no new package, global framework job API, native rebuild,
+cross-app intent migration or runtime restart. Strict Python/TS checks, real
+archive regressions, frontend builds and APK seed refresh are in scope.
+Runtime acceptance stays in the final release validation pass.
+
+This is deliberately a release compatibility seam, not the long-term archive
+architecture. User intends to offload Python archiving/job activities to the
+framework pipe in the next version. Keep current app routes/operation boundary
+narrow and replaceable rather than broadening Python functionality.
+
 ### Accepted native builds and Android settings/assets — 2026-10-18
 
 User accepts the current Rust binaries and newly built/running mypyc extension;
@@ -448,6 +466,10 @@ approved merge/tag/GitHub/PyPI publication workflow. README already states Gboar
 18+ support; update release references at release time, not during this audit.
 
 ## Explicit next-version backlog
+
+Move archive execution/jobs from the interim app-owned Python implementation
+behind framework-pipe services (user direction 2026-10-18). This is separate
+from the current bounded repair and does not add a release dependency.
 
 Shared Rust library investigation is explicitly deferred until the next release
 (user direction 2026-10-18). Audit duplicated framework/Code TE2 worker crates and

@@ -922,6 +922,32 @@ relevant after final packaging; do not count unrun stress experiments as bugs.
 - [ ] Final release artifact installation/client matrix; older wheels/APKs cannot
   accept source changes introduced since those artifacts were built.
 
+## Archive compatibility repair — 2026-10-18
+
+- [x] User-approved bounded repair; no new dependencies. Missing Create/Test
+  routes, retired global jobs API, nonexistent expand fallback and .7z default
+  confirmed from source. Long-term archive execution moves to framework pipe
+  next version; no global Python framework service restored.
+- [x] Archive Manager and File Explorer now own /jobs routes under their app
+  prefixes, with separate app-data jobs.json and allowed operations. Existing
+  shared helper binds poll/cancel/delete to the caller's app. No uncertain replay.
+- [x] ZIP create/update and libarchive verification/extraction implemented;
+  explicit overwrite consent, atomic ZIP staging, progress/cancel, bounded active
+  jobs, coalesced persistence, traversal/link rejection and overwrite policies.
+  Existing global job-manager singleton removed; no state writes on import.
+- [x] Real archive/HTTP regressions: 82 tests pass, including app isolation,
+  create/update/test/extract, cancel/delete guards and malicious output paths.
+  Archive frontend: 9 tests; File Explorer frontend: 145 tests; bound job-client
+  helper: 1 test; native asset/interception checks: 9 tests. Both apps typecheck
+  and build; strict mypy passes all nine touched Python modules, including the
+  shared job implementation. Shared APK seed refreshed. Existing Node module-type and Starlette
+  TestClient deprecation warnings remain, without new dependencies to quiet them.
+- [x] User reports the archive repair working live and requests commit/push.
+  Final packaged wheel/APK acceptance remains a separate release gate.
+  No agent runtime restart, Code TE2 mypyc/native build or APK assembly here.
+  Recorded active compiled manifest contains none of the changed archive/job/
+  File Explorer modules. Technical contract: archive_manager/README.md.
+
 ## Android settings OTA and asset-source audit — 2026-10-18
 
 - [x] User reports current Rust binaries/new mypyc extension running well and
@@ -975,7 +1001,8 @@ relevant after final packaging; do not count unrun stress experiments as bugs.
   expansion, native diagnostic tooling and optimization/benchmark experiments.
 - Aria 502/stale-shell investigation, socket/event/intent modernization; known
   unresolved behavior is not relabeled accepted/error-free.
-- Archive intent/job/context-menu expansion and missing Create/Add/Test handlers.
+- Archive intent/job/context-menu expansion beyond the compatibility repair;
+  next-version framework-pipe execution replaces the interim Python operations.
 - Electromux public-host/calculator expansion, exhaustive crash/failure matrices,
   opt-in legacy filesystem cleanup, broader platform/device acceptance.
 

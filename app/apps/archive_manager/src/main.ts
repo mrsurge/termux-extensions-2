@@ -307,7 +307,7 @@ function useToast(host: Host | undefined, message: string, duration = 2500) {
 }
 
 async function createJobRequest(type: string, params: Record<string, unknown>): Promise<Job> {
-  const response = await fetch('/api/jobs', {
+  const response = await fetch('/api/app/archive_manager/jobs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, params }),
@@ -338,6 +338,7 @@ const jobTracker: { poller: JobPoller | null; jobs: Map<string, JobInfo> } = {
 function ensureJobPoller(state: State) {
   if (!jobTracker.poller) {
     jobTracker.poller = createJobPoller({
+      baseUrl: '/api/app/archive_manager/jobs',
       onUpdate: (jobs) => handleJobUpdates(state, jobs),
       onError: (err) => console.error('[archive jobs]', err),
     });
@@ -356,7 +357,7 @@ function maybeStopJobPoller() {
 function trackExtractionJob(state: State, job: Job, meta: ExtractionMeta) {
   const info = {
     meta,
-    lastStatus: job.status,
+    lastStatus: '',
     cleaned: false,
   };
   jobTracker.jobs.set(job.id, info);
@@ -381,7 +382,7 @@ function handleJobUpdates(state: State, jobs: unknown) {
 
 function updateJobNotification(state: State, job: Job, info: JobInfo) {
   const meta = info.meta;
-  const title = meta.archiveName ? `Extract ${meta.archiveName}` : 'Extract archive';
+  const title = meta.archiveName ? `Archive · ${meta.archiveName}` : 'Archive operation';
   let message = meta.destination ? `→ ${meta.destination}` : 'Running';
   let variant: 'info' | 'success' | 'error' | 'warning' = 'info';
   const actions: NotificationAction[] = [];
@@ -391,13 +392,13 @@ function updateJobNotification(state: State, job: Job, info: JobInfo) {
   }
   if (job.status === JobStatus.SUCCEEDED) {
     variant = 'success';
-    message = job.message || `Extracted to ${meta.destination}`;
+    message = job.message || `Completed → ${meta.destination}`;
   } else if (job.status === JobStatus.FAILED) {
     variant = 'error';
-    message = job.error || 'Extraction failed';
+    message = job.error || 'Archive operation failed';
   } else if (job.status === JobStatus.CANCELLED) {
     variant = 'warning';
-    message = job.message || 'Extraction cancelled';
+    message = job.message || 'Archive operation cancelled';
   }
 
   if (job.status === JobStatus.RUNNING || job.status === JobStatus.PENDING) {
@@ -405,7 +406,7 @@ function updateJobNotification(state: State, job: Job, info: JobInfo) {
       label: 'Cancel',
       onClick: async () => {
         try {
-          await cancelJob(job.id);
+          await cancelJob(job.id, undefined, '/api/app/archive_manager/jobs');
           useToast(state.host, 'Cancellation requested.');
         } catch (error) {
           useToast(state.host, errorMessage(error, 'Failed to cancel job.'));
@@ -428,7 +429,7 @@ function updateJobNotification(state: State, job: Job, info: JobInfo) {
       onDismiss: () => {
         jobTracker.jobs.delete(job.id);
         if (TERMINAL_STATUSES.has(job.status)) {
-          deleteJob(job.id).catch(() => {});
+          deleteJob(job.id, undefined, '/api/app/archive_manager/jobs').catch(() => {});
         }
         maybeStopJobPoller();
       },
@@ -470,7 +471,7 @@ function scheduleJobCleanup(state: State, job: Job, info: JobInfo) {
   setTimeout(() => {
     window.teUI?.dismiss?.(job.id);
     jobTracker.jobs.delete(job.id);
-    deleteJob(job.id).catch(() => {});
+    deleteJob(job.id, undefined, '/api/app/archive_manager/jobs').catch(() => {});
     maybeStopJobPoller();
   }, 4000);
 }
@@ -486,7 +487,7 @@ function transformEntries(state: State, data: import('./contracts').Listing) {
   state.entryMap = map;
 }
 
-async function promptForArchivePath(state: State, initialName = 'archive.7z'): Promise<PickerTarget | null> {
+async function promptForArchivePath(state: State, initialName = 'archive.zip'): Promise<PickerTarget | null> {
   if (!window.teFilePicker || typeof window.teFilePicker.saveFile !== 'function') {
     const fallback = await window.teUI?.dialog.prompt('Enter archive destination path (relative to home)', `~/${initialName}`);
     return fallback ? { path: fallback } : null;
@@ -570,6 +571,20 @@ export default async function init(root: HTMLElement, api: API, host?: Host) {
   const exitArchiveBtn = root.querySelector<HTMLElement>('[data-action="exit-archive"]');
   const extractBtn = requiredElement(root, '[data-action="extract"]', HTMLButtonElement);
   const addBtn = requiredElement(root, '[data-action="add-to-archive"]', HTMLButtonElement);
+  const testBtn = root.querySelector<HTMLButtonElement>('[data-action="test-archive"]');
+  testBtn?.addEventListener('click', async () => {
+    const selected = Array.from(state.selectedIds).map(id => state.entryMap.get(id));
+    const path = state.mode === 'archive' ? state.archivePath
+      : selected.length === 1 && selected[0]?.isArchive ? selected[0].path : null;
+    if (!path) return;
+    try {
+      const job = decodeJob(unwrapResponse(await state.client.testArchive({ archive_path: path }), true, 200));
+      trackExtractionJob(state, job, { archivePath: path, archiveName: path.split('/').pop() || path, destination: '', itemCount: 0 });
+      useToast(host, 'Archive verification started.');
+    } catch (error) {
+      useToast(host, errorMessage(error, 'Unable to test archive.'));
+    }
+  });
   const pickBtn = root.querySelector<HTMLElement>('[data-action="pick-target"]');
   const showHiddenToggle = requiredElement(root, '#am-show-hidden', HTMLInputElement);
   const menuGroups = Array.from(root.querySelectorAll<HTMLElement>('.am-menu-group'));
@@ -918,6 +933,7 @@ export default async function init(root: HTMLElement, api: API, host?: Host) {
 
     newArchiveBtn.disabled = !(state.mode === 'filesystem' && hasSelection);
     addBtn.disabled = !(state.mode === 'filesystem' && hasSelection);
+    if (testBtn) testBtn.disabled = !(state.mode === 'archive' || singleSelection?.isArchive);
 
     const canExtract = (state.mode === 'archive' && hasSelection) ||
       (state.mode === 'filesystem' && singleSelection && singleSelection.isArchive);
@@ -999,20 +1015,21 @@ export default async function init(root: HTMLElement, api: API, host?: Host) {
       return;
     }
     const selected = Array.from(state.selectedIds).map((id) => state.entryMap.get(id)).filter((entry): entry is Entry => entry !== undefined);
-    const defaultName = selected.length === 1 ? `${selected[0].name}.7z` : 'archive.7z';
+    const defaultName = selected.length === 1 ? `${selected[0].name}.zip` : 'archive.zip';
     const target = await promptForArchivePath(state, defaultName);
     if (!target) return;
-    if (target.existed && !(await window.teUI?.dialog.confirm('Archive already exists. Overwrite/append?'))) {
+    if (target.existed && !(await window.teUI?.dialog.confirm('Archive already exists. Replace it?'))) {
       return;
     }
     const body = {
       archive_path: target.path,
       sources: selected.map((entry) => entry.path),
-      options: {},
+      options: { overwrite: target.existed === true },
     };
     try {
-      await state.client.createArchive(body);
-      useToast(host, 'Archive created successfully.');
+      const job = decodeJob(unwrapResponse(await state.client.createArchive(body), true, 200));
+      trackExtractionJob(state, job, { archivePath: target.path, archiveName: defaultName, destination: target.path.split('/').slice(0, -1).join('/'), itemCount: selected.length });
+      useToast(host, 'Archive creation started.');
       state.clearSelection();
       state.refresh();
     } catch (error) {
@@ -1033,12 +1050,13 @@ export default async function init(root: HTMLElement, api: API, host?: Host) {
       return;
     }
     try {
-      await state.client.createArchive({
+      const job = decodeJob(unwrapResponse(await state.client.createArchive({
         archive_path: target.path,
         sources: selected.map((entry) => entry.path),
-        options: {},
-      });
-      useToast(host, 'Archive updated successfully.');
+        options: { update: true },
+      }), true, 200));
+      trackExtractionJob(state, job, { archivePath: target.path, archiveName: target.path.split('/').pop() || target.path, destination: target.path.split('/').slice(0, -1).join('/'), itemCount: selected.length });
+      useToast(host, 'Archive update started.');
       state.clearSelection();
       state.refresh();
     } catch (error) {

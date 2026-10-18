@@ -26,6 +26,8 @@ from app.apps.file_explorer.tab_service import compose_tabs
 from app.te2_paths import te2_app_data_home
 
 from app.libs.jobs import JobCancelled, JobContext, register_job_handler
+from app.libs.app_jobs import AppJobs
+from app.libs import archiver_service  # Registers the shared extraction operation.
 from app.libs import pipe_runtime
 
 
@@ -1293,6 +1295,7 @@ async def _http_query(path: str, query: dict[str, str]) -> object:
 
 
 HTTP_APP = FileExplorerHTTP(
+    jobs=AppJobs('file_explorer', frozenset({'extract_archive', 'bulk_copy', 'bulk_move'})),
     query_handler=_http_query,
     commands={
         '/intent': dispatch_embedded_intent,

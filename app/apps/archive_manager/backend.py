@@ -14,25 +14,19 @@ import msgspec
 from starlette.exceptions import HTTPException
 
 from app.libs.archiver_service import browse_archive
-from app.libs.jobs import manager as job_manager
+from app.libs.app_jobs import AppJobs
+from app.libs import archive_operations  # Registers neutral archive handlers.
 from app.utils.paths import _resolve_user_path
 
 APP_ID = str(os.environ.get("TE_APP_ID") or "archive_manager").strip() or "archive_manager"
 JsonObject = dict[str, object]
+JOBS = AppJobs('archive_manager', frozenset({'extract_archive', 'create_archive', 'test_archive'}))
 
 
 class _ReadableHttpResponse(Protocol):
     def __enter__(self) -> Self: ...
     def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: object | None) -> None: ...
     def read(self) -> bytes: ...
-
-
-class _JobResult(Protocol):
-    def to_public_dict(self) -> JsonObject: ...
-
-
-class _JobManager(Protocol):
-    def create_job(self, job_type: str, params: JsonObject) -> _JobResult: ...
 
 
 class LaunchArchiveRequest(msgspec.Struct, kw_only=True):
@@ -260,21 +254,22 @@ def extract_archive(payload: JsonObject) -> JsonObject:
     if not isinstance(raw_archive_path, str) or not raw_archive_path.strip():
         raise HTTPException(status_code=400, detail="archive_path is required")
 
-    try:
-        manager = cast(_JobManager, job_manager)
-        job = manager.create_job(
-            job_type="extract_archive",
-            params={
+    return {'ok': True, 'data': JOBS.create('extract_archive', {
                 "archive_path": raw_archive_path,
                 "items": items,
                 "destination": destination_raw,
                 "options": options,
-            },
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to create extraction job: {exc}")
+            })}
 
-    return {"ok": True, "data": job.to_public_dict()}
+
+def create_archive(payload: JsonObject) -> JsonObject:
+    params = archive_operations.create_params(payload)
+    return {'ok': True, 'data': JOBS.create('create_archive', params)}
+
+
+def test_archive(payload: JsonObject) -> JsonObject:
+    params = archive_operations.test_params(payload)
+    return {'ok': True, 'data': JOBS.create('test_archive', params)}
 
 
 from .http_app import ArchiveManagerASGI

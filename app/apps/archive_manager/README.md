@@ -3,7 +3,7 @@
 The Archive Manager app provides a touch-friendly interface for browsing the
 filesystem and archive contents using the native libarchive library through
 Python's `libarchive-c` binding. Supported backend capabilities are browsing,
-launcher URL preparation and extraction jobs.
+launcher URL preparation, extraction/verification jobs and ZIP creation/update.
 
 ## Requirements
 - Native libarchive plus Python `libarchive-c` (declared in TE2 requirements).
@@ -16,10 +16,30 @@ launcher URL preparation and extraction jobs.
 ## Backend Endpoints
 All endpoints live under `/api/app/archive_manager/` and return the standard
 `{ ok: true, data: ... }` success envelope; HTTP errors retain `{ detail: ... }`.
-The four implemented routes are `/ping`, `/browse`, `/archives/launch` and
-`/archives/extract`. The frontend still contains Create/Add/Test controls calling
-unimplemented `/archives/create` and `/archives/test`; these are a separately
-tracked capability gap, not supported backend APIs.
+Implemented routes are `/ping`, `/browse`, `/archives/launch`, `/archives/extract`,
+`/archives/create` and `/archives/test`. Create defaults to `.zip`; creation and
+Add support ZIP only and reject other output formats explicitly. Add rewrites
+the ZIP atomically, retaining other members and replacing matching paths. Create
+requires explicit overwrite consent for an existing target; cancellation/failure
+before commit preserves it. No 7-Zip executable or new dependency is required.
+
+`/jobs` GET/POST and `/jobs/<id>` GET/DELETE plus `/jobs/<id>/cancel` POST are
+app-owned admission/status/cancel routes, not framework `/api/jobs`. Archive
+Manager and File Explorer use separate `<app-data>/jobs.json` registries and
+allowlists. Existing pending/running records become failed after worker restart,
+never replayed. Responses are job admission, not operation completion; polling
+drives progress and completion UI. Four concurrent jobs per app are allowed;
+state writes coalesce rather than creating a thread per progress update.
+
+Extraction uses libarchive and rejects traversal, escaping links and special
+files; overwrite policy is rename (default), skip, error or replace. Completed
+members can remain after cancellation; extraction is not a whole-directory
+transaction. Password-protected extraction is explicitly unsupported. ZIP and
+per-file extraction staging uses same-directory temporary files.
+
+This is a bounded current-release compatibility repair. Next-version direction
+is to move archive execution/jobs behind the framework pipe, not expand Python
+archiving or resurrect the retired global Python framework API.
 
 `backend.py` exports `TE2_ASGI_APP`, composed in `http_app.py` using neutral
 `app.libs.te2_asgi` helpers. App-owned msgspec request shapes validate commands;

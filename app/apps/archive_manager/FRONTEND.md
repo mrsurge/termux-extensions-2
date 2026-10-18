@@ -22,11 +22,11 @@ adapter request. Development node_modules is excluded from Python packages.
 
 Directory/archive browsing, query seeds, host restoration, selection, bookmarks,
 file pickers and extraction-job notification/cancellation retain their existing
-ownership and routes. Extraction is a single `/api/jobs` admission; failures do
-not retry through another API. Typing does not introduce a session registry or
-implement the separately planned archive intent brokerage. The legacy Create/
-Add/Test client methods remain; their missing backend capabilities are tracked
-separately and must not be described as supported.
+ownership. Jobs now use `/api/app/archive_manager/jobs` and the shared helper's
+explicit base URL for status/cancel/delete, not the retired `/api/jobs` routes.
+Failures do not retry through another API. Create/Add/Test now have implemented
+app endpoints and track admission through the same notifications; ZIP is the
+write format. No session registry or cross-app intent brokerage is introduced.
 
 The frontend tests execute compiled source with isolated DOM/host/job fixtures;
 they are synthetic, not live worker or extraction-completion acceptance. Python

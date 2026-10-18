@@ -11,6 +11,7 @@
 export function createJobPoller({
   interval = 2500,
   fetcher,
+  baseUrl = '/api/jobs',
   onUpdate = () => {},
   onError = (err) => console.error('[jobs]', err),
 } = {}) {
@@ -20,7 +21,7 @@ export function createJobPoller({
   const doFetch = async () => {
     if (!active) return;
     try {
-      const response = await (fetcher || defaultFetch)('/api/jobs');
+      const response = await (fetcher || defaultFetch)(baseUrl);
       onUpdate(Array.isArray(response.data) ? response.data : response);
     } catch (error) {
       onError(error);
@@ -129,21 +130,30 @@ export function createJobStream({
   };
 }
 
-export async function fetchJob(jobId, fetcher) {
-  const response = await (fetcher || defaultFetch)(`/api/jobs/${encodeURIComponent(jobId)}`);
+export async function fetchJob(jobId, fetcher, baseUrl = '/api/jobs') {
+  const response = await (fetcher || defaultFetch)(`${baseUrl}/${encodeURIComponent(jobId)}`);
   return response.data || response;
 }
 
-export async function cancelJob(jobId, fetcher) {
+export async function cancelJob(jobId, fetcher, baseUrl = '/api/jobs') {
   const fn = fetcher || defaultFetch;
-  const response = await fn(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+  const response = await fn(`${baseUrl}/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
   return response.data || response;
 }
 
-export async function deleteJob(jobId, fetcher) {
+export async function deleteJob(jobId, fetcher, baseUrl = '/api/jobs') {
   const fn = fetcher || defaultFetch;
-  const response = await fn(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+  const response = await fn(`${baseUrl}/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
   return response.data || response;
+}
+
+export function createJobClient(baseUrl) {
+  return {
+    createJobPoller: options => createJobPoller({...options, baseUrl}),
+    fetchJob: (id, fetcher) => fetchJob(id, fetcher, baseUrl),
+    cancelJob: (id, fetcher) => cancelJob(id, fetcher, baseUrl),
+    deleteJob: (id, fetcher) => deleteJob(id, fetcher, baseUrl),
+  };
 }
 
 if (typeof window !== 'undefined') {
@@ -153,5 +163,6 @@ if (typeof window !== 'undefined') {
     fetchJob,
     cancelJob,
     deleteJob,
+    createJobClient,
   });
 }

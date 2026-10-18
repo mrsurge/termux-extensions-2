@@ -136,14 +136,13 @@ export function createOpenActions(deps: OpenActionDependencies) {
         if (current(origin)) deps.notify('Extraction started.');
       } else {
         deps.notify('Extracting archive…');
-        const response = await deps.fetch('/api/app/archive_manager/archives/expand', {
+        const response = await deps.fetch('/api/app/file_explorer/jobs', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ archive_path: captured.path, destination: destination.path, options: { overwrite: 'rename', password: null } }),
+          body: JSON.stringify({ type: 'extract_archive', params: { archive_path: captured.path, items: [], destination: destination.path, options: { overwrite: 'rename', password: null } } }),
         });
         await responseBody(response, 'Extraction failed');
         if (!current(origin)) return;
-        deps.notify(`Archive extracted to ${destination.path}`);
-        if (destination.path === snapshot.path) await deps.loadDirectory(snapshot.path);
+        deps.notify('Extraction started; reopen the destination after completion.');
       }
     } catch (error) {
       if (current(origin) && message(error, '') !== 'cancelled') deps.notify(message(error, 'Extraction failed'));
