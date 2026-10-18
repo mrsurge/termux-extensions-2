@@ -1,4 +1,4 @@
-"""Preference-owned managed installation identity, with no executable probes."""
+"""Managed layout hints; backend disk assessment owns installation availability."""
 # pyright: strict
 from __future__ import annotations
 
@@ -28,18 +28,13 @@ def default_layout() -> Layout:
 def selected_installation() -> CodeServerInstallation | None:
     snapshot = _state_store().read()
     state = snapshot.installation
-    if state is None:
-        # One-time adoption: attempt the known private launcher, never scan disks.
-        # Success records the pin/layout; failure records unavailable, ending retry.
-        if snapshot.web_workers_enabled:
-            return None
-        return installation_for_layout(default_layout())
-    if state.get("installed") is not True or state.get("version") != PINNED_CODE_SERVER_VERSION:
-        return None
-    layout = state.get("layout")
-    if layout not in ("termux", "standalone"):
-        return None
-    return installation_for_layout("termux" if layout == "termux" else "standalone")
+    # Earlier mode/startup failures could persist installed=False without deleting
+    # anything. Never let that ledger veto the backend's known-path disk check.
+    if state is not None and state.get("version") == PINNED_CODE_SERVER_VERSION:
+        layout = state.get("layout")
+        if layout in ("termux", "standalone"):
+            return installation_for_layout("termux" if layout == "termux" else "standalone")
+    return installation_for_layout(default_layout())
 
 
 def record_installation(installation: CodeServerInstallation) -> None:

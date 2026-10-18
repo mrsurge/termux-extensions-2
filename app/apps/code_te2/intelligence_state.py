@@ -75,7 +75,7 @@ class IntelligenceStateStore:
         mode = ui.get("webWorkersEnabled") is True
         raw = legacy.get("codeServerInstallation")
         installation = None if raw is None else _object(raw)
-        state = IntelligenceState(mode, {"installed": False} if mode else installation)
+        state = IntelligenceState(mode, installation)
         self._write(state)
         return state
 
@@ -86,8 +86,8 @@ class IntelligenceStateStore:
     def set_web_workers_enabled(self, enabled: bool) -> None:
         with self._locked():
             previous = self._read()
-            # Mode and installation invalidation remain a single atomic update.
-            state = IntelligenceState(enabled, {"installed": False} if enabled else previous.installation)
+            # A language-mode choice does not remove the package on disk.
+            state = IntelligenceState(enabled, previous.installation)
             if state != previous:
                 self._write(state)
 

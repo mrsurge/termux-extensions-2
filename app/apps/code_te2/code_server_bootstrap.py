@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import stat
 import subprocess
 from typing import BinaryIO, Final, Literal, TypedDict, cast
 import uuid
@@ -121,7 +122,11 @@ def _is_termux_android() -> bool:
 def _assess_installation(
     installation: CodeServerInstallation | None,
 ) -> CodeServerPrerequisite:
-    if installation is None:
+    try:
+        launcher_present = installation is not None and stat.S_ISREG(installation.executable.stat().st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        launcher_present = False
+    if not launcher_present or installation is None:
         return CodeServerPrerequisite(
             state="missing",
             installation=None,
@@ -129,7 +134,20 @@ def _assess_installation(
             reason="Code Server was not found.",
         )
 
-    if installation.vscode_root is None:
+    if not os.access(installation.executable, os.X_OK):
+        return CodeServerPrerequisite(
+            state="incompatible", installation=installation,
+            version_info={"version": REQUIRED_CODE_SERVER_VERSION},
+            reason="TE2's managed Code Server launcher is not executable.",
+        )
+    try:
+        tree_present = installation.vscode_root is not None and stat.S_ISDIR(
+            (installation.vscode_root / "extensions").stat().st_mode
+        )
+    except (FileNotFoundError, NotADirectoryError):
+        tree_present = False
+    # Permission/I/O errors propagate as unavailable status, never missing.
+    if not tree_present:
         return CodeServerPrerequisite(
             state="incompatible",
             installation=installation,
@@ -500,7 +518,8 @@ def install_code_server_installation() -> CodeServerInstallation:
     with lock_path.open("a+b") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         # Explicit install may adopt a preserved package (web-worker mode does
-        # not delete it). Disk validation belongs only to this consented path.
+        # not delete it). Adoption here is explicit; status checks also validate
+        # known disk paths without installing, repairing or launching anything.
         preserved = te2_managed_code_server_installation(REQUIRED_CODE_SERVER_VERSION)
         if preserved is not None and preserved.vscode_root is not None:
             verified = _verify_bootstrapped_installation(preserved)

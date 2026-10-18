@@ -27,6 +27,20 @@ The ALS framework-pipe/Sidebar IPC migration is explicitly next-version work.
 
 ## Ordered remaining work
 
+### Code Server status authority correction — approved 2026-10-18
+
+Keep disk installation, runtime readiness and selected language mode separate.
+Backend prerequisite inspection checks only exact managed package paths; stale
+negative records do not veto real files. Spawn/readiness/connection failures and
+web-worker mode changes must not erase installation identity. Missing files are
+disk facts; permission/I/O failures are unavailable status. Frontend transport
+failure/malformed or missing status never invents an installation state or submits
+a mode/install action; only a fresh explicit backend negative result can present
+the existing consent dialog. Preserve known-ready fast boot and no version/process
+probes or discovery scans. Validate Python state/failure paths, TS disconnect
+projection, typecheck and host build; activation separately needs matching
+Python/mypyc plus client assets. No shared runtime restart/publication authorized.
+
 ### Project-scoped autosave and safe switching — approved 2026-10-17
 
 User requires save-mode ownership in each ProjectSidecar, not global preferences,

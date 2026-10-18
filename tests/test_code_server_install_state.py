@@ -58,22 +58,37 @@ class InstallationStateTests(unittest.TestCase):
         with patch.object(Path, "is_file", side_effect=AssertionError("no probing")), patch.object(Path, "is_dir", check_directory):
             self.assertEqual(state.selected_installation(), candidate)
 
-    def test_launch_failure_ends_optimistic_migration(self) -> None:
+    def test_stale_negative_ledger_cannot_veto_disk_assessment(self) -> None:
         state.clear_installation()
-        self.assertIsNone(state.selected_installation())
+        self.assertEqual(state.selected_installation(), state.installation_for_layout("termux"))
         self.assertEqual(self.prefs.get_code_server_installation(), {"installed": False})
 
-    def test_web_workers_do_not_adopt_unknown_install(self) -> None:
+    def test_web_workers_do_not_hide_known_disk_candidate(self) -> None:
         _ = self.prefs.update_preferences(ui={"webWorkersEnabled": True})
-        self.assertIsNone(state.selected_installation())
+        self.assertEqual(state.selected_installation(), state.installation_for_layout("termux"))
 
-    def test_runtime_pin_and_layout_are_required(self) -> None:
+    def test_disk_facts_override_stale_false_ledger_even_in_worker_mode(self) -> None:
+        installation = state.installation_for_layout("termux")
+        installation.executable.parent.mkdir(parents=True)
+        installation.executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        installation.executable.chmod(0o755)
+        assert installation.vscode_root is not None
+        (installation.vscode_root / "extensions").mkdir(parents=True)
+        state.clear_installation()
+        self.prefs.update_preferences(ui={"webWorkersEnabled": True})
+        with patch.object(subprocess, "check_output", side_effect=AssertionError("no process probe")):
+            self.assertTrue(bootstrap.inspect_code_server_prerequisite().compatible)
+        self.assertTrue(self.prefs.intelligence_state.read().web_workers_enabled)
+        installation.executable.unlink()
+        self.assertEqual(bootstrap.inspect_code_server_prerequisite().state, "missing")
+
+    def test_stale_pin_or_unknown_layout_uses_only_current_managed_candidate(self) -> None:
         for record in (
             {"installed": True, "version": "old", "layout": "termux"},
             {"installed": True, "version": "4.130.0", "layout": "external"},
         ):
             self.prefs.set_code_server_installation(dict(record))
-            self.assertIsNone(state.selected_installation())
+            self.assertEqual(state.selected_installation(), state.installation_for_layout("termux"))
 
     def test_generic_ui_updates_cannot_set_installation_flag(self) -> None:
         _ = self.prefs.update_preferences(ui={"codeServerInstallation": {"installed": True}})
@@ -85,10 +100,15 @@ class InstallationStateTests(unittest.TestCase):
         self.assertEqual(state.selected_installation(), installation)
         state.clear_installation()
         self.assertFalse(installation.executable.exists())
-        self.assertIsNone(state.selected_installation())
+        self.assertFalse(bootstrap.inspect_code_server_prerequisite().compatible)
 
     def test_explicit_install_adopts_package_and_records_without_version_process(self) -> None:
         installation = state.installation_for_layout("termux")
+        installation.executable.parent.mkdir(parents=True)
+        installation.executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        installation.executable.chmod(0o755)
+        assert installation.vscode_root is not None
+        (installation.vscode_root / "extensions").mkdir(parents=True)
         with (
             patch.object(bootstrap, "code_server_bootstrap_cache_dir", return_value=installation.executable.parent / "cache"),
             patch.object(bootstrap, "code_server_install_prefix", return_value=installation.executable.parent.parent),
@@ -100,17 +120,20 @@ class InstallationStateTests(unittest.TestCase):
             self.assertEqual(bootstrap.install_code_server_installation(), installation)
         self.assertEqual(state.selected_installation(), installation)
 
-    def test_worker_mode_clears_flag_but_preserves_package(self) -> None:
+    def test_worker_mode_preserves_installation_record_and_package(self) -> None:
         installation = state.installation_for_layout("termux")
         installation.executable.parent.mkdir(parents=True)
         _ = installation.executable.write_text("preserved", encoding="utf-8")
         state.record_installation(installation)
         with patch.object(code_server_backend, "get_preferences_store", return_value=self.prefs), patch.object(code_server_backend, "publish_preferences_changed", AsyncMock()):
             _ = asyncio.run(code_server_backend._persist_mode(web_workers_enabled=True))
-        self.assertIsNone(state.selected_installation())
+        self.assertEqual(state.selected_installation(), installation)
+        saved = self.prefs.get_code_server_installation()
+        assert saved is not None
+        self.assertTrue(saved["installed"])
         self.assertEqual(installation.executable.read_text(encoding="utf-8"), "preserved")
 
-    def test_launch_failure_clears_flag_but_adapter_callback_failure_does_not(self) -> None:
+    def test_spawn_readiness_and_adapter_failures_preserve_installation_record(self) -> None:
         installation = state.installation_for_layout("termux")
         root = installation.executable.parent.parent
 
@@ -165,7 +188,7 @@ class InstallationStateTests(unittest.TestCase):
                 watcher.assert_called_once_with("ipc")
                 self.assertEqual([call[0] for call in preparation.mock_calls], ["gate", "watcher", "spawn"])
                 assert saved is not None
-                self.assertEqual(saved.get("installed"), failure == "adapter")
+                self.assertIs(saved.get("installed"), True)
 
         for failure in ("spawn", "readiness", "adapter"):
             asyncio.run(exercise(failure))

@@ -6165,24 +6165,28 @@ Semantic registration events install/refresh the Monaco provider. Document-symbo
 registration events retry the matching active document's breadcrumb request through
 its existing generation/barrier checks. Tests: `tests/wba_missing_provider.test.mjs`.
 
-### Preference-owned Code Server installation state
+### Backend-owned Code Server disk state and independent language mode
 
-`intelligence_state.py` owns the small authoritative config file
+`intelligence_state.py` owns the small backend config file
 `$TE2_CONFIG_HOME/code_te2/intelligence.json` (using the standard resolved config
 root when that override is absent). It stores schema `version: 1`,
 `webWorkersEnabled`, and the backend-only `codeServerInstallation` record:
 `{installed: true, version: "4.130.0", layout: "termux" | "standalone"}`. Generic
-UI preference updates cannot write this record. Startup, boot snapshots, settings,
-and extension commands derive managed paths from it without checking whether
-executables or Code trees exist. The Code version is pinned in
-`code_server_identity.py`; only the explicit installer validates package files.
+UI preference updates cannot write this record. It is a managed layout hint,
+not proof that the package exists or does not exist. Backend prerequisite
+assessment checks the exact managed launcher (regular/executable file) and
+bundled `extensions` directory. No PATH/system discovery, recursive scan,
+subprocess/version probe, installation or repair occurs during status inspection.
+Missing files produce missing/incompatible status; permission/I/O failures
+propagate as unavailable, never as evidence that installation is absent. The
+Code version remains pinned in `code_server_identity.py`.
 
 `PreferencesStore` delegates mode/installation access to this file and projects
 the mode back into the unchanged UI preference DTO. On first access only, the
 compact store migrates those values from `preferences.json`; preference-store
 initialization then removes the legacy fields. Existing compact state always wins,
 including after interrupted legacy cleanup. Invalid compact state fails rather
-than falling back to old values. The mode and installation invalidation share one
+than falling back to old values. Mode and installation-record writes share one
 atomic replace under a stable sibling file lock, across threads/store instances.
 Other editor/UI/project preferences remain in `preferences.json`; updates spanning
 both files are not a cross-file transaction. Custom preference paths get sibling
@@ -6195,16 +6199,20 @@ remains intact. Tests: `test_intelligence_state`, `test_code_server_install_stat
 `test_workbench_route_contracts`, and the startup/lifecycle regression suites.
 
 The record is set after successful installation or code-server launch/adoption.
-Code-server spawn/readiness failure clears it to `{installed: false}`; a WBA/LSP
-failure does not. Switching to web workers also clears it but preserves the package
-on disk. Switching back uses the consented installer path to validate/adopt that
-preserved package rather than forcing a download.
+Spawn, transport, readiness and WBA/LSP failures never clear it. Switching language
+mode also preserves it and the package. Explicit removal still clears the record.
+Absent, negative or stale-version/layout hints use only the current platform's
+known managed candidate and let backend disk assessment decide availability;
+this recovers old false records without reinstalling or modifying user mode.
+Disk availability does not start intelligence when web-worker mode is selected.
 
-An absent record denotes migration: with Code Server mode enabled, try the known
-platform-specific managed launcher once. Success records the pin/layout; launch
-failure records unavailable and ends optimistic retries. Worker-mode installations
-are not adopted during startup. A recorded different pin requires explicit install
-of the current pin. No shared-runtime restart is performed by these state helpers.
+The host only projects backend facts and transmits explicit user choices. A fresh
+backend missing/incompatible result with install metadata may open a choice;
+null/malformed/failed replies or a dropped connection cannot. A failed refresh
+does not reuse a stale negative snapshot, invent a missing reason/version, submit
+an install or switch to web workers. It fails startup with status unavailable and
+leaves mode unchanged; reconnect/reload can request fresh state. Known ready
+snapshots retain their fast path. No runtime transition is performed by helpers.
 
 ### Early Intelligence Preparation And Backend Assembly
 

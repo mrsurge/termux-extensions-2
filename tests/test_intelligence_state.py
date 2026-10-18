@@ -28,7 +28,7 @@ class IntelligenceStateTests(unittest.TestCase):
                 prefs = PreferencesStore(path)
                 snapshot = prefs.intelligence_state.read()
                 self.assertEqual(snapshot.web_workers_enabled, enabled)
-                self.assertEqual(snapshot.installation, {"installed": False} if enabled else ledger)
+                self.assertEqual(snapshot.installation, ledger)
                 self.assertNotIn('"webWorkersEnabled"', path.read_text())
                 self.assertNotIn('"codeServerInstallation"', path.read_text())
                 self.assertEqual(prefs.get_preferences()["ui"], prefs.update_preferences()["ui"])
@@ -41,7 +41,7 @@ class IntelligenceStateTests(unittest.TestCase):
             _ = path.write_text('{"ui":{"webWorkersEnabled":false},"codeServerInstallation":{"installed":true}}')
             prefs = PreferencesStore(path)
             self.assertTrue(prefs.intelligence_state.read().web_workers_enabled)
-            self.assertEqual(prefs.get_code_server_installation(), {"installed": False})
+            self.assertIsNone(prefs.get_code_server_installation())
             # Once initialized, startup needs neither preferences nor app imports.
             path.unlink()
             self.assertTrue(IntelligenceStateStore(path).read().web_workers_enabled)
@@ -85,15 +85,14 @@ class IntelligenceStateTests(unittest.TestCase):
                 else:
                     store.set_web_workers_enabled(False)
                 snapshot = store.read()
-                if snapshot.web_workers_enabled:
-                    self.assertEqual(snapshot.installation, {"installed": False})
+                self.assertIsNone(snapshot.installation)
 
             with ThreadPoolExecutor(max_workers=4) as executor:
                 _ = list(executor.map(exercise, range(40)))
             prefs = PreferencesStore(path)
             prefs.set_code_server_installation({"installed": True})
             _ = prefs.update_preferences(ui={"webWorkersEnabled": True})
-            self.assertEqual(IntelligenceStateStore(path).read().installation, {"installed": False})
+            self.assertEqual(IntelligenceStateStore(path).read().installation, {"installed": True})
 
     def test_custom_preference_stores_are_isolated_and_reject_invalid_mode(self) -> None:
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as directory:

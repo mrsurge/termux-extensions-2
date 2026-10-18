@@ -423,34 +423,28 @@ async def _ensure_code_server_shell(
         except Exception as exc:
             print(f"[code_server] watcher settings sync failed (non-fatal): {exc}", flush=True)
 
-        try:
-            # Do not retain a partially evaluated launch dictionary across an
-            # await: this pattern crashes in the mypyc restart path.
-            compile_cache_path = await asyncio.to_thread(node_compile_cache, "code-server")
-            shell = await orch.start_from_ref(
-                SHELLSPEC_REF,
-                base_dir=SHELLSPEC_DIR,
-                ctx={
-                    "APP_ID": APP_ID,
-                    "PROJECT_ROOT": str(repo_root),
-                    "PROJECT_HASH": _project_hash(str(repo_root)),
-                    "INSTANCE_ID": "primary",
-                    "CODE_SERVER_BIN": code_server_bin,
-                    "CODE_SERVER_BIN_DIR": str(Path(code_server_bin).parent),
-                    "CODE_SERVER_DATA_DIR": str(data_dir),
-                    "CODE_SERVER_SOCKET": _expected_socket_path(),
-                    "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
-                    "NODE_COMPILE_CACHE": compile_cache_path,
-                },
-                label=label,
-                record_spec_id=f"service:{APP_ID}:code_server",
-                wait_ready=False,
-            )
-        except Exception:
-            from .code_server_install_state import clear_installation
-
-            await asyncio.to_thread(clear_installation)
-            raise
+        # Do not retain a partially evaluated launch dictionary across an
+        # await: this pattern crashes in the mypyc restart path.
+        compile_cache_path = await asyncio.to_thread(node_compile_cache, "code-server")
+        shell = await orch.start_from_ref(
+            SHELLSPEC_REF,
+            base_dir=SHELLSPEC_DIR,
+            ctx={
+                "APP_ID": APP_ID,
+                "PROJECT_ROOT": str(repo_root),
+                "PROJECT_HASH": _project_hash(str(repo_root)),
+                "INSTANCE_ID": "primary",
+                "CODE_SERVER_BIN": code_server_bin,
+                "CODE_SERVER_BIN_DIR": str(Path(code_server_bin).parent),
+                "CODE_SERVER_DATA_DIR": str(data_dir),
+                "CODE_SERVER_SOCKET": _expected_socket_path(),
+                "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
+                "NODE_COMPILE_CACHE": compile_cache_path,
+            },
+            label=label,
+            record_spec_id=f"service:{APP_ID}:code_server",
+            wait_ready=False,
+        )
 
         _active_shell_id = shell.id
 
@@ -459,16 +453,12 @@ async def _ensure_code_server_shell(
         if on_spawned is not None:
             on_spawned(shell)
 
-        try:
-            if await _has_live_pipe(shell):
-                await _wait_for_code_server_readiness(shell.id)
-            else:
-                raise RuntimeError("code-server live pipe unavailable for readiness")
-        except Exception:
-            from .code_server_install_state import clear_installation
-
-            await asyncio.to_thread(clear_installation)
-            raise
+        # Process/transport/readiness failures do not remove package files and
+        # must never invalidate installation state.
+        if await _has_live_pipe(shell):
+            await _wait_for_code_server_readiness(shell.id)
+        else:
+            raise RuntimeError("code-server live pipe unavailable for readiness")
 
         return shell
     finally:

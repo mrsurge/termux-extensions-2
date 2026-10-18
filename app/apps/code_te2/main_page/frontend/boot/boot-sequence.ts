@@ -104,14 +104,24 @@ export async function prepareCodeServer(
       if (snapshot) snapshot.code_server = refreshedPrerequisite;
       return true;
     }
-    prerequisite = refreshedPrerequisite || prerequisite;
+    prerequisite = refreshedPrerequisite;
   } catch (error) {
     console.warn('[code-server] prerequisite refresh failed:', error);
+    deps.spinnerSetStep('Code Server status unavailable', true);
+    throw new Error('Code Server status could not be obtained from the backend. Reconnect and reload; no installation or language-mode change was requested.', { cause: error });
   }
 
-  const installVersion = asString(prerequisite?.install_version) || '4.130.0';
+  // Only a fresh, explicit backend fact authorizes an installation choice.
+  // Missing/malformed replies and transport failures are never disk facts.
+  if (prerequisite?.compatible !== false ||
+      (prerequisite.state !== 'missing' && prerequisite.state !== 'incompatible') ||
+      !asString(prerequisite.install_version) || !asString(prerequisite.reason)) {
+    deps.spinnerSetStep('Code Server status unavailable', true);
+    throw new Error('The backend did not provide a valid Code Server installation status. Reconnect and reload; no installation or language-mode change was requested.');
+  }
+  const installVersion = asString(prerequisite.install_version);
   const installPrefix = asString(prerequisite?.install_prefix);
-  const reason = asString(prerequisite?.reason) || "TE2's managed Code Server is not installed.";
+  const reason = asString(prerequisite.reason);
   const androidNote = prerequisite?.android === true
     ? '\n\nOn Android this downloads about 165 MiB, installs about 709 MiB under TE2 data, and may install its Termux runtime dependencies.'
     : '';

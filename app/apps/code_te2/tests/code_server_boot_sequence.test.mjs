@@ -76,6 +76,39 @@ test('managed Code Server is rechecked before a stale missing snapshot can promp
   assert.deepEqual(seeded, [{ webWorkersEnabled: false }]);
 });
 
+test('unknown Code Server status never prompts, installs, or switches language mode', async () => {
+  const { prepareCodeServer } = await importBootSequence();
+  let dialogs = 0, mutations = 0;
+  globalThis.window = { teUI: { dialog: { open: async () => { dialogs++; } } } };
+  const stale = { ui_prefs: { webWorkersEnabled: false }, code_server: {
+    state: 'missing', compatible: false, install_version: '4.130.0', reason: 'Old missing snapshot',
+  } };
+  for (const response of [
+    async () => { throw new Error('socket disconnected'); },
+    async () => null,
+    async () => ({ ok: false }),
+    async () => ({ ok: true, snapshot: {} }),
+    async () => ({ ok: true, snapshot: { code_server: { compatible: false } } }),
+    async () => ({ ok: true, snapshot: { code_server: { state: 'unknown', compatible: false } } }),
+  ]) {
+    for (const snapshot of [null, structuredClone(stale)]) {
+      const uiPrefs = snapshot?.ui_prefs || {};
+      const before = structuredClone(uiPrefs);
+      const steps = [];
+      await assert.rejects(prepareCodeServer(snapshot, uiPrefs, {
+        requestBackendBootSnapshot: response,
+        requestBackendLanguageBackendSet: async () => { mutations++; },
+        seedUiPrefsSnapshot: () => {},
+        spinnerSetStep: (...args) => steps.push(args),
+      }), /backend/);
+      assert.deepEqual(uiPrefs, before);
+      assert.deepEqual(steps.at(-1), ['Code Server status unavailable', true]);
+    }
+  }
+  assert.equal(dialogs, 0);
+  assert.equal(mutations, 0);
+});
+
 test('host mounts and restores a document while WBA readiness is pending', async () => {
   const win = new Window();
   globalThis.window = win;
@@ -157,7 +190,9 @@ test('startup installation dialog explicitly yields and restores overlay interac
     assert.deepEqual(calls, [true]);
     return { status: 'cancelled', action: 'continue' };
   } } };
-  const snapshot = { ui_prefs: {}, code_server: { compatible: false } };
+  const snapshot = { ui_prefs: {}, code_server: {
+    compatible: false, state: 'missing', install_version: '4.130.0', reason: 'Backend confirmed missing.',
+  } };
   const result = await prepareCodeServer(snapshot, snapshot.ui_prefs, {
     requestBackendBootSnapshot: async () => ({ ok: true, snapshot }),
     requestBackendLanguageBackendSet: async () => ({ ok: true }),

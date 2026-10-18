@@ -127,6 +127,20 @@ class CodeServerBootstrapTests(unittest.TestCase):
         self.assertIs(managed, prerequisite.installation)
         self.assertIn("bundled Code/extension-host tree", prerequisite.reason)
 
+    def test_positive_record_is_not_proof_of_existing_or_executable_disk_files(self) -> None:
+        managed = _installation(self.root / "managed", source="te2-managed")
+        with patch.object(code_server_bootstrap, "selected_installation", return_value=managed):
+            managed.executable.chmod(0o644)
+            self.assertEqual(code_server_bootstrap.inspect_code_server_prerequisite().state, "incompatible")
+            managed.executable.unlink()
+            self.assertEqual(code_server_bootstrap.inspect_code_server_prerequisite().state, "missing")
+
+    def test_disk_access_error_is_not_classified_as_missing(self) -> None:
+        managed = _installation(self.root / "managed", source="te2-managed")
+        with patch.object(Path, "stat", side_effect=PermissionError("disk inaccessible")):
+            with self.assertRaises(PermissionError):
+                code_server_bootstrap._assess_installation(managed)
+
     def test_remove_managed_runtime_preserves_sibling_extension_data(self) -> None:
         self.install_prefix.mkdir(parents=True)
         (self.install_prefix / "runtime.txt").write_text("runtime", encoding="utf-8")

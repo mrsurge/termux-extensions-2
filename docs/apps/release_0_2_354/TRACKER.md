@@ -839,6 +839,30 @@ mandatory full-device matrix is added for the latest smoke acceptance.
 
 ## Acceptance still needing bounded confirmation
 
+### Code Server disk/status authority — 2026-10-18
+
+- [x] Source trace: failed frontend prerequisite refresh fell into a fabricated
+  missing/install prompt; backend spawn/readiness failure and web-worker mode
+  also cleared the installed record despite preserved disk files.
+- [x] Backend checks exact managed launcher/tree; stale false/layout/version
+  records cannot veto platform managed disk assessment. Permission/I/O failure
+  propagates as unavailable. No command-version probes, disk scans or repair.
+- [x] Mode migration/updates and spawn/readiness/adapter failures retain install
+  identity; explicit removal retains its existing clear operation.
+- [x] Host requires a fresh explicit backend missing/incompatible status before
+  presenting consent. Disconnect/null/malformed replies reject status without
+  install or mode mutation, including when an earlier snapshot said missing.
+- [x] 54 focused Python state/bootstrap/resolution/mode tests and 9 frontend
+  boot tests pass; Code TE2 typecheck and host build pass. Broader route run:
+  56 pass, one pre-existing shellspec-literal assertion fails (expects literal
+  code-te2-worker instead of CODE_TE2_WORKER_BIN); unrelated to this change.
+  Targeted ty reports only two existing warnings (redundant cast/contextmanager
+  deprecation), not new errors. Authored whitespace check passes; generated host
+  embeds upstream string whitespace and is not hand-edited to suppress it.
+- [ ] Activate matching Python/mypyc and client assets, then live-verify dropped
+  connection/reload, real missing installation consent and explicit mode switch.
+  No restart, publication or compiled-domain activation performed by this slice.
+
 These are not blanket unimplemented features. Ask only about cases that remain
 relevant after final packaging; do not count unrun stress experiments as bugs.
 
