@@ -94,21 +94,21 @@ def _termux_archive(
     return path
 
 
-def _write_public_download_fixture(root: Path, installer_payload: bytes) -> None:
+def _write_public_download_fixture(root: Path, installer_payload: bytes, *, version: str = "0.2.338") -> None:
     installer_name = "install_te2.py"
     (root / installer_name).write_bytes(installer_payload)
     manifest = {
         "release": {
             "publicationEligible": True,
             "sourceCommit": "a" * 40,
-            "tag": "0.2.338",
-            "version": "0.2.338",
+            "tag": version,
+            "version": version,
         },
         "schemaVersion": 1,
         "targets": {
             "linux-glibc-x86_64": {"installer": installer_name},
             "termux-android-aarch64": {
-                "archive": "te2-0.2.338-termux-aarch64.tar.gz"
+                "archive": f"te2-{version}-termux-aarch64.tar.gz"
             },
         },
     }
@@ -659,7 +659,7 @@ class PublicReleaseTests(unittest.TestCase):
             _write_public_download_fixture(root, (
                 b"from pathlib import Path\nimport json, os, sys\n"
                 b"Path(os.environ['TE2_TEST_REPORT']).write_text(json.dumps(sys.argv[1:]))\n"
-            ))
+            ), version="0.2.354")
             environment = {**os.environ, "PREFIX": "/data/data/com.termux/files/usr",
                            "TE2_INSTALL_PYTHON": sys.executable,
                            "TE2_RELEASE_BASE_URL": root.as_uri(), "TE2_TEST_REPORT": str(report)}
@@ -668,7 +668,7 @@ class PublicReleaseTests(unittest.TestCase):
                                     capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             arguments = json.loads(report.read_text())
-            self.assertEqual(arguments[arguments.index("--release-version") + 1], "0.2.338")
+            self.assertEqual(arguments[arguments.index("--release-version") + 1], "0.2.354")
             self.assertIn("--yes", arguments)
             # The fixture declares an archive but intentionally supplies no such file.
 

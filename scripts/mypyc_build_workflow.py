@@ -219,13 +219,17 @@ def clone_or_copy_library(source: Path, target: Path) -> bool:
     try:
         with source.open('rb') as src, target.open('xb') as dst:
             created = True
-            try:
-                fcntl.ioctl(dst.fileno(), 0x40049409, src.fileno())  # Linux FICLONE
-                cloned = True
-            except OSError as exc:
-                if exc.errno not in {errno.EOPNOTSUPP, errno.ENOTTY, errno.EXDEV,
-                                     errno.EINVAL, errno.ENOSYS}:
-                    raise
+            # Android can deny FICLONE even for readable/writable app-owned
+            # files. Avoid that optional ioctl; ordinary copies still isolate
+            # snapshot inodes. Actual open/copy/metadata errors remain fatal.
+            if sys.platform != 'android':
+                try:
+                    fcntl.ioctl(dst.fileno(), 0x40049409, src.fileno())  # Linux FICLONE
+                    cloned = True
+                except OSError as exc:
+                    if exc.errno not in {errno.EOPNOTSUPP, errno.ENOTTY, errno.EXDEV,
+                                         errno.EINVAL, errno.ENOSYS}:
+                        raise
         if not cloned:
             shutil.copyfile(source, target)
         shutil.copystat(source, target)

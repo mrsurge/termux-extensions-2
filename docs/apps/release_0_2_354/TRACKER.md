@@ -8,6 +8,26 @@ Old unchecked boxes are evidence to reconcile, not automatic release tasks.
 
 ## Recent work — 2026-10-15 through 2026-10-17
 
+### Installer compatibility and release README — 2026-10-18
+
+- [x] Approved routing uses verified selected release version: Termux before
+  0.2.354 uses matching checksummed archive/installer; newer latest or explicit
+  tags use PyPI. Legacy maintenance avoids archive download. Linux keeps its
+  existing route with a common-module import smoke, not a FastAPI requirement.
+- [x] README records all five user-reported known issues/workarounds, separate
+  roots, second-root app wrapping and ALS extension CLI/upcoming providers/UI.
+- [x] Separate release attachment staged at
+  `.codex-scratch/release-template-0.2.354/te2-second-root-app-template.zip`:
+  six files (existing wrapper runtime/config unchanged, corrected ZIP README),
+  SHA-256 `835b679580f4590c549b3ebc45a57aff107871054a0efd49442cb1a82ca5958d`.
+  ZIP integrity checked; it is ignored/untracked and not part of either wheel.
+- [ ] Add ZIP to final release assets/SHA256SUMS and verify its published digest.
+  No upload, version bump, wheel rebuild or runtime transition in this slice.
+- [x] Source validation: 13 PyPI/bootstrap routing tests and 33 release tests
+  pass; shell syntax and `git diff --check` pass. ZIP is 3,712 bytes and passes
+  `unzip -t`. Synthetic installer tests do not replace final published-installer
+  end-to-end validation.
+
 Only recent work is consolidated here; older backlog is not reclassified or
 silently accepted. User notes below are preserved verbatim, not inferred approvals
 to implement every item. No version change, commit or push accompanies this
@@ -995,8 +1015,27 @@ relevant after final packaging; do not count unrun stress experiments as bugs.
   prepared for .354; accepted local binaries remain untouched. Release builder
   now limits Podman's --userns=keep-id to Podman, not Docker; 7 regressions pass.
   No local Cargo/mypyc/wheel/APK build: local free space is only about 1.6 GiB.
-- [ ] Pin source/submodules and toolchain/image provenance; build Linux wheel,
+- [x] Record source/submodules and toolchain/image provenance; build Linux wheel,
   validate native domain/private runtime, install/test in a fresh Debian venv.
+  Linux build for pushed 1c8f0505 completed exit 0, no OOM; builder platform,
+  native payload and size audits pass. Wheel is 98,410,861 bytes; server reports
+  .354. Full hashes, immutable image identity and retained remote paths:
+  BUILD_STATUS.md. User subsequently confirms comprehensive live integrated
+  acceptance of the joint Linux stack; no Android acceptance is implied.
+  Subsequent isolated Debian Python 3.13 venv install/import validation passes:
+  private Python 3.14.6, 143 compiled imports, installed WBA/Socket.IO and .354
+  server identity. Local/remote mypyc startup-source digest matches; binary
+  hashes differ across toolchains. Default public dependency closure is blocked by
+  ALS .132, which pulls FWS .0.64 and the removed FastAPI/MCP/schema/crypto stack.
+  User approves cleaned ALS private-runtime packaging and final stable .139:
+  rebuilt wheel is 56,739,875 bytes with native/private-runtime bytes matching
+  accepted dev2. Fresh local and Debian joint stable venvs pass MCP discovery,
+  actual bundled libpython mapping, package checks and .354 identity. FWS .65
+  and uvloop .23 are installed; no retired dependency stack. Public-resolution
+  closure remains a publication gate, not a reason to restore exact TE2 pins.
+- [ ] Finalize clean ALS source/release provenance and publish the approved
+  stable dependency before checking default public PyPI resolution. Current
+  stable candidate records source_dirty=true; no tags/uploads performed.
 - [ ] Prove target Android aarch64 wheel/mypyc container compatibility, or use
   native Termux fallback; build staged APKs with matching current asset seed.
 - [ ] Independent rebuild/provenance/hash comparison and target acceptance.

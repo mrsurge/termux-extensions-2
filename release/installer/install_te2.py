@@ -530,7 +530,7 @@ def _validate_linux_release_imports(
     )
     script = (
         "import importlib.metadata as m; "
-        "import app, framework_shells, agent_log_server_rs, fastapi, libarchive, msgspec; "
+        "import app, framework_shells, agent_log_server_rs, libarchive, msgspec; "
         f"assert m.version('te2') == {version!r}"
     )
     subprocess.run([str(python), "-I", "-c", script], env=environment, check=True, timeout=60)

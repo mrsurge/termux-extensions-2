@@ -366,6 +366,8 @@ versus cache-local configuration instead of always claiming 512 MB.
 
 Snapshot `.so` publication tries Linux FICLONE into a new inode, falling back to
 an ordinary independent copy on unsupported/cross-filesystem operations. It never
+attempts FICLONE on Android, where the optional ioctl can be denied despite normal
+file access; Android snapshots use independent copies directly. It never
 hard-links mutable compiler outputs; cache rebuilds cannot modify an accepted
 snapshot. Genuine I/O failures abort publication, not silently copy or activate a
 partial result. Reflink support is filesystem-dependent and does not imply disk

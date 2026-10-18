@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+import tarfile
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -92,3 +96,103 @@ class TermuxPyPIInstallerTests(unittest.TestCase):
         names = {item["name"] for item in installer.TERMUX_APT_PACKAGES}
         self.assertFalse(names & {"python-cryptography", "bun"})
         self.assertTrue({"python", "python-pip", "nodejs-lts", "libarchive", "libgit2"} <= names)
+
+    def test_linux_import_smoke_does_not_require_retired_dependencies(self) -> None:
+        with patch.object(installer.subprocess, "run") as run:
+            installer._validate_linux_release_imports(Path("/unused/release"), "0.2.354", {})
+        command = run.call_args.args[0]
+        script = command[command.index("-c") + 1]
+        self.assertIn("framework_shells", script)
+        self.assertIn("libarchive", script)
+        self.assertNotIn("fastapi", script)
+
+
+class BootstrapReleaseRoutingTests(unittest.TestCase):
+    """Run the real shell bootstrap against local, checksummed release fixtures."""
+
+    def run_bootstrap(self, version, *, tag="latest", maintenance=False, unsafe=False, corrupt=False, termux=True):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            payload = root / "release"
+            payload.mkdir()
+            manifest = {"schemaVersion": 1,
+                        "release": {"version": version, "publicationEligible": True},
+                        "targets": {"linux-glibc-x86_64": {"installer": "install_te2.py"},
+                                    "termux-android-aarch64": {"archive": "termux.tar.gz"}}}
+            (payload / "release-manifest.json").write_text(json.dumps(manifest))
+            # Only record dispatch: never run pip/apt, build, or activate anything.
+            (payload / "install_te2.py").write_text(
+                "import json,os,sys\nfrom pathlib import Path\n"
+                "p=Path(sys.argv[sys.argv.index('--payload-root')+1])\n"
+                "Path(os.environ['ROUTING_RESULT']).write_text(json.dumps({"
+                "'args':sys.argv[1:],'legacy':(p/'target-manifest.json').is_file()}))\n")
+            if version == "0.2.353" and not maintenance:
+                with tarfile.open(payload / "termux.tar.gz", "w:gz") as archive:
+                    member = tarfile.TarInfo("../escape" if unsafe else "legacy/target-manifest.json")
+                    member.size = 2
+                    archive.addfile(member, io.BytesIO(b"{}"))
+            sums = []
+            for path in payload.iterdir():
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                if corrupt and path.name == "termux.tar.gz":
+                    digest = "0" * 64
+                sums.append(f"{digest}  {path.name}\n")
+            (payload / "SHA256SUMS").write_text("".join(sums))
+            result_file = root / "result.json"
+            env = dict(os.environ, TE2_RELEASE_TAG=tag, TE2_RELEASE_BASE_URL=payload.as_uri(),
+                       TE2_INSTALL_PYTHON=sys.executable, PREFIX="/data/data/com.termux/files/usr",
+                       ROUTING_RESULT=str(result_file), TMPDIR=str(root))
+            if not termux:
+                env.pop("PREFIX", None)
+                env.pop("ANDROID_ROOT", None)
+            command = ["sh", str(ROOT / "release/installer/install-te2"), "--yes"]
+            if maintenance:
+                command.append("--uninstall")
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            return result, json.loads(result_file.read_text()) if result_file.exists() else None
+
+    def test_latest_current_release_uses_pypi_without_archive(self):
+        result, body = self.run_bootstrap("0.2.354")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(body["legacy"])
+        self.assertIn("--release-version", body["args"])
+
+    def test_explicit_current_tag_uses_pypi_without_archive(self):
+        result, body = self.run_bootstrap("0.2.354", tag="0.2.354")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--release-version", body["args"])
+
+    def test_linux_previous_release_keeps_matching_installer_route(self):
+        result, body = self.run_bootstrap("0.2.353", termux=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(body["legacy"])
+        self.assertIn("--release-version", body["args"])
+
+    def test_previous_tag_uses_verified_archive(self):
+        result, body = self.run_bootstrap("0.2.353", tag="0.2.353")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(body["legacy"])
+        self.assertNotIn("--release-version", body["args"])
+
+    def test_latest_pointing_at_previous_release_uses_archive(self):
+        result, body = self.run_bootstrap("0.2.353")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(body["legacy"])
+
+    def test_legacy_maintenance_does_not_download_archive(self):
+        result, body = self.run_bootstrap("0.2.353", maintenance=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--uninstall", body["args"])
+        self.assertFalse(body["legacy"])
+
+    def test_unsafe_archive_rejected_before_installer(self):
+        result, body = self.run_bootstrap("0.2.353", unsafe=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unsafe Termux archive member", result.stderr)
+        self.assertIsNone(body)
+
+    def test_corrupt_archive_rejected_before_installer(self):
+        result, body = self.run_bootstrap("0.2.353", corrupt=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum mismatch", result.stderr)
+        self.assertIsNone(body)

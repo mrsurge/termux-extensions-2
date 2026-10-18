@@ -10,6 +10,14 @@ verifies packaged runtime/loop selection, then reuses managed activation,
 rollback and uninstall. Explicit local offline payloads retain their old path.
 This does not change already-published installers.
 
+The current bootstrap routes Termux by the verified selected release version:
+before 0.2.354, download/check/extract that release's legacy archive and invoke
+its matching installer; from 0.2.354 onward, use PyPI staging. Explicit modern
+tags still use PyPI, and `latest` pointing to an older release still uses its
+archive. Legacy uninstall/rollback do not download the archive. Linux keeps its
+matching-release installer route, and its import smoke requires only common
+runtime modules, not the retired FastAPI dependency.
+
 The user has validated the upcoming source dependencies: no costly native builds,
 and any remaining small source builds take roughly ten seconds or less. Absence
 of an Android wheel alone is not a release blocker. Public TE2 0.2.353 retains

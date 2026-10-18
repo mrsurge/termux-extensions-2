@@ -407,6 +407,16 @@ refresh persistence without duplicating registrations.
 
 ### 5. Packaging and final release verification
 
+Approved installer/documentation closure: preserve pre-0.2.354 Termux tagged
+archive installs while current/latest releases use PyPI, choosing by verified
+release version rather than whether a tag was explicitly supplied. Keep Linux
+validation compatible with both dependency generations. Document the five
+user-reported workarounds in README (Git init, Code Server/Terminal startup,
+Termux extension servers and ALS/Codex login), second-root app wrapping and ALS
+extension CLI/planned providers. Stage the existing wrapper template with brief
+instructions as a separate release ZIP, never a tracked ZIP or wheel payload;
+include it in the final release asset/checksum inventory before publication.
+
 Do not infer clean dependency closure from source imports. TE2 declares bare
 framework-shells and agent-log-server requirements: no minimum, exact pin or
 upper cap. User requires existing source/development installs to satisfy these

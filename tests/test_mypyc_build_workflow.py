@@ -146,6 +146,7 @@ def test_compiler_cache_honors_local_budget_and_explicit_override(tmp_path, monk
 
 @pytest.mark.parametrize('supported', [True, False])
 def test_snapshot_clone_or_copy_never_shares_mutable_inode(tmp_path, monkeypatch, supported):
+    monkeypatch.setattr(workflow.sys, 'platform', 'linux')
     source = tmp_path / 'mutable.so'
     target = tmp_path / 'snapshot.so'
     source.write_bytes(b'original')
@@ -165,7 +166,34 @@ def test_snapshot_clone_or_copy_never_shares_mutable_inode(tmp_path, monkeypatch
     assert source.read_bytes() == b'updated!'
 
 
+def test_android_snapshot_copy_skips_restricted_clone_ioctl(tmp_path, monkeypatch):
+    source, target = tmp_path / 'source.so', tmp_path / 'target.so'
+    source.write_bytes(b'original')
+    monkeypatch.setattr(workflow.sys, 'platform', 'android')
+    monkeypatch.setattr(workflow.fcntl, 'ioctl', lambda *args: pytest.fail('Android must not attempt FICLONE'))
+    assert workflow.clone_or_copy_library(source, target) is False
+    assert source.stat().st_ino != target.stat().st_ino
+    source.write_bytes(b'updated')
+    assert target.read_bytes() == b'original'
+    with pytest.raises(FileExistsError):
+        workflow.clone_or_copy_library(source, target)
+
+
+def test_android_snapshot_copy_failure_is_not_suppressed(tmp_path, monkeypatch):
+    source, target = tmp_path / 'source.so', tmp_path / 'target.so'
+    source.write_bytes(b'original')
+    monkeypatch.setattr(workflow.sys, 'platform', 'android')
+    def denied(*args):
+        raise PermissionError(errno.EACCES, 'copy denied')
+    monkeypatch.setattr(workflow.shutil, 'copyfile', denied)
+    with pytest.raises(PermissionError):
+        workflow.clone_or_copy_library(source, target)
+    assert not target.exists()
+    assert source.read_bytes() == b'original'
+
+
 def test_clone_failure_preserves_existing_target_and_propagates_disk_full(tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow.sys, 'platform', 'linux')
     source, target = tmp_path / 'source.so', tmp_path / 'target.so'
     source.write_bytes(b'source')
     target.write_bytes(b'existing')

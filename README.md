@@ -138,10 +138,40 @@ For a pinned installation, use the matching tagged download URL instead of
 curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.353/install-te2 | TE2_RELEASE_TAG=0.2.353 sh -s -- --yes
 ```
 
-## Remote-First Workspace
+The upcoming installer also supports selecting older tags through
+`TE2_RELEASE_TAG`: Termux releases before `0.2.354` use their checksum-verified
+GitHub archive; `0.2.354` and newer use PyPI, including explicit tagged installs.
+`latest` follows the selected release's version, not a different dependency policy.
 
-TE2 specializes in remote multi-client project mirroring, shared drafting, and
-collaborative workflows. One framework owns the project, its open logical
+## Known Issues And Workarounds
+
+- **New Git repositories:** run `git init` manually in the project's terminal.
+  The repository-initialization detection guard is broken. Git operations work
+  normally afterward; existing repositories and repositories cloned through the
+  UI are unaffected.
+- **Code Server startup:** initialization can occasionally time out. Allow it
+  to finish, then refresh the page manually if needed.
+- **First Terminal app launch:** initial preparation can time out in the UI even
+  though the terminal eventually launches. Wait before retrying; the reported
+  error does not necessarily mean startup stopped. This does not affect Code
+  TE2's terminal drawer.
+- **Termux extensions:** some extensions display platform-incompatibility
+  warnings or checks despite being installable. Installation does not guarantee
+  their bundled native language servers support Termux. For **ty**, install the
+  language-server executable through Termux's package manager and configure the
+  extension to use that system executable. The latest ty extension also has a
+  validation issue that is not limited to Termux; earlier TE2 releases allowed
+  extension installation without these newer compatibility checks.
+- **ALS / Codex authentication:** you may need to log in through the Codex CLI
+  before using ALS. If ALS was already running when you authenticated, manually
+  restart its Codex session/process so it picks up the login.
+
+## Local And Remote Workspace
+
+TE2 provides the same workspace experience locally and remotely, with shared
+project state and client-specific views. Multi-client project mirroring, shared
+drafting, and collaborative workflows work in either setting. One framework
+owns the project, its open logical
 documents, drafts, language and extension services, processes, and sidebar
 membership. Each connected client keeps its own foreground document and local
 presentation, so a desktop, phone, tablet, or another browser can work against
@@ -478,6 +508,45 @@ runtime directory under `$TMPDIR` or Termux `$PREFIX/tmp`. Normal startup never
 uses an old root as a fallback for these migrated caches. Durable framework and
 Code TE2 store cutovers are tracked separately.
 
+### Separate Configuration And Test Environments
+
+To try a release or keep a separate configuration without mixing it with your
+normal TE2 state, launch from a subshell with explicit roots. This works on
+Linux and Termux; choose any absolute directory for `state`:
+
+```bash
+(
+  state="$HOME/.cache/te2-test"
+
+  export TE2_CONFIG_HOME="$state/config"
+  export TE2_DATA_HOME="$state/data"
+  export TE2_CACHE_HOME="$state/cache"
+  export TE2_RUNTIME_HOME="$state/runtime"
+
+  export XDG_CONFIG_HOME="$state/xdg/config"
+  export XDG_DATA_HOME="$state/xdg/data"
+  export XDG_CACHE_HOME="$state/xdg/cache"
+  export XDG_RUNTIME_DIR="$state/xdg/runtime"
+
+  export FRAMEWORK_SHELLS_BASE_DIR="$state/fws"
+
+  mkdir -p "$TE2_RUNTIME_HOME" "$XDG_RUNTIME_DIR"
+  chmod 700 "$TE2_RUNTIME_HOME" "$XDG_RUNTIME_DIR"
+  te2 --host 127.0.0.1 --port 18089
+)
+```
+
+Open `http://127.0.0.1:18089`. Use the `te2` executable from the environment you
+want to test (activate its virtual environment first, if applicable).
+`TE2_*_HOME` values are final roots, with no extra `/te2` appended. The XDG
+overrides cover components using standard XDG locations, while
+`FRAMEWORK_SHELLS_BASE_DIR` separates shell runtime records and logs. The
+subshell keeps these overrides out of subsequent launches; omit them to use
+your normal roots again. This separates application state, not filesystem
+access: opening and saving a project still operates on its real files.
+
+### Launcher Commands And Runtime Details
+
 The first standalone Terminal launch installs its locked production Node
 dependencies under `$TE2_DATA_HOME/node_runtime/terminal` (normally
 `~/.local/share/te2/node_runtime/terminal` after root resolution). The runtime
@@ -562,6 +631,41 @@ wrapper under `~/.local/share/te2/apps/<app_id>` can launch the real application
 through Framework-Shells and expose it through TE2's proxy surface. The wrapped
 application remains independently runnable; TE2 is its development harness,
 not a hidden product dependency.
+
+### Add A Second-Root App
+
+A second-root app is a user-installed app outside TE2's built-in app tree.
+Download the [second-root app template ZIP](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.354/te2-second-root-app-template.zip)
+from the `0.2.354` release assets when published. Extract its `proxy_shell_wrapper`
+directory to `~/.local/share/te2/apps/<your_app_id>` (or
+`$TE2_DATA_HOME/apps/<your_app_id>` when overridden).
+
+1. Give `manifest.json` a unique `id` and display name; set its proxy start and
+   health paths to match your web app.
+2. In `shellspec/app_worker.yaml`, replace the placeholder command with the
+   app's real startup command, set `cwd` to its source directory, and match the
+   listening port/environment and readiness check. Update the status label in
+   `main.py` if desired.
+3. Reload the app registry through TE2's MCP tools, then start/open the app.
+   For a new app, create a normal standalone web server first; for an existing
+   app, point the wrapper at it without moving its source into TE2.
+
+There is no general app installer or build-automation command yet. With a
+Codex conversation in ALS connected to TE2's MCP tools and integration
+instructions, an agent can scaffold and validate the wrapper, run the app's
+build steps, reload the registry, and launch it with your approval.
+
+### ALS Extensions
+
+ALS is extensible; Codex is the currently bundled provider. Copilot and OpenCode
+extensions are planned, and UI-based extension installation is coming later.
+Extensions can already be installed through the CLI:
+
+```bash
+als-rs extension install --path /path/to/extension --install-dependencies
+# Or install a packaged extension:
+als-rs extension install --zip /path/to/extension.zip
+```
 
 ## Acknowledgements
 
