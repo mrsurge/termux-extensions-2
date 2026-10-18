@@ -27,7 +27,7 @@ async def handle_host_language_backend_set_request(
     mode_value = data.get("mode")
     if mode_value not in {"code-server", "web-workers"}:
         return {"ok": False, "error": "mode must be 'code-server' or 'web-workers'."}
-    mode = cast(LanguageBackendMode, mode_value)
+    mode = mode_value
 
     async with _mode_switch_lock:
         if mode == "code-server":

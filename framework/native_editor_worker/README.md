@@ -335,16 +335,44 @@ edit builds before claiming effective reuse. No cache or release checkpoints are
 automatically deleted by this entrypoint.
 
 `build` keeps intermediates under `${TMPDIR:-.codex-scratch}/mypyc-build-cache`.
-`--cache-dir` overrides that root. Separate cache generations are keyed by checkout,
+`--cache-dir` overrides that root.
+
+Code TE2 mypyc uses the repository's explicit `pyproject.toml` configuration:
+`[tool.mypy] strict = true`. This includes disallow-any-generics,
+disallow-subclassing-any, typed/incomplete definition checks, checking untyped
+bodies, warn-return-any and strict equality, plus mypy's other strict checks.
+`disallow_subtyping_any` is not a mypy option; the supported spelling is
+`disallow_subclassing_any`. The build passes the config path explicitly, so an
+invoking working directory cannot select another policy. Finished snapshot
+fingerprints include the parsed mypy settings, but not unrelated project version
+metadata. Config/source changes require a new validated snapshot; previous active
+snapshots and compiler caches are retained, with no automatic activation/rebuild.
+
+Separate cache generations are keyed by checkout,
 CPython ABI/version, compiler/version/flags, mypy/setuptools versions and compiled
 module membership; ordinary source-content changes reuse the same generation.
 An exclusive writer lock protects the cache. Generated C and objects remain there;
 never point `CODE_TE2_MYPYC_DIR` at the mutable cache.
 
 The installed setuptools recompiles a changed shared extension as a whole. When
-`ccache` is present, the workflow uses a dedicated **512 MB** compiler cache with
-content-based compiler checking; unchanged C/header/flag combinations reuse cached
-objects. The low-level probe can still run without ccache, but the preferred local
+`ccache` is present, the workflow uses a dedicated cache with content-based
+compiler checking; unchanged C/header/flag combinations reuse cached objects.
+New caches default to **512 MB**. An explicit `CCACHE_MAXSIZE` or a per-cache
+`<cache-root>/ccache/ccache.conf` takes precedence; unrelated global cache settings
+are not edited. This desktop's ignored local cache config sets **1 GiB**, keeps
+compression enabled and disables ccache file_clone/hard_link. Other machines do
+not inherit that local file or larger budget. Logs identify environment limits
+versus cache-local configuration instead of always claiming 512 MB.
+
+Snapshot `.so` publication tries Linux FICLONE into a new inode, falling back to
+an ordinary independent copy on unsupported/cross-filesystem operations. It never
+hard-links mutable compiler outputs; cache rebuilds cannot modify an accepted
+snapshot. Genuine I/O failures abort publication, not silently copy or activate a
+partial result. Reflink support is filesystem-dependent and does not imply disk
+savings on ext4; this desktop's small probe used the copy fallback successfully.
+This is distinct from ccache's cloning mode, which would disable object compression.
+
+The low-level probe can still run without ccache, but the preferred local
 entrypoint and low-level probe both diagnose unavailable/broken ccache and fall
 back; `--no-cache`/`NO_CACHE=1` skip probing. A user-supplied ccache `CC` wrapper is
 removed while uncached compilation runs, then restored in the caller's environment.

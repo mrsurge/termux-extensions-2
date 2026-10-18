@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import importlib.util
 import json
 import os
@@ -117,6 +118,7 @@ def test_compiler_cache_restores_environment_and_sets_bound(tmp_path, monkeypatc
     monkeypatch.delenv('NO_CACHE', raising=False)
     monkeypatch.setenv('CC', 'old-cc')
     monkeypatch.delenv('CCACHE_DIR', raising=False)
+    monkeypatch.delenv('CCACHE_MAXSIZE', raising=False)
     monkeypatch.setattr(workflow.shutil, 'which', lambda name: '/usr/bin/ccache')
     with workflow.compiler_cache(tmp_path, {'cc': ['/usr/bin/cc']}) as enabled:
         assert enabled
@@ -124,6 +126,61 @@ def test_compiler_cache_restores_environment_and_sets_bound(tmp_path, monkeypatc
         assert os.environ['CCACHE_MAXSIZE'] == '512M'
     assert os.environ['CC'] == 'old-cc'
     assert 'CCACHE_DIR' not in os.environ
+
+
+def test_compiler_cache_honors_local_budget_and_explicit_override(tmp_path, monkeypatch):
+    monkeypatch.delenv('NO_CACHE', raising=False)
+    monkeypatch.delenv('CCACHE_MAXSIZE', raising=False)
+    monkeypatch.setattr(workflow.shutil, 'which', lambda name: '/usr/bin/ccache')
+    cache = tmp_path / 'ccache'
+    cache.mkdir()
+    (cache / 'ccache.conf').write_text('max_size = 1 GiB\ncompression = true\n')
+    with workflow.compiler_cache(tmp_path, {'cc': ['/usr/bin/cc']}):
+        assert 'CCACHE_MAXSIZE' not in os.environ
+        assert os.environ['CCACHE_DIR'] == str(cache)
+    monkeypatch.setenv('CCACHE_MAXSIZE', '768M')
+    with workflow.compiler_cache(tmp_path, {'cc': ['/usr/bin/cc']}):
+        assert os.environ['CCACHE_MAXSIZE'] == '768M'
+    assert os.environ['CCACHE_MAXSIZE'] == '768M'
+
+
+@pytest.mark.parametrize('supported', [True, False])
+def test_snapshot_clone_or_copy_never_shares_mutable_inode(tmp_path, monkeypatch, supported):
+    source = tmp_path / 'mutable.so'
+    target = tmp_path / 'snapshot.so'
+    source.write_bytes(b'original')
+
+    def clone(dst, request, src):
+        assert request == 0x40049409
+        if not supported:
+            raise OSError(errno.EOPNOTSUPP, 'no reflinks')
+        os.write(dst, os.read(src, 1024))
+
+    monkeypatch.setattr(workflow.fcntl, 'ioctl', clone)
+    assert workflow.clone_or_copy_library(source, target) is supported
+    assert source.stat().st_ino != target.stat().st_ino
+    source.write_bytes(b'updated!')
+    assert target.read_bytes() == b'original'
+    target.write_bytes(b'snapshot')
+    assert source.read_bytes() == b'updated!'
+
+
+def test_clone_failure_preserves_existing_target_and_propagates_disk_full(tmp_path, monkeypatch):
+    source, target = tmp_path / 'source.so', tmp_path / 'target.so'
+    source.write_bytes(b'source')
+    target.write_bytes(b'existing')
+    with pytest.raises(FileExistsError):
+        workflow.clone_or_copy_library(source, target)
+    assert target.read_bytes() == b'existing'
+    target.unlink()
+    def full(*args):
+        raise OSError(errno.ENOSPC, 'disk full')
+    monkeypatch.setattr(workflow.fcntl, 'ioctl', full)
+    with pytest.raises(OSError) as error:
+        workflow.clone_or_copy_library(source, target)
+    assert error.value.errno == errno.ENOSPC
+    assert not target.exists()
+    assert source.read_bytes() == b'source'
 
 
 def test_explicit_no_cache_disables_even_user_wrapped_compiler(tmp_path, monkeypatch):
@@ -158,6 +215,31 @@ def test_finished_fingerprint_tracks_source_toolchain_and_recipe(tmp_path):
     (tmp_path / 'scripts').mkdir()
     (tmp_path / 'scripts/mypyc_build_workflow.py').write_text('# changed recipe')
     assert workflow.build_fingerprint(tmp_path, identity, 'source1') != first
+
+
+def test_fingerprint_tracks_mypy_policy_not_package_version(tmp_path):
+    config = tmp_path / 'pyproject.toml'
+    identity = {'soabi': 'abi'}
+    config.write_text('[project]\nversion = "1.0"\n[tool.mypy]\nstrict = true\n')
+    first = workflow.build_fingerprint(tmp_path, identity, 'source')
+    config.write_text('[project]\nversion = "2.0"\n[tool.mypy]\nstrict = true\n')
+    assert workflow.build_fingerprint(tmp_path, identity, 'source') == first
+    config.write_text('[project]\nversion = "2.0"\n[tool.mypy]\nstrict = false\n')
+    assert workflow.build_fingerprint(tmp_path, identity, 'source') != first
+
+
+def test_compiler_uses_actual_strict_config_from_any_working_directory(tmp_path, monkeypatch):
+    main = pytest.importorskip('mypy.main')
+    repo = SCRIPT.parents[1]
+    source = str(repo / 'app/apps/code_te2/code_server_install_state.py')
+    monkeypatch.chdir(tmp_path)
+    args = workflow.mypy_build_args(repo, [source])
+    assert args == ['--config-file', str(repo / 'pyproject.toml'), source]
+    _, options = main.process_options(args)
+    for name in ('disallow_any_generics', 'disallow_subclassing_any',
+                 'disallow_untyped_defs', 'disallow_incomplete_defs',
+                 'check_untyped_defs', 'warn_return_any', 'strict_equality'):
+        assert getattr(options, name) is True, name
 
 
 def test_reuse_requires_integrity_and_fingerprint(tmp_path):

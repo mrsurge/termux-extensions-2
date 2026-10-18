@@ -841,6 +841,49 @@ mandatory full-device matrix is added for the latest smoke acceptance.
 
 ### Code Server disk/status authority — 2026-10-18
 
+- [x] Approved local cache follow-up: this desktop's dedicated ignored
+  .codex-scratch/mypyc-build-cache/ccache/ccache.conf sets 1 GiB, compression=true,
+  file_clone=false and hard_link=false. Workflow honors explicit environment or
+  cache-local config; new caches retain 512M default. Verified through the real
+  compiler_cache context and ccache --show-config; global 80 GB configuration
+  was not modified, nor were any other devices.
+- [x] Snapshot publication uses a new inode and FICLONE-first copy, falling back
+  only on unsupported/cross-filesystem errors. Tests prove mutation isolation
+  on both branches, existing-target preservation and disk-full propagation.
+  Actual ext4 probe reports reflink unsupported and safe copy fallback: no
+  claimed space savings here. 46 workflow tests pass, one opt-in benchmark skipped.
+  No native build, snapshot cleanup/activation or runtime restart. Local free
+  space was about 1.5 GiB; increasing the allowance does not preallocate 1 GiB.
+
+- [x] User live acceptance of interpreted status correction; user also reports
+  the prior mypyc build succeeded. Strict typing follow-up below does not claim
+  a new compiled build/activation or execution acceptance for its changed source.
+- [x] Strict mypy follow-up: four status-fix modules pass; broader initial run
+  found 29 diagnostics in eight existing files. Added missing return annotations,
+  canonical contract imports and removed redundant casts/obsolete ignore; no
+  blanket suppressions or behavior changes. Repository [tool.mypy] strict=true
+  now passes all 143 sources in the active compiled manifest plus interpreted
+  code-server bootstrap (144 files), with normal import following.
+- [x] mypyc passes explicit repository config; snapshot fingerprint includes
+  normalized tool.mypy settings, not unrelated package-version changes. Tests
+  check actual parsed strict flags and config selection outside repo cwd.
+  `disallow_subtyping_any` is invalid; supported disallow_subclassing_any is
+  included in strict. No new interpreter/native binary or snapshot activation.
+- [x] Typing/workflow regressions: 99 tests pass, one opt-in cache benchmark
+  skipped; strict mypy succeeds and authored whitespace checks pass. This does
+  not claim every unrelated repository module is strict-clean. No frontend asset
+  change/publication, runtime restart, commit or push in this follow-up.
+- [x] App-directory strict edge seams: all 18 remaining diagnostics across six
+  files resolved using existing narrowing, owner imports, guarded callable casts
+  and typed/narrowed marketplace tests. `python -m mypy --cache-dir=/dev/null .`
+  from app/apps/code_te2 passes all 243 source files, including tests and modules
+  outside the recorded startup compilation set. No DTO/protocol/runtime behavior
+  change or new suppressions. Focused marketplace, intelligence startup, search
+  replacement, Explorer delivery/open and review tests: 68 pass plus 7 subtests;
+  all 3 frontend benchmark/search-trigger regressions also pass.
+  This remains source validation, not a rebuilt/activated shared object; no
+  runtime restart, asset publication, commit or push performed.
+
 - [x] Source trace: failed frontend prerequisite refresh fell into a fabricated
   missing/install prompt; backend spawn/readiness failure and web-worker mode
   also cleared the installed record despite preserved disk files.
@@ -859,9 +902,10 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   Targeted ty reports only two existing warnings (redundant cast/contextmanager
   deprecation), not new errors. Authored whitespace check passes; generated host
   embeds upstream string whitespace and is not hand-edited to suppress it.
-- [ ] Activate matching Python/mypyc and client assets, then live-verify dropped
-  connection/reload, real missing installation consent and explicit mode switch.
-  No restart, publication or compiled-domain activation performed by this slice.
+- [x] User confirms live interpreted correction; no agent runtime transition.
+- [ ] Compiled execution acceptance after matching strict-policy snapshot;
+  user reported the preceding build passed but had not yet confirmed execution
+  of this follow-up source. No agent publication or domain activation performed.
 
 These are not blanket unimplemented features. Ask only about cases that remain
 relevant after final packaging; do not count unrun stress experiments as bugs.
@@ -877,6 +921,22 @@ relevant after final packaging; do not count unrun stress experiments as bugs.
   source fix exists, but the specific log/lifecycle checks are not separately proven.
 - [ ] Final release artifact installation/client matrix; older wheels/APKs cannot
   accept source changes introduced since those artifacts were built.
+
+## Debian release build-host preparation — 2026-10-18
+
+- [x] User selects Debian as primary Linux/APK build host and experimental
+  Termux packaging-container host, with native Termux fallback if needed.
+  Read-only SSH preflight: x86_64, Docker available, 137 GiB free; system
+  Python 3.13.5 is not the Code TE2 CPython 3.14 build interpreter.
+- [ ] Inventory privileged access, installed toolchains, existing checkout and
+  container capabilities; propose exact isolated setup/build procedure.
+- [ ] Pin source/submodules and toolchain/image provenance; build Linux wheel,
+  validate native domain/private runtime, install/test in a fresh Debian venv.
+- [ ] Prove target Android aarch64 wheel/mypyc container compatibility, or use
+  native Termux fallback; build staged APKs with matching current asset seed.
+- [ ] Independent rebuild/provenance/hash comparison and target acceptance.
+  No builds/provisioning, deployment or release publication performed by this
+  checkpoint; existing running builds are untouched.
 
 ## Deferred, not part of this release
 

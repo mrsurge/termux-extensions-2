@@ -241,15 +241,15 @@ def _unregister_editor_for_client(*, client_id: str) -> None:
             _active_editor = None
             _active_editor_client_id = None
 
-def set_current_file(path: str, sha256: str | None = None):
+def set_current_file(path: str, sha256: str | None = None) -> None:
     global _current_file_path, _current_file_sha256
     _current_file_path = path
     _current_file_sha256 = sha256
 
-def get_current_file():
+def get_current_file() -> str | None:
     return _current_file_path
 
-def get_current_file_sha256():
+def get_current_file_sha256() -> str | None:
     return _current_file_sha256
 
 
@@ -341,7 +341,7 @@ def _apply_watcher_replace(
     sha256: str | None,
     project_path: str | None,
     reason: str = 'watcher_replace',
-):
+) -> bool:
     """Apply content delivered by the file watcher and invalidate stale cache entries.
 
     Returns True if content was actually applied to the editor.
@@ -538,7 +538,7 @@ def _persist_to_cache_debounced() -> None:
     except Exception as e:
         print(f"[PERSIST] Failed to refresh diffs: {e}", file=sys.stderr)
 
-def _cancel_cache_persist_timer():
+def _cancel_cache_persist_timer() -> None:
     """Cancel any pending cache persist timer."""
     global _cache_persist_timer
     if _cache_persist_timer:
@@ -549,7 +549,7 @@ def _cancel_cache_persist_timer():
         _cache_persist_timer = None
 
 
-def _schedule_cache_persist():
+def _schedule_cache_persist() -> None:
     """Schedule debounced cache persistence."""
     global _cache_persist_timer
 
@@ -693,7 +693,7 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> 
         get_combined_diffs_async=_get_combined_diffs_async,
     )
 
-def _refresh_active_diffs():
+def _refresh_active_diffs() -> None:
     """Recalculate combined diffs for the current file based on latest preferences."""
     editor = get_active_editor()
     current_file = get_current_file()

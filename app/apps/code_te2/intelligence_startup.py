@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from app.libs.runtime_startup_trace import StartupTrace
 
 from .code_server_shell_manager import (
-    ShellRecord,
     code_server_connection_target,
     ensure_code_server_shell,
 )
+from .native_shells import ShellRecord
 from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 from .intelligence_bootstrap_gate import wait_for_application
 

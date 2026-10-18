@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import errno
 import fcntl
 import hashlib
 import importlib.metadata
@@ -15,11 +16,17 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tomllib
 from typing import Callable, Generator, cast
 
 from framework.bootstrap.compiler_cache_preflight import ccache_health
 
 SCHEMA = 1
+
+
+def mypy_build_args(repo: Path, sources: list[str]) -> list[str]:
+    """Use the repository policy independently of the invoking directory."""
+    return ['--config-file', str(repo / 'pyproject.toml'), *sources]
 
 
 def source_digest(repo: Path, modules: dict[str, str]) -> str:
@@ -68,6 +75,11 @@ def build_fingerprint(repo: Path, identity: dict[str, object], digest: str) -> s
         path = repo / relative
         if path.is_file():
             recipe.update(relative.encode() + b'\0' + path.read_bytes())
+    config_path = repo / 'pyproject.toml'
+    if config_path.is_file():
+        config = tomllib.loads(config_path.read_text()).get('tool', {}).get('mypy', {})
+        # Config changes invalidate snapshots, not unrelated package versions.
+        recipe.update(b'mypy-config\0' + json.dumps(config, sort_keys=True).encode())
     return hashlib.sha256(json.dumps({'schema': 1, 'toolchain': identity,
         'source_digest': digest, 'recipe': recipe.hexdigest()}, sort_keys=True).encode()).hexdigest()
 
@@ -183,8 +195,13 @@ def compiler_cache(cache_root: Path, identity: dict[str, object]) -> Generator[b
         compiler = cast(list[str], compiler)
         # Don't double-wrap a user-supplied ccache compiler command.
         command = compiler if Path(str(compiler[0])).name == 'ccache' else [executable, *compiler]
-        os.environ.update(CC=shlex.join(command), CCACHE_DIR=str(cache_root / 'ccache'),
-                          CCACHE_MAXSIZE='512M', CCACHE_COMPILERCHECK='content')
+        cache_dir = cache_root / 'ccache'
+        os.environ.update(CC=shlex.join(command), CCACHE_DIR=str(cache_dir),
+                          CCACHE_COMPILERCHECK='content')
+        # Preserve explicit per-invocation and per-cache policy. New caches keep
+        # the conservative default; one desktop's larger budget is not global.
+        if 'CCACHE_MAXSIZE' not in os.environ and not (cache_dir / 'ccache.conf').is_file():
+            os.environ['CCACHE_MAXSIZE'] = '512M'
     try:
         yield enabled
     finally:
@@ -193,6 +210,30 @@ def compiler_cache(cache_root: Path, identity: dict[str, object]) -> Generator[b
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def clone_or_copy_library(source: Path, target: Path) -> bool:
+    """Independent snapshot inode: CoW reflink when supported, never hard links."""
+    created = False
+    cloned = False
+    try:
+        with source.open('rb') as src, target.open('xb') as dst:
+            created = True
+            try:
+                fcntl.ioctl(dst.fileno(), 0x40049409, src.fileno())  # Linux FICLONE
+                cloned = True
+            except OSError as exc:
+                if exc.errno not in {errno.EOPNOTSUPP, errno.ENOTTY, errno.EXDEV,
+                                     errno.EINVAL, errno.ENOSYS}:
+                    raise
+        if not cloned:
+            shutil.copyfile(source, target)
+        shutil.copystat(source, target)
+        return cloned
+    except BaseException:
+        if created:
+            target.unlink(missing_ok=True)
+        raise
 
 
 def publish_snapshot(repo: Path, cache: Path, output: Path, manifest: dict[str, object],
@@ -210,8 +251,8 @@ def publish_snapshot(repo: Path, cache: Path, output: Path, manifest: dict[str, 
             source = cache / 'lib' / relative
             target = stage / 'lib' / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            # Copy, not hard-link: future cache rebuilds may overwrite libraries.
-            shutil.copy2(source, target)
+            # Reflinks isolate future writes just like copies; hard links do not.
+            clone_or_copy_library(source, target)
         resources(stage / 'lib')
         (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2))
         shutil.copy2(cache / 'startup.json', stage / 'startup.json')

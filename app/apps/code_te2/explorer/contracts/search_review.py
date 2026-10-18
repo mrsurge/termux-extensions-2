@@ -74,7 +74,7 @@ def parse_search_replace_params(payload: object) -> SearchReplaceParams:
         selected.append(index)
     if phase == 'prepare' and not selected:
         raise ExplorerSearchReviewContractError('Select at least one match')
-    return {'phase': cast(Literal['prepare', 'apply'], phase),
+    return {'phase': phase,
         'searchId': _required_string(raw.get('searchId'), 'searchId'),
         'projectGeneration': generation,
         'relativePath': _required_string(raw.get('relativePath'), 'relativePath'),
@@ -543,7 +543,7 @@ def _parse_search_mode(value: object) -> SearchMode:
     if value is None:
         return "name"
     if value in ("name", "content", "changes"):
-        return cast(SearchMode, value)
+        return value
     raise ExplorerSearchReviewContractError("Invalid search mode")
 
 

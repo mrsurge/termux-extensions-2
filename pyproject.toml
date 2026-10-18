@@ -18,6 +18,9 @@ te2-desktop = "desktop_client.electron_cli:main"
 [tool.pytest.ini_options]
 addopts = ["--ignore=worktrees"]
 
+[tool.mypy]
+strict = true
+
 [tool.setuptools]
 include-package-data = true
 

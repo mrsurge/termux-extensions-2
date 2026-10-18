@@ -783,7 +783,7 @@ async def _broadcast_active_project_terminal_shell_list() -> None:
 
 configure_terminal_facts_changed(_broadcast_active_project_terminal_shell_list)
 
-def get_history_store():
+def get_history_store() -> TerminalHistoryStore:
     """Return the shared HistoryStore instance used across the app."""
     return cast(TerminalHistoryStore, _get_shared_history_store())
 

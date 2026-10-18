@@ -106,7 +106,7 @@ class ObserverClient:
             raise RuntimeError("FWS response belongs to an old connection")
         if isinstance(response, dict) and cast(dict[str, object], response).get("error") is not None:
             self.bridge.fws_reconnect(epoch)
-        return cast(object, response)
+        return response
 
     async def shutdown(self) -> None:
         self.stopped = True

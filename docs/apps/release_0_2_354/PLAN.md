@@ -41,6 +41,28 @@ probes or discovery scans. Validate Python state/failure paths, TS disconnect
 projection, typecheck and host build; activation separately needs matching
 Python/mypyc plus client assets. No shared runtime restart/publication authorized.
 
+Approved follow-up: persistent strict mypy policy in pyproject.toml, explicit
+config selection by mypyc and config-aware finished-snapshot fingerprints.
+Resolve the 29 strict diagnostics across eight existing domain modules through
+annotations, canonical contract imports and removal of redundant casts/ignores,
+without runtime behavior changes or new suppressions. Validate all sources from
+the active compiled manifest plus interpreted code-server bootstrap and focused
+runtime/build-workflow tests. No native rebuild or selector activation here.
+
+Approved edge-seam completion: clear the remaining app-directory strict errors
+in lazy/interpreted search contracts, benchmark lane narrowing, dynamic Explorer
+callable guards, the intelligence ShellRecord import and marketplace tests.
+Preserve existing runtime validation/protocols; use explicit test DTO narrowing,
+not Any suppressions. Validate the whole Code TE2 directory and focused tests;
+no native compilation, runtime activation or commit is included.
+
+Approved local cache follow-up: retain 512 MB for new caches but honor explicit
+CCACHE_MAXSIZE/per-cache config, setting this desktop's ignored config to 1 GiB
+with compression retained. Snapshot publication tries independent CoW reflinks,
+then ordinary copies where unsupported; no hard links to mutable compiler
+outputs. Validate the actual local configuration, a small filesystem probe and
+isolation/error regressions without compilation, cleanup or activation.
+
 ### Project-scoped autosave and safe switching — approved 2026-10-17
 
 User requires save-mode ownership in each ProjectSidecar, not global preferences,
@@ -368,6 +390,34 @@ for concurrent Android compilation validation; do not interfere.
 Build matched current-source Linux/Termux wheels, native worker/domain receipts,
 OTA and staging APK assets. Reuse artifacts only under the established fingerprint
 and provenance checks. Enforce the strict 100,000,000-byte PyPI wheel budget.
+
+2026-10-18 build-host direction: use the Debian acceptance host
+(`mrsurge@100.74.145.70`, privileged access available) as this release's primary
+build platform, rather than burdening the busy development machine/Pixel.
+Read-only preflight confirms x86_64, Docker on PATH and 137 GiB free; default
+Python is 3.13.5, so explicitly provision/select the required CPython 3.14 build
+environment. Do not substitute the invoking interpreter for native-domain ABI.
+
+Prepare an isolated checkout pinned to the pushed source revision and existing
+submodule pins. Separate Linux wheel/private-runtime/mypyc builds and clean-venv
+acceptance from Android APK builds and the experimental Termux packaging Docker
+lane. The latter must prove Android aarch64 Python/NDK/Node/native-extension ABI
+compatibility, not merely produce Linux artifacts with Android-looking tags.
+Build Android Termux wheels and mypyc domains there if the target toolchain
+supports the existing build workflow; retain native Termux wheel/domain builds
+as the user-approved fallback if the container lane fails. Do not interrupt
+currently running builds or overwrite their output/selectors.
+
+Record exact source/submodules, container image digest, toolchain/interpreter
+versions, commands, target tags/ABI, receipts and artifact SHA-256. Independently
+rebuild before claiming reproducibility; successful installation is functional
+acceptance, not proof of byte-for-byte reproducibility. Test the Linux wheel in
+a fresh Debian venv and target Android artifacts on Termux; APK/signing/runtime
+acceptance stays separate. Inspect remote prerequisites and present concrete
+container/toolchain/setup/build commands before provisioning or heavy execution.
+This checkpoint authorizes recording the direction and commit/push, not release
+publication or an unreviewed replacement of the native packaging workflow.
+
 Fresh Debian and Android/Termux installs must prove version, native selection,
 real WBA/Node imports, console/MCP, app launch and dependency closure. Check
 libarchive.file_reader, not merely import libarchive. Then perform the separately

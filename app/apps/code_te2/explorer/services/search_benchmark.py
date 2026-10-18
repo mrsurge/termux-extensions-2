@@ -863,7 +863,7 @@ def _benchmark_lanes(value: object) -> list[BenchmarkLane]:
     lanes: list[BenchmarkLane] = []
     for item in cast(list[object], value):
         if item in {"fullStack", "pythonBridge", "rustOnly"}:
-            lanes.append(cast(BenchmarkLane, item))
+            lanes.append(item)
     if not lanes:
         raise ValueError("search benchmark lanes did not contain a supported lane")
     return lanes

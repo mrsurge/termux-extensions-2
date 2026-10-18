@@ -85,4 +85,4 @@ async def publish_editor_result(
             await deliver(EditorNotification("client", EDITOR_RPC_NOTIFICATION_GIT_BASELINES, payload))
         elif method == EDITOR_RPC_METHOD_DRAFT_DIFF_GET:
             await deliver(EditorNotification("connection", EDITOR_RPC_NOTIFICATION_DRAFT_DIFF, payload))
-    await reply(request_id, cast(object, result))
+    await reply(request_id, result)

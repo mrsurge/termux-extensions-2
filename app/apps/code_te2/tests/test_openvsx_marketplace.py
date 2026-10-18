@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import platform
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
+from typing import cast
 
 import httpx
 
@@ -25,6 +27,13 @@ _SHA256_PATH = (
     f"{_API_PATH}/file/detachhead.basedpyright-{_VERSION}.sha256"
 )
 _CDN_PREFIX = f"/detachhead/basedpyright/{_VERSION}"
+
+
+def _object(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    entries = cast(dict[object, object], value)
+    assert all(isinstance(key, str) for key in entries)
+    return cast(dict[str, object], entries)
 
 
 def _metadata(
@@ -106,8 +115,11 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(openvsx_marketplace, '_backend_targets', return_value=('linux-x64','universal')):
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                 detail = await openvsx_marketplace.get_openvsx_detail(ext_id='astral-sh.ty', installed_extensions=[], client=client)
-                self.assertEqual(detail['extension']['targetPlatform'], 'linux-x64')
-                self.assertIn('/linux-x64/', detail['extension']['iconUrl'])
+                extension = _object(detail['extension'])
+                self.assertEqual(extension['targetPlatform'], 'linux-x64')
+                icon_url = extension['iconUrl']
+                assert isinstance(icon_url, str)
+                self.assertIn('/linux-x64/', icon_url)
                 artifact = await openvsx_marketplace.download_openvsx_vsix(ext_id='astral-sh.ty', version='1.0.0', client=client)
                 try:
                     self.assertEqual(artifact.read_bytes(), content)
@@ -128,7 +140,7 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(openvsx_marketplace._trusted_openvsx_response_url(url,namespace='vendor',name='example',version='1.0.0',suffix='.vsix',target_platform='linux-arm64'))
 
     async def test_termux_targets_prefer_universal_and_never_alpine(self) -> None:
-        with patch('app.apps.code_te2.code_server_bootstrap._is_termux_android',return_value=True), patch.object(openvsx_marketplace.platform,'machine',return_value='aarch64'):
+        with patch('app.apps.code_te2.code_server_bootstrap._is_termux_android',return_value=True), patch.object(platform,'machine',return_value='aarch64'):
             self.assertEqual(openvsx_marketplace._backend_targets(),('universal','linux-arm64'))
 
     async def test_installed_icons_preserve_formats_and_reject_escapes(self) -> None:
@@ -145,8 +157,12 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
                     ext['icon'] = target.name
                     result = registry.get_installed_extension_icon('vendor.example', '1.0.0')
                     self.assertEqual(result, {'content': b'icon bytes', 'mime': mime})
-                    self.assertIn('id=vendor.example&version=1.0.0', registry.get_extension_list()[0]['iconUrl'])
-                    self.assertEqual(registry.get_local_marketplace_detail('vendor.example')['iconUrl'], registry.get_extension_list()[0]['iconUrl'])
+                    icon_url = registry.get_extension_list()[0]['iconUrl']
+                    assert isinstance(icon_url, str)
+                    self.assertIn('id=vendor.example&version=1.0.0', icon_url)
+                    detail = registry.get_local_marketplace_detail('vendor.example')
+                    assert detail is not None
+                    self.assertEqual(detail['iconUrl'], icon_url)
                 with self.assertRaises(RuntimeError):
                     registry.get_installed_extension_icon('vendor.example', '2.0.0')
                 outside = base / 'outside.png'; outside.write_bytes(b'outside')
@@ -159,7 +175,9 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
                 # Existing persisted registries must work without a registry rebuild.
                 ext.pop('icon')
                 (root / 'package.json').write_text('{"name":"example","publisher":"vendor","icon":"ICON.PNG"}')
-                self.assertEqual(registry.get_installed_extension_icon('vendor.example', '1.0.0')['mime'], 'image/png')
+                result = registry.get_installed_extension_icon('vendor.example', '1.0.0')
+                assert result is not None
+                self.assertEqual(result['mime'], 'image/png')
     async def test_readme_is_lazy_exact_version_and_bounded(self) -> None:
         requests: list[str] = []
         metadata = _metadata()
@@ -171,11 +189,11 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=metadata)
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             detail = await openvsx_marketplace.get_openvsx_detail(ext_id=_EXT_ID, installed_extensions=[], client=client)
-            self.assertNotIn("readme", detail["extension"])
+            self.assertNotIn("readme", _object(detail["extension"]))
             self.assertEqual(len(requests), 1)
             detail = await openvsx_marketplace.get_openvsx_detail(ext_id=_EXT_ID, version=_VERSION,
                 include_readme=True, installed_extensions=[], client=client)
-            self.assertEqual(detail["extension"]["readme"], "# Readme\n\nBody")
+            self.assertEqual(_object(detail["extension"])["readme"], "# Readme\n\nBody")
 
     async def test_readme_redirect_cannot_request_private_origin(self) -> None:
         requests: list[str] = []
@@ -210,15 +228,18 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
                 "description": "Local description", "display_name": "Example", "source": "user"}}}
             with patch.object(extension_registry, '_EXTENSIONS_DIR', installed), patch.object(extension_registry, 'load_registry', return_value=registry):
                 detail = extension_registry.get_local_marketplace_detail(_EXT_ID, True)
+                assert detail is not None
                 self.assertEqual(detail['readme'], '# Local')
                 self.assertEqual(detail['metadataSource'], 'installed')
                 readme.unlink(); outside = root / 'secret'; outside.write_text('secret', encoding='utf-8'); readme.symlink_to(outside)
-                self.assertEqual(extension_registry.get_local_marketplace_detail(_EXT_ID, True)['readme'], '')
+                detail = extension_registry.get_local_marketplace_detail(_EXT_ID, True)
+                assert detail is not None
+                self.assertEqual(detail['readme'], '')
 
     async def test_handler_uses_installed_fallback_and_rejects_version_change(self) -> None:
         from app.apps.code_te2.explorer.handlers.extensions import handle_ext_marketplace_detail
-        emitted = []
-        async def emit(method, payload, reply_to=None):
+        emitted: list[dict[str, object]] = []
+        async def emit(method: str, payload: dict[str, object], reply_to: str | None = None) -> None:
             emitted.append(payload)
         context = ExplorerExtensionHandlerContext(project_root=Path('/workspace'), emit_personal=emit)
         local = {'id': _EXT_ID, 'version': _VERSION, 'readme': '# Local'}
@@ -226,7 +247,7 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
              patch('app.apps.code_te2.extension_registry.get_local_marketplace_detail', return_value=local), \
              patch.object(openvsx_marketplace, 'get_openvsx_detail', AsyncMock(side_effect=openvsx_marketplace.OpenVsxMarketplaceError('offline'))):
             await handle_ext_marketplace_detail(context, {'ext_id': _EXT_ID, 'readme': True, 'version': _VERSION}, 'one')
-            self.assertEqual(emitted[0]['extension']['readme'], '# Local')
+            self.assertEqual(_object(emitted[0]['extension'])['readme'], '# Local')
             with self.assertRaisesRegex(RuntimeError, 'version changed'):
                 await handle_ext_marketplace_detail(context, {'ext_id': _EXT_ID, 'readme': True, 'version': '0.0.0'}, 'two')
 
@@ -376,7 +397,8 @@ class OpenVsxMarketplaceHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(vsix_path.exists())
         self.assertEqual(emitted[0][0], "ext:marketplace_installed")
-        self.assertIn("sample.setting", emitted[0][1]["config_schema"]["properties"])
+        schema = _object(emitted[0][1]["config_schema"])
+        self.assertIn("sample.setting", _object(schema["properties"]))
         restart_mock.assert_awaited_once()
 
 

@@ -349,7 +349,7 @@ def _get_explorer_helper_callable(name: str) -> ExplorerHelperCall:
     helper = getattr(helper_module, name, None)
     if not callable(helper):
         raise RuntimeError(f"explorer.services.file_ops.{name} unavailable")
-    return helper
+    return cast(ExplorerHelperCall, helper)
 
 
 def _normalize_object_dict(value: object) -> dict[str, object]:

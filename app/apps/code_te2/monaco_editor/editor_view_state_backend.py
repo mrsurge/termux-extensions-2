@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from typing import Protocol, cast
 
-from ..draft_diff_helper import compute_draft_diff as _compute_draft_diff  # type: ignore[reportUnknownVariableType]
+from ..draft_diff_helper import compute_draft_diff as _compute_draft_diff
 from .editor_backend_services.contracts import JsonMap
 
 

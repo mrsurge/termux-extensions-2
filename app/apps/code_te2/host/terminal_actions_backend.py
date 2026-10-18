@@ -290,7 +290,7 @@ async def _handle_host_run_active_file_request(
         raise
 
     if result.get("ok") is True:
-        data_obj = _json_object(cast(object, result.get("data")))
+        data_obj = _json_object(result.get("data"))
         _ = data_obj.setdefault("action", "terminal")
         _ = data_obj.setdefault("message", "Running active file in terminal")
         result["data"] = data_obj

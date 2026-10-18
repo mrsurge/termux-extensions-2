@@ -32,6 +32,7 @@ from profile_code_te2_import import check_event
 from mypyc_build_workflow import (
     activate, build_lock, cache_key, compiler_cache, publish_snapshot,
     prune, source_digest, toolchain, build_fingerprint, reusable_snapshot, snapshot_status,
+    mypy_build_args,
 )
 from framework.bootstrap.compiler_cache_preflight import ccache_health
 
@@ -196,12 +197,16 @@ def build(output: Path, cache_root: Path, *, fingerprinted: bool = False) -> Pat
         log_path = cache / "build.log"
         try:
             with compiler_cache(cache_root, identity) as cached:
-                cache_status = "enabled (512M limit)" if cached else (
+                cache_limit = os.environ.get('CCACHE_MAXSIZE') or 'cache-local configuration'
+                cache_status = f"enabled ({cache_limit})" if cached else (
                     "explicitly disabled; full changed-extension rebuilds" if os.environ.get('NO_CACHE') == '1'
                     else "unavailable; full changed-extension rebuilds")
                 print(f'Build cache: {cache}; ccache: {cache_status}', flush=True)
                 with log_path.open("w") as log, redirect_stdout(log), redirect_stderr(log):
-                    extensions = mypycify(sources, opt_level="3", multi_file=True, target_dir=str(cache / "csrc"))
+                    extensions = mypycify(
+                        mypy_build_args(REPO, sources),
+                        opt_level="3", multi_file=True, target_dir=str(cache / "csrc"),
+                    )
                     setup(
                         name="te2-mypyc-domain-probe", ext_modules=extensions,
                         script_args=["build_ext", "--build-lib", str(cache / "lib"), "--build-temp", str(cache / "temp")],
