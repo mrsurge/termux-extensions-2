@@ -288,4 +288,54 @@ honestly records source_dirty=true; stable release/clean provenance remains gate
 3. Android/Termux wheel lane and separate validation handoff.
 4. All three staging APKs as one validation group.
 
-No tags, uploads, production installation or shared runtime changes have occurred.
+The preceding sections record candidate-stage evidence. Final publication below
+supersedes their pending source/tag/upload gates; old candidates remain unchanged.
+
+## Final wheel publication — 2026-10-18
+
+User approves commits, tags and public PyPI publication while GitHub remains a
+draft pending all three APKs. Tagged TE2 source is
+`76b1f84e2a1a3b41480a1a0a5de02ef378bb94dc` (`0.2.354`); tagged ALS source is
+`d10a16c87ab36efbca1a541f37e750cb584b0279` (`0.2.139`). Both source branches
+and annotated tags are pushed. Final wheels are assembled from clean isolated
+checkouts, not the dirty candidate trees. No native compilation was repeated.
+Pixel snapshot restore uses the existing SHA-verified reuse helper to rebase
+absolute source paths, compare startup sources and import all 143 modules.
+
+| Published wheel | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `te2-0.2.354-py3-none-manylinux_2_28_x86_64.whl` | 98,412,666 | `62402b9ea26f0242f7e8cff7f478bf5ef9de90a39a9cc1d820ab35be27e365a7` |
+| `te2-0.2.354-cp314-cp314-android_24_arm64_v8a.whl` | 49,428,489 | `bcd2aa879ef8686694b3e9f3bd9588609e608fe5a05592406f8ec7b0fb968a7f` |
+| `agent_log_server-0.2.139-py3-none-manylinux_2_28_x86_64.whl` | 56,739,877 | `0409d0f0d51ca7985dc90a425e815d866fb1d443de4b2dcdd75b55eb37753ee8` |
+| `agent_log_server-0.2.139-cp314-none-android_24_arm64_v8a.whl` | 9,596,571 | `14c317cb96f28e1dfe8278dc2aad9506e64f44e5fb780891a36fb140690cfbeb` |
+
+All wheels pass Twine checks and the strict byte budget. Every ELF member is
+byte-identical to its accepted candidate: TE2 Linux 163 / Android 146; ALS Linux
+25 / Android 2. This is accepted-to-final payload equality, not a claim that
+different build hosts/toolchains independently produce identical binaries.
+Linux private-runtime platform audit passes; Android TE2 receipt explicitly
+reports publicationEligible=true and empty sourceDirty.
+
+Final local-wheel and fresh **PyPI-only** joint installs pass on Debian system
+Python 3.13.5 and Pixel system Python 3.14.6. Default resolution selects TE2 .354,
+ALS .139 and FWS .65 with target-exclusive uvloop .23 / uvloop-te2 .23.post1.
+Pip/uv dependency checks pass (45 Linux / 43 Android distributions), all compiled
+editor imports and real installed WBA imports pass, FWS native pipe/uvloop loads,
+ALS MCP discovers 38 tools/one resource and closes cleanly. Linux verifies its
+bundled CPython/libpython 3.14.6. No retired web/schema/MCP/crypto distributions
+are installed. Pixel PyPI builds only the permitted small pyyaml/msgpack/msgspec
+dependencies; preparation completes in 8.4 seconds, not large native builds.
+
+Artifacts/receipts: Debian `/root/.cache/te2-release-build/final-wheels/` and
+Pixel `~/.cache/te2-release-build/final-termux-wheels/`. Each retains isolated
+local-wheel and PyPI venvs/smoke outputs plus native-comparison JSON. ALS uploads
+precede TE2 through isolated Debian Twine; credentials passed only through SSH
+stdin to an ephemeral process. PyPI JSON confirms every published digest matches
+the table above. Existing developer/shared frameworks were not restarted.
+
+TE2 GitHub release `0.2.354` is **draft**, not Latest/public. The separate template
+ZIP is attached and its downloaded SHA-256 matches
+`835b679580f4590c549b3ebc45a57aff107871054a0efd49442cb1a82ca5958d`.
+All three APK assemblies/grouped acceptance, final release assets/installers and
+checksum inventory, and final GitHub publication remain pending. Wheels are
+already public; no source distribution was uploaded in this wheel-only slice.

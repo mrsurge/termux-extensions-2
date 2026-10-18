@@ -1033,15 +1033,20 @@ relevant after final packaging; do not count unrun stress experiments as bugs.
   actual bundled libpython mapping, package checks and .354 identity. FWS .65
   and uvloop .23 are installed; no retired dependency stack. Public-resolution
   closure remains a publication gate, not a reason to restore exact TE2 pins.
-- [ ] Finalize clean ALS source/release provenance and publish the approved
-  stable dependency before checking default public PyPI resolution. Current
-  stable candidate records source_dirty=true; no tags/uploads performed.
-- [ ] Prove target Android aarch64 wheel/mypyc container compatibility, or use
-  native Termux fallback; build staged APKs with matching current asset seed.
-- [ ] Independent rebuild/provenance/hash comparison and target acceptance.
-  Remote candidate build approved; live-validation groups are Linux wheel,
-  Android/Termux wheel, then all three APKs. Stop at major decisions or group
-  handoffs. No tags/uploads/release publication authorized by candidate builds.
+- [x] Finalize clean tagged ALS .139 and TE2 .354 source/release provenance,
+  push both repos/tags, publish four Linux/Android wheels to PyPI ALS-first,
+  and verify every published digest. Final clean-source assembly reuses the
+  accepted native artifacts with exact ELF equality; old candidates unchanged.
+- [x] Native Termux wheel/mypyc fallback and user live acceptance completed;
+  clean final local-wheel and fresh PyPI-only installs pass on Debian/Pixel.
+  Default public resolution now selects ALS .139/FWS .65 with correct uvloop
+  and no retired stack. Full hashes, sizes and smoke receipts: BUILD_STATUS.md.
+- [x] Independent-build source/toolchain/provenance comparison and Linux/Termux
+  target acceptance recorded; no cross-toolchain byte-reproducibility claim.
+- [ ] Build all three staged APKs with matching current asset seed, then stop
+  for grouped live acceptance before final GitHub publication. User approves
+  keeping GitHub release 0.2.354 as draft; template ZIP attached/hash verified,
+  final installers/asset/checksum inventory still pending. PyPI wheels are public.
 
 ## Deferred, not part of this release
 
