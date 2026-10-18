@@ -73,6 +73,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/wire-encoding.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/completion-timeouts.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/rpc-ids.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/protocol/pinned-rpc-ids.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/pending-requests.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/ext-host-dispatch.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/client/configuration.ts',

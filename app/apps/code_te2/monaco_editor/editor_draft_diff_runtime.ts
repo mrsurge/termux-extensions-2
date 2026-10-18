@@ -49,6 +49,7 @@ interface DraftDiffLineLike {
 interface DraftDiffHunkLike {
   oldStart?: unknown;
   newStart?: unknown;
+  newLines?: unknown;
   lines?: unknown;
 }
 
@@ -334,6 +335,11 @@ export function applyDraftDiffDecorations(
       const lines = asArray<DraftDiffLineLike>(hunk && hunk.lines);
       if (!lines.length) continue;
 
+      // Zero-context hunks have an empty modified range only for a deletion.
+      // Replacements, including net-shrinking ones, remain modifications.
+      const deletionOnly = hunk.newLines === 0 &&
+        !lines.some((line) => asString(line && line.type) === 'add-draft');
+
       let oldLine = asNumber(hunk && hunk.oldStart, 1);
       let newLine = asNumber(hunk && hunk.newStart, 1);
       if (debug && debugLines) {
@@ -414,6 +420,25 @@ export function applyDraftDiffDecorations(
             lineIndex += 1;
           }
           lineIndex -= 1;
+
+          if (deletionOnly && showDraftInsertions && !usingStockDeletionWidgets) {
+            // newLine is the first surviving line after the deletion. Anchor at
+            // the end of the preceding logical line, like VS Code quick diff,
+            // so wrapped lines place the caret after their last rendered row.
+            const markerLine = clampLine(newLine - 1);
+            const atStart = newLine <= 1;
+            const column = atStart ? 1 : Number.MAX_VALUE;
+            decorations.push({
+              range: new monacoRef.Range(markerLine, column, markerLine, column),
+              options: {
+                description: 'te2-draft-deletion',
+                isWholeLine: false,
+                linesDecorationsClassName: 'te2-draft-delete-glyph' +
+                  (atStart ? ' te2-draft-delete-glyph-top' : ''),
+                linesDecorationsTooltip: `${delBlock.length} deleted draft ${delBlock.length === 1 ? 'line' : 'lines'}`,
+              },
+            });
+          }
 
           if (debug && debugLines) {
             let sample = '';

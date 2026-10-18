@@ -697,7 +697,7 @@ export function createEditorWorkbenchRuntime(
           || (!!currentPath && deps.absPathFromVscodeUri(resource) === currentPath);
       });
 
-      if (activeTouched || (!activeUri && currentPath)) {
+      if (stats.clearedOwner || activeTouched || (!activeUri && currentPath)) {
         syncDiagnosticsForCurrentModel('changeMany');
       } else {
         deps.setDebugDiag(

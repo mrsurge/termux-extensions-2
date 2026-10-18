@@ -377,6 +377,7 @@ export interface ExtHostDispatchRuntimeDeps {
   mainThreadOutputServiceRpcId: number;
   mainThreadStatusBarRpcId: number;
   mainThreadStorageRpcId: number;
+  mainThreadDiagnosticsRpcId: number;
   extHostWorkspaceRpcId: number;
   extensionActivity: ExtHostDispatchRuntime["extensionActivity"];
   initializeExtensionStorage: ExtHostDispatchRuntime["initializeExtensionStorage"];
@@ -802,6 +803,7 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
       MainThreadOutputService: deps.mainThreadOutputServiceRpcId,
       MainThreadStatusBar: deps.mainThreadStatusBarRpcId,
       MainThreadStorage: deps.mainThreadStorageRpcId,
+      MainThreadDiagnostics: deps.mainThreadDiagnosticsRpcId,
       ExtHostWorkspace: deps.extHostWorkspaceRpcId,
     },
     extensionActivity: deps.extensionActivity,

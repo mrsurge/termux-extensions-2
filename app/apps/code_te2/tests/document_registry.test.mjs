@@ -45,6 +45,7 @@ function createRegistry(
     activateLanguage = async () => {},
     isPathClientForeground = () => false,
     isPathProjectedForeground = () => false,
+    onSendExt = () => {},
   } = {},
 ) {
   let req = 0;
@@ -53,6 +54,7 @@ function createRegistry(
     uriToString,
     sendExt(rpcId, method, args, cancellable) {
       calls.push({ rpcId, method, args, cancellable });
+      onSendExt(method, args);
       return ++req;
     },
     sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs) {
@@ -63,7 +65,7 @@ function createRegistry(
       };
     },
     uriForPath,
-    workspacePath: () => workspacePath,
+    workspacePath: () => typeof workspacePath === "function" ? workspacePath() : workspacePath,
     resolveLanguageId(path, _text, requestedLanguageId) {
       return requestedLanguageId || (path.endsWith(".rs") ? "rust" : "plaintext");
     },
@@ -414,6 +416,55 @@ test("$tryOpenDocument shares registry identity with active documents", async ()
     documentDeltas(calls).filter((delta) => delta.addedDocuments).length,
     1,
   );
+});
+
+test("switch-back logical hydration restores draft text and keeps foreground protection", async () => {
+  let workspace = "/first";
+  const foreground = new Set();
+  const calls = [];
+  const transmittedText = [];
+  const registry = createRegistry(calls, {
+    workspacePath: () => workspace,
+    isPathClientForeground: path => foreground.has(path),
+    onSendExt(method, args) {
+      if (method === "$acceptDocumentsAndEditorsDelta") {
+        for (const document of args[0].addedDocuments || []) {
+          transmittedText.push(document.lines.join("\n"));
+        }
+      }
+    },
+  });
+  let staleRequest;
+  for (const [index, project] of ["/first", "/second", "/first"].entries()) {
+    workspace = project;
+    foreground.clear();
+    registry.clearLocal(); // same registry reset used by WorkbenchClient reconnect
+    const path = `${project}/draft.rs`;
+    const descriptor = logicalDescriptor(path, `sha256:draft-${index}`);
+    const params = { ...reconcileParams({ activePath: null, background: [descriptor] }),
+      projectPath: project, projectGeneration: index + 1 };
+    const result = registry.reconcileLogicalDocuments(params);
+    assert.equal(result.ok, true);
+    assert.equal(result.hydration.length, 1);
+    const request = { ...hydrateParams(result.hydration[0], `// draft ${index} λ\n`),
+      projectPath: project, projectGeneration: index + 1 };
+    if (staleRequest) {
+      const rejected = await registry.hydrateLogicalDocument(staleRequest);
+      assert.equal(rejected.ok, false);
+      assert.equal(registry.getByPath(path), null);
+    }
+    assert.equal((await registry.hydrateLogicalDocument(request)).ok, true);
+    assert.equal(transmittedText.at(-1), `// draft ${index} λ\n`);
+    assert.equal(registry.getByPath(path).dirty, true);
+    const retainedVersion = registry.getByPath(path).versionId;
+    // Once a live client owns the document, background hydration must not
+    // overwrite it; this is the warning observed in the live worker log.
+    foreground.add(path);
+    const protectedResult = await registry.hydrateLogicalDocument({ ...request, text: "disk text" });
+    assert.equal(protectedResult.error, "client_foreground_document_protected");
+    assert.equal(registry.getByPath(path).versionId, retainedVersion);
+    staleRequest = request;
+  }
 });
 
 test("workspace switch removes editor facade then releases every document", async () => {

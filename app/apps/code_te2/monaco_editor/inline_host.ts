@@ -177,6 +177,27 @@ const INLINE_EDITOR_HOST_STYLE = `
   background: rgba(56, 139, 253, 0.12) !important;
 }
 #editor-frame .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.09) !important; }
+#editor-frame .monaco-editor .te2-draft-delete-glyph {
+  margin-left: 5px;
+  opacity: 0.65;
+  pointer-events: none;
+  z-index: 5;
+}
+#editor-frame .monaco-editor .te2-draft-delete-glyph::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 4px solid var(--vscode-editorGutter-deletedBackground, #f14c4c);
+  pointer-events: none;
+}
+#editor-frame .monaco-editor .te2-draft-delete-glyph-top::after {
+  top: -4px;
+  bottom: auto;
+}
 #editor-frame .monaco-editor .te2-draft-del-zone {
   background: rgba(210, 153, 34, 0.06);
   color: #e6b450;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ from app.apps.code_te2.logical_document_reconciler import (
     materialize_logical_document_hydration,
 )
 from app.apps.code_te2.open_state_backend import SidecarOpenStatePayload
+from app.apps.code_te2.project_sidecar import ProjectSidecar
 from app.apps.code_te2.worker_services.event_bus import JsonObject, WorkerEvent
 
 
@@ -542,3 +544,87 @@ class LogicalDocumentReconcilerTests(unittest.IsolatedAsyncioTestCase):
             await reconciler.wait_idle()
 
         self.assertEqual(calls, [12, 12, 12])
+
+    async def test_switch_away_and_back_hydrates_real_sidecar_drafts_in_both_ready_orders(self) -> None:
+        """Do not substitute disk text when restoring foreground/background recents."""
+        with _temp_dir() as raw_root:
+            root = Path(raw_root).resolve()
+            generation = 1
+            hydration: list[JsonObject] = []
+
+            def sidecar_path(project: str) -> Path:
+                return root / "state" / (hashlib.sha256(project.encode()).hexdigest() + ".json")
+
+            async def adapter_call(
+                method: str, params: JsonObject | None = None, timeout: float = 30.0,
+            ) -> JsonObject:
+                del timeout
+                assert params is not None
+                if method.endswith("reconcile"):
+                    descriptors = cast(list[LogicalDocumentDescriptor], params["background"])
+                    return {"result": {"ok": True, "hydration": [
+                        {**item, "languageId": "rust", "reason": "missing", "expectedActiveEpoch": 0}
+                        for item in descriptors
+                    ]}}
+                self.assertEqual(method, "vscode.logicalDocuments.hydrate")
+                hydration.append(dict(params))
+                return {"result": {"ok": True}}
+
+            with (
+                patch.object(ProjectSidecar, "get_sidecar_path", side_effect=sidecar_path),
+                patch.object(ProjectSidecar, "_instances", {}),
+                patch.object(reconciler_module, "current_project_generation", side_effect=lambda _project: generation),
+            ):
+                projects: list[tuple[str, list[str]]] = []
+                for name in ("first", "second"):
+                    project = root / name
+                    project.mkdir()
+                    sidecar = ProjectSidecar.load_or_create(str(project))
+                    paths: list[str] = []
+                    for filename in ("foreground.rs", "background.rs"):
+                        path = project / filename
+                        disk = f"// disk {name} {filename}\n"
+                        path.write_text(disk, encoding="utf-8")
+                        draft = f"// draft {name} {filename} λ\n"
+                        sidecar.upsert_cached_document(
+                            str(path), draft, hashlib.sha256(disk.encode()).hexdigest(),
+                            "test", "test", "test", 0, 0,
+                        )
+                        paths.append(str(path))
+                    sidecar.save()
+                    projects.append((str(project), paths))
+
+                reconciler = LogicalDocumentReconciler(adapter_call=adapter_call)
+                for index, (project, paths) in enumerate((projects[0], projects[1], projects[0]), start=1):
+                    generation = index
+                    hydration.clear()
+                    started = _event("ProjectSwitchStarted", project, {})
+                    started["project_generation"] = generation
+                    await reconciler.handle_project_switch_started(started)
+                    state = _open_state(project, revision=index, active=paths[0], recents=paths)
+                    opened = _event("OpenStateChanged", project, {"openState": state})
+                    opened["project_generation"] = generation
+                    ready = _event("AdapterWorkspaceReady", project, {})
+                    ready["project_generation"] = generation
+                    if index == 2:
+                        await reconciler.handle_adapter_workspace_ready(ready)
+                        await reconciler.handle_open_state(opened)
+                    else:
+                        await reconciler.handle_open_state(opened)
+                        await reconciler.wait_idle()
+                        self.assertEqual(hydration, [], "no hydration before adapter readiness")
+                        await reconciler.handle_adapter_workspace_ready(ready)
+                    await reconciler.wait_idle()
+                    self.assertEqual([item["path"] for item in hydration], paths)
+                    for item in hydration:
+                        self.assertTrue(item["dirty"])
+                        self.assertEqual(item["projectGeneration"], generation)
+                        self.assertIn("// draft", str(item["text"]))
+                        self.assertNotIn("// disk", str(item["text"]))
+                        self.assertIn("λ", str(item["text"]))
+                    stale = _event("OpenStateChanged", projects[1][0], {"openState": state})
+                    stale["project_generation"] = generation - 1
+                    hydration.clear()
+                    await reconciler.handle_open_state(stale)
+                    await reconciler.wait_idle()
+                    self.assertEqual(hydration, [])

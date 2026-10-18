@@ -171,7 +171,7 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
     if ev_type == "watcher/fileChanges":
         await _handle_watcher_file_changes(ev)
         return
-    if ev_type == "diagnostics/update":
+    if ev_type in {"diagnostics/update", "diagnostics/clear"}:
         from .diagnostics_bridge import handle_wba_diagnostics_update
 
         await handle_wba_diagnostics_update(ev)

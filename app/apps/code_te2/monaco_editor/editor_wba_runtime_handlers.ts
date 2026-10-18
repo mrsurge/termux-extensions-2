@@ -129,6 +129,10 @@ export function registerEditorWbaRuntimeHandlers(
         return;
       }
 
+      if (type === "diagnostics/clear") {
+        deps.applyDiagnosticsUpdate(event);
+        return;
+      }
       if (type === "diagnostics/changeMany") {
         logDiagnosticsEvent(
           event,

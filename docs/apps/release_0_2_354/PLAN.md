@@ -42,8 +42,14 @@ original user notes verbatim in the tracker.
    focus and shared membership. Investigate existing selection/focus owners first.
 2. Project-switch draft hydration: opened files must send their full draft content
    to WBA on project restoration just as ordinary file opens do. Draft content is
-   intended, not an erroneous entry in the open-model list. Audit the project
-   switch path without changing cold-start behavior that already hydrates models.
+   intended, not an erroneous entry in the open-model list. Deferred unresolved
+   by user on 2026-10-17, not a release blocker: current tests and user retesting
+   restore drafts correctly; the original diagnostic discrepancy is no longer
+   reproducible and may have been a one-off. Retain regression coverage; do not
+   claim a fix or alter hydration/foreground guards without fresh evidence.
+   A subsequent live reproduction exposed a separate diagnostic-projection
+   mismatch. The approved owner-clear protocol correction is recorded under U2
+   in TRACKER.md; this does not establish a project-switch hydration defect.
 3. Deleted-draft gutter indicator: inspect the VS Code implementation and follow
    its small red between-line deletion marker pattern in the draft gutter.
 4. Mentions from the inline problem widget: reuse the existing mention owner and

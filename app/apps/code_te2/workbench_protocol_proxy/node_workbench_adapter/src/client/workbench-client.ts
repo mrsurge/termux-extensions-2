@@ -328,6 +328,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
 
   // Keep diagnostics/hover requests parseable when we need them later.
   "$changeMany",
+  "$clear",
   "$provideHover",
   "$provideDocumentSymbols",
 
@@ -2071,6 +2072,7 @@ export class WorkbenchClient {
       mainThreadOutputServiceRpcId: _rpcIds.MainThreadOutputService,
       mainThreadStatusBarRpcId: _rpcIds.MainThreadStatusBar,
       mainThreadStorageRpcId: _rpcIds.MainThreadStorage,
+      mainThreadDiagnosticsRpcId: _rpcIds.MainThreadDiagnostics,
       extHostWorkspaceRpcId: _rpcIds.ExtHostWorkspace,
       extensionActivity: this._extensionActivity,
       initializeExtensionStorage: (shared, extensionId) =>
@@ -2145,7 +2147,7 @@ export class WorkbenchClient {
     if (typeof payload.type === "string" && (
       payload.type.startsWith("provider/") || payload.type === "diagnostics/changeMany"
     )) this._startupMark(`intelligence.first.${payload.type}`);
-    if (payload.type === "diagnostics/changeMany") {
+    if (payload.type === "diagnostics/changeMany" || payload.type === "diagnostics/clear") {
       this._diagnosticSnapshots.apply(payload);
     }
     if (payload.type === "document/activeChanged" && typeof payload.path === "string") {

@@ -841,6 +841,25 @@ When a file is edited:
    - `review:setEntries` with full review list (including diff hunks)
 4. Explorer UI applies `data-hasDraft="1"` attribute to file/folder nodes (CSS handles visual indicator)
 
+### Editor draft deletion markers
+
+`editor_draft_diff_runtime.ts` renders normal-editor deletion boundaries from the
+existing `del-draft` blocks in `editor.draftDiff.updated`. With draft insertion
+highlighting enabled and no full/inline diff editor, each consecutive deletion
+block adds one non-whole-line `linesDecorationsClassName` caret to the existing
+draft decoration collection only when the zero-context hunk has `newLines === 0`
+and no added lines. Replacements are modifications, including net-shrinking
+replacements: they retain blue insertion highlighting without a deletion caret,
+matching VS Code's empty-modified-range Delete classification.
+The range anchors at the preceding logical line's
+end (VS Code QuickDiffDecorator's MAX_VALUE-column pattern), so wrapping does not
+move it to that line's first visual row. A beginning-of-file deletion uses the top
+of line 1; EOF/empty documents retain valid model anchors. The inline-host CSS
+draws a translucent red, theme-variable-aware triangle without input interception.
+Expanded diff views keep their existing stock deletion widgets without duplicate
+carets. Existing collection replacement/clear removes markers on fresh or clean
+projections; no new backend diff, model text, WBA or persistence path is involved.
+
 ### Review panel flow
 
 The Drafts overlay requests `explorer.review.list` on its Explorer RPC lane.
@@ -2887,6 +2906,24 @@ reprojects every owner for the active model, clears rendered owners when leaving
 a model, and aggregates toolbar counts from the retained marker state. A WBA
 resync replays the bounded owner/resource snapshot to a newly connected editor;
 there is no polling or frontend-to-frontend diagnostics relay.
+
+VS Code diagnostics have two distinct removal operations: `$changeMany` with an
+empty marker list clears one resource; `MainThreadDiagnostics.$clear(owner)`
+clears the owner's entire collection. The pinned Diagnostics actor is NID 16 for
+the managed Code Server build. Its arguments must be in WBA's decoding allowlist.
+WBA projects `$clear` as `diagnostics/clear` with the exact owner, evicts that
+owner from the retained resync snapshot before broadcast, and forwards the event
+over both the editor lane and backend pipe. The editor marker service clears
+only that owner and reprojects the active model, preserving other owners. Backend
+diagnostics clears the same owner and republishes the existing full detail/count
+projection for Explorer/Problems/file tabs. The distinct clear event is a pipe
+coalescing barrier, not an empty per-resource update; updates before and after it
+retain their order. Unknown/empty owners and `$clear` calls on other RPC actors
+must not clear diagnostic collections. No synthetic edits or diagnostic replay
+requests are used to repair a clear.
+
+The main Code TE2 build explicitly emits `pinned-rpc-ids.ts` along with WBA's
+other modules; editing a pin without regenerating its module is not activation.
 
 The backend normalization path is separate from that direct editor path:
 adapter stdout PUSH frames enter workbench_adapter_shell_manager.py, flow through

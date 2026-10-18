@@ -25,6 +25,7 @@ export interface VendorMainThreadDiagnosticsApplyStats {
   changedResources: number;
   droppedNoUri: number;
   resources: string[];
+  clearedOwner?: boolean;
 }
 
 interface VendorMainThreadDiagnosticsDeps {
@@ -154,6 +155,15 @@ export class VendorMainThreadDiagnostics {
   }
 
   applyChangeMany(payload: unknown): VendorMainThreadDiagnosticsApplyStats | null {
+    if (isRecord(payload) && payload.type === 'diagnostics/clear') {
+      if (typeof payload.owner !== 'string' || !payload.owner) return null;
+      const resources = Array.from(new Set(
+        this.markerService.read({ owner: payload.owner }).map((marker) => marker.resource),
+      ));
+      this.markerService.changeAll(payload.owner, []);
+      return { owner: payload.owner, resources, changedResources: resources.length,
+        droppedNoUri: 0, clearedOwner: true };
+    }
     const parsed = parseChangeManyPayload(payload, this.extHostId, this.uriToStringFn);
     if (!parsed) return null;
 

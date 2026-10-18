@@ -331,10 +331,22 @@ async def _emit_diagnostics_debounced() -> None:
 
 
 async def handle_wba_diagnostics_update(ev: JsonObject) -> None:
-    """Project WBA diagnostics/update events into Explorer/problems state."""
+    """Project WBA per-resource updates and owner clears into backend views."""
     project_root = _diagnostics_project_root()
     if not project_root:
         print("[diag_bridge] diagnostics/update ignored: no active project", flush=True)
+        return
+    if ev.get("type") == "diagnostics/clear":
+        owner = ev.get("owner")
+        if not isinstance(owner, str) or not owner:
+            return
+        for key in list(_diag_cache):
+            if key[1] == owner:
+                del _diag_cache[key]
+        print(f"[diag_bridge] diagnostics/clear owner={owner}", flush=True)
+        # A distinct event preserves ordering through the pipe coalescer: all
+        # earlier updates drain before clear, and subsequent updates survive it.
+        await _emit_diagnostics_to_explorer_and_ui(project_root)
         return
     metrics_enabled = diagnostics_latency_metrics_enabled()
     items = _json_object_list(ev.get("items")) if metrics_enabled else []

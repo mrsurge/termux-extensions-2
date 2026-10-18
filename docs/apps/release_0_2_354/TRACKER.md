@@ -269,12 +269,86 @@ plans are retained as references; they do not replace this current checklist.
   - [ ] Live acceptance after matching host assets and rebuilt Electron launch:
     detach/activate repeatedly, focus fallback, close/hide fallback, reattach.
     Builds are not publication or activation; no shared framework restart done.
-- [ ] U2 / original note 3 — Project restoration must hydrate WBA with opened
+- [ ] U2 / original note 3 — **Deferred unresolved; not a release blocker**
+  (user direction 2026-10-17). Project restoration must hydrate WBA with opened
   files' draft models, like ordinary file opening. Earlier description claiming
-  draft models should not enter the opened-model list was incorrect; the gap is
-  project-switch draft hydration, not draft exclusion.
+  draft models should not enter the opened-model list was incorrect; the reported
+  concern was project-switch draft hydration, not draft exclusion.
+  Original symptom: a draft contained a diagnostic-suppression change, leaving
+  disk content untouched, but an error unexpectedly remained after restoration.
+  User now cannot reproduce it and observes draft-aware intelligence working;
+  possibly a one-off, not a proven cause or an implemented behavioral fix.
+  - [x] Read-only trace finds existing logical_document_reconciler already builds
+    draft-first descriptors/materializes full draft content. WorkbenchClient
+    supplies foreground-protection paths to the registry; no missing DTO field
+    or absent hydration implementation is established.
+  - [x] User-approved regression-only investigation: 20 Python tests plus three
+    subtests and 19 real WBA registry tests pass; changed Python test passes ty.
+    New tests cover persisted sidecars with distinct disk/draft text (including
+    Unicode), first→second→first project sequence, foreground/background recents,
+    both readiness/open-state orderings, stale generations, actual extension-host
+    document DTO text and foreground overwrite rejection. Python transport is
+    stubbed and WBA registry is exercised separately: this is not full live
+    project-service/frontend transport reproduction.
+  - [ ] Revisit only if the live restoration discrepancy recurs, before behavioral
+    edits. Current worker log has client_foreground_document_protected hydration
+    warnings; registry tests confirm this guard intentionally rejects background
+    writes to foreground-owned documents. Warnings alone do not prove draft loss.
+    No runtime code, mypyc, assets, active projects or user drafts changed in this
+    investigation; no speculative guard relaxation is approved or implemented.
+  - [x] User reproduced a related diagnostic mismatch (2026-10-17); read-only
+    capture before reload: Cefrium main_page:ipZo and Electron main_page:mFz6
+    both show codec.py draft with `# ty: ignore[unresolved-import]`. Cefrium has
+    a ty unresolved-msgspec Monaco marker, Electron has none; both tabs show red
+    and both Explorer nodes internally retain diagErrors=1 despite the reported
+    lack of visible Explorer marker. This reopens diagnostic-coherence diagnosis,
+    not proof that project restoration supplied disk instead of draft content.
+  - [x] Follow up proven source gap: VS Code DiagnosticCollection.clear emits
+    MainThreadDiagnostics.$clear(owner), while current WBA dispatch handles only
+    $changeMany. Owner-wide clear is therefore missing; strongest current stale
+    diagnostic candidate, but this occurrence's exact triggering request has not
+    been captured. User approved the source correction separately; owner/resource
+    isolation and direct-editor versus backend projection lanes are preserved.
+  - [x] Source correction implements pinned Diagnostics actor NID 16, `$clear`
+    argument decoding/dispatch, retained WBA snapshot eviction and explicit
+    diagnostics/clear fanout through actual editor handler/marker service and
+    backend cache/full projections. Clear is an ordering barrier in the existing
+    coalescer; later updates survive and unrelated owners remain. Main host build
+    now emits the pinned RPC-ID module, which its entrypoint list had omitted.
+  - [x] 52 focused JS tests and 22 Python tests pass; Python ty, frontend typecheck
+    and host/WBA build pass. New wire-level tests cross actual WorkbenchClient
+    runtime adapters, argument decoder, dispatcher, snapshot owner, event bridge
+    and editor notification handler. Backend tests cover update→clear→update,
+    exact-owner eviction and file-tab count projection. Adapter-wide tsc has 105
+    existing diagnostics; compiler-API comparison against HEAD reports the same
+    105 with zero new diagnostics, not a clean adapter-wide typecheck claim.
+  - [x] User reports the owner-clear fix live verified (2026-10-17) and approves
+    commit/push. This closes the diagnostic-clear follow-up; the original
+    restoration issue remains deferred above. The captured occurrence's precise
+    replay sequence remains unproven. No runtime restart, mypyc rebuild, user
+    draft mutation or client publication performed by agent.
 - [ ] U3 / original note 2 — Add VS Code-style small red between-line gutter
   indicators for deleted draft lines; inspect upstream behavior before editing.
+  - [x] User approved frontend-only marker; inspected local code-server/VS Code
+    QuickDiffDecorator and dirtydiffDecorator.css. Existing draft-deletion blocks
+    now add a translucent red triangular line-decoration caret in normal editor
+    mode under existing draft-insertion visibility. End-of-logical-line range
+    preserves wrapped-line anchoring; BOF/EOF/empty-model anchors are bounded.
+    Full/inline diff retains stock widgets with no duplicate markers.
+  - [x] User-corrected classification: caret only for deletion-only gaps, not the
+    old half of a replacement. VS Code quickDiff.ts classifies Delete by an empty
+    modified range; TE2 reuses zero-context draft hunk newLines === 0 (and rejects
+    contradictory added rows). Equal/growing/shrinking replacements stay blue
+    without a caret. No new diff engine or backend DTO is needed.
+  - [x] 15 focused marker/inline-diff tests pass; frontend typecheck and host build
+    pass. Tests cover block grouping/count, replacement plus insertion tint,
+    replacement suppression (including net shrinking), independent pure deletions,
+    wrap-anchor columns, boundaries, empty document, stale-path rejection,
+    clean collection replacement, legacy decoration path and CSS contract.
+    Build retains the existing Node module-type warning, not a failure.
+  - [x] User live accepts deletion-only marker classification: caret appears
+    only for deleted lines, not replacements (2026-10-17). No agent-managed
+    runtime transition or native build performed; frontend-only activation.
 - [x] Original note 4 — Qualified Sidebar/client identities implemented and user
   accepted; preserve the existing source and routing contract.
 - [ ] U4 / original note 5 — Mentions from the inline problem widget, reusing
@@ -286,7 +360,8 @@ plans are retained as references; they do not replace this current checklist.
 
 ### Still-open pre-release gates
 
-Finish the clarified user-note queue above, then R4/R5 and bounded acceptance below.
+Finish the non-deferred clarified user-note queue above, then R4/R5 and bounded
+acceptance below. U2 remains recorded unresolved, not an active release gate.
 No old test failure, dependency/pin issue, missing selected artifact or final
 wheel/APK validation is closed merely by moving documentation. No duplicate
 mandatory full-device matrix is added for the latest smoke acceptance.
