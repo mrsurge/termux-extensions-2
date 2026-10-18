@@ -144,7 +144,8 @@ mouse wheel behavior and selection gestures intact. Add direction/unit/native
 wheel/no-inertia regressions. Client asset publication/live acceptance remain
 separate; no worker/backend/native build is required.
 
-Inertia is deferred, not implemented by this gain change. Survey sources:
+Inertia was initially deferred, not implemented by that gain change. The user
+subsequently approved the velocity-gated follow-up below. Survey sources:
 [touch-scroll-physics](https://github.com/Experience-Monks/touch-scroll-physics)
 is a small MIT renderer-independent candidate, but its update ignores dt and
 applies decay per call; refresh-rate correction and lifecycle cancellation need
@@ -153,6 +154,29 @@ separate scope. [Lenis](https://github.com/darkroomengineering/lenis) and
 machinery rather than xterm's application mouse/scroll flow.
 [use-gesture](https://github.com/pmndrs/use-gesture) supplies gesture tracking,
 not the complete inertia scroller. U5 sidebar launch remains a separate next item.
+
+### Terminal flick follow-up — approved 2026-10-18
+
+User explicitly requires a genuine release gesture, not automatic coasting after
+every drag: stronger throws travel farther, slow scrubbing/paused release stop,
+and reversal cannot preserve old-direction momentum. Approved implementation uses
+a small timestamped velocity estimator and elapsed-time exponential integral,
+not a general-purpose engine or dependency. Preserve the accepted 1:1 touch drag,
+xterm line settings and existing wheel/TUI path. Limit generated pulses to one
+measured row each and bound frame/time work. Fence new touches, selections,
+resize, lifecycle visibility, terminal/session/socket/checkpoint changes and
+stale/hidden geometry; respect reduced motion. Deterministic tests must compare
+60/90/120 Hz and cover non-flick releases and force-dependent travel. Build all
+three affected frontends; matching helper/script publication and live feel
+acceptance remain separate. No backend/mypyc/native changes or runtime restart.
+
+User-approved calibration after the clock correction: regular throw should coast
+a little less than one page and strongest at least four. Use continuous
+`min(4.5, 0.75 * speed²)` page travel with reference release speeds 1 and 2.5
+CSS px/ms, measured terminal-height normalization, and 280 ms decay. Preserve
+activation gates/direct drag/cancellation; keep a bounded 16-pulse frame budget
+with residual distance rather than cancelling a strong throw for exceeding the
+old pixel ceiling. Test multiple viewport heights and high-row-count terminals.
 
 ### Approved follow-up: mobile shortcuts after file switches
 

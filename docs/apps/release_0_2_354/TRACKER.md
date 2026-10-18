@@ -526,6 +526,49 @@ plans are retained as references; they do not replace this current checklist.
 - [x] User live accepts the approximately 1:1 touch scrubbing feel (2026-10-18).
   Quick-flick inertia/physics remains deferred; user approves checkpoint/push
   and moving on to U5 immediate Terminal Sidebar launch.
+
+### Terminal flick follow-up — source implementation, 2026-10-18
+
+- [x] User reopened fling while finishing Terminal work and approved the refined
+  contract: real velocity-gated releases only, stronger flicks travel farther,
+  slow/short/paused drags do not coast and reversals discard old velocity.
+  This supersedes the earlier fling deferral, not the accepted 1:1 drag baseline.
+- [x] Identical app-owned helpers implement timestamped recent velocity plus an
+  analytically integrated decay, without adding a physics dependency. Wheel/TUI
+  routing and line settings remain xterm-owned; each generated pulse is at most
+  one measured row, with speed/time/work bounds and no suspended-frame burst.
+  Reduced motion disables fling. New touch/selection/resize/page lifecycle,
+  invalid surface, buffer/mode/session/socket/checkpoint handoff stops momentum.
+  All three owners retain their independent shell/backends and use only the
+  neutral attachment cancelGesture hook; no other-app backend reuse is added.
+- [x] All 25 touch/selection tests pass, including force-dependent travel,
+  slow/paused/short rejection, reversal, 60/90/120 Hz equivalence, lifecycle and
+  explicit owner cancellation, scrollback bounds and TUI-owned wheel routing.
+  Terminal's 28 tests and File Explorer's 145 frontend tests pass. All three
+  TypeScript checks/builds pass; existing Code TE2 Node module warning remains.
+  Identical helper copies and diff whitespace check verified.
+- [x] User tested the updated fling and accepts the calibrated behavior as good
+  enough (2026-10-18), authorizing commit/push. This records overall live feel
+  acceptance, not a claim that every suggested TUI/lifecycle scenario was
+  individually exercised. Matching client activation is user-run evidence;
+  no agent-performed restart, mypyc/native build or publication.
+- [x] Live follow-up: user triggered fling only once in roughly 50–60 attempts.
+  Read-only Cefrium clock probe measured first rAF timestamp 12.4 ms before the
+  scheduling performance.now sample, while actual callback time advanced 1.4 ms.
+  The mixed-clock dt<0 guard could cancel an accepted flick immediately. Approved
+  correction uses performance.now consistently for sampling/release/integration;
+  thresholds remain unchanged pending another live test. Regression replays those
+  exact clock offsets and confirms continued wheel output. Both direct-served
+  helper copies updated; matching helper asset update/reload still required.
+- [x] User reports strongest fling only about half a page; approved page-scaled
+  calibration targets reference regular ~0.75 page and strong ~4.5 pages.
+  Previous 2.5 px/ms × 180 ms decay capped raw travel near 450 px irrespective
+  of page height (live visible terminal measured ~532 px). Helpers now use a
+  continuous velocity-squared page curve with 280 ms decay/2.2 s limit. Retain
+  up to 16 one-row pulses per frame, carrying bounded residual distance instead
+  of killing strong throws. New regressions verify range at 100/532/1000 px
+  heights and bounded output for a 200-row terminal. All 28 touch tests pass;
+  user live calibration acceptance recorded above.
   Asset publication/reload is separate; no worker restart/mypyc rebuild needed.
 
 ### Still-open pre-release gates

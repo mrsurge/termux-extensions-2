@@ -195,6 +195,7 @@ interface XtermOptions {
 }
 
 interface XtermDisposable {
+  cancelGesture?(): void;
   dispose(): void;
 }
 
@@ -1293,6 +1294,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function clearSocket(): void {
+    state.touchSelection?.cancelGesture?.();
     if (state.ws) {
       try {
         state.ws.close(1000, 'dispose');
@@ -1402,6 +1404,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
 
     ws.addEventListener('close', () => {
+      state.touchSelection?.cancelGesture?.();
       setStatus('disconnected');
     });
 
@@ -1620,7 +1623,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const touchSelection = state.touchSelection;
     const disposeMenu = bindTerminalContextMenu(ui.termContainer, term, message => setStatus(message));
     const cursorBinding = bindTerminalCursor(ui.termContainer, term);
-    state.touchSelection = { dispose() { cursorBinding.dispose(); disposeMenu(); touchSelection?.dispose(); } };
+    state.touchSelection = {
+      cancelGesture() { touchSelection?.cancelGesture?.(); },
+      dispose() { cursorBinding.dispose(); disposeMenu(); touchSelection?.dispose(); },
+    };
     await bindVendoredCtrlHandler(term);
     installVendoredCtrlFocusBinding(term);
     term.onData((data) => {
