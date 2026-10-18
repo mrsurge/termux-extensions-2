@@ -194695,6 +194695,7 @@ init_resources();
 init_strings();
 init_range();
 init_nls();
+init_actions();
 init_menuEntryActionViewItem2();
 init_actions2();
 init_contextkey();
@@ -194983,6 +194984,25 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
     const menu = this._menuService.getMenuActions(MarkerNavigationWidget_1.TitleMenu, this._contextKeyService);
     const actions = getFlatActionBarActions(menu);
     this._actionbarWidget.push(actions, { label: false, icon: true, index: 0 });
+    this._te2MentionAction = new Action(
+      "te2.problem.mention",
+      "Mention in conversation",
+      "codicon codicon-comment-discussion",
+      false,
+      () => {
+        const snapshot = this._te2MentionSnapshot;
+        const model = this.editor.getModel();
+        if (!snapshot || model !== snapshot.model || model.isDisposed() || model.getVersionId() !== snapshot.version) return;
+        const node = this.editor.getContainerDomNode();
+        const EventType3 = node?.ownerDocument.defaultView?.CustomEvent;
+        if (node && EventType3) node.dispatchEvent(new EventType3("te2:problem-mention", {
+          detail: snapshot
+        }));
+      }
+    );
+    this._te2MentionAction.tooltip = "Mention in conversation";
+    this._disposables.add(this._te2MentionAction);
+    this._actionbarWidget.push(this._te2MentionAction, { label: false, icon: true, index: 0 });
   }
   _fillTitleIcon(container) {
     this._icon = append(container, $(""));
@@ -195000,7 +195020,17 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
   show() {
     throw new Error("call showAtMarker");
   }
+  _te2CaptureMention(marker) {
+    const model = this.editor.getModel();
+    this._te2MentionSnapshot = model ? {
+      model,
+      version: model.getVersionId(),
+      marker: { ...marker }
+    } : void 0;
+    this._te2MentionAction.enabled = !!model;
+  }
   showAtMarker(marker, markerIdx, markerCount) {
+    this._te2CaptureMention(marker);
     this._container.classList.remove("stale");
     this._message.update(marker);
     this._severity = marker.severity;
@@ -195023,10 +195053,13 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
     this.editor.focus();
   }
   updateMarker(marker) {
+    this._te2CaptureMention(marker);
     this._container.classList.remove("stale");
     this._message.update(marker);
   }
   showStale() {
+    this._te2MentionSnapshot = void 0;
+    this._te2MentionAction.enabled = false;
     this._container.classList.add("stale");
     this._relayout();
   }

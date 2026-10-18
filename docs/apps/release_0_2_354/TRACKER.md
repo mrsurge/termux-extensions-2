@@ -428,7 +428,7 @@ plans are retained as references; they do not replace this current checklist.
     individual suggested scenario was separately exercised. No agent runtime
     restart, client reload, user draft edit, publication or mypyc activation
     performed in this slice.
-- [ ] U3 / original note 2 — Add VS Code-style small red between-line gutter
+- [x] U3 / original note 2 — Add VS Code-style small red between-line gutter
   indicators for deleted draft lines; inspect upstream behavior before editing.
   - [x] User approved frontend-only marker; inspected local code-server/VS Code
     QuickDiffDecorator and dirtydiffDecorator.css. Existing draft-deletion blocks
@@ -452,8 +452,37 @@ plans are retained as references; they do not replace this current checklist.
     runtime transition or native build performed; frontend-only activation.
 - [x] Original note 4 — Qualified Sidebar/client identities implemented and user
   accepted; preserve the existing source and routing contract.
-- [ ] U4 / original note 5 — Mentions from the inline problem widget, reusing
+- [x] U4 / original note 5 — Mentions from the inline problem widget, reusing
   existing mention ownership and exact-client routing.
+  - [x] Approved frontend-only implementation adds a Monaco action to the inline
+    Problems peek header using a pinned-source-checked bootstrap adapter; vendor
+    source is not edited. It captures the displayed diagnostic, not the current
+    editor selection, and uses the existing targeted editor mention sender/RPC.
+    Explorer rows share diagnostic severity/code/message/source and range format.
+  - [x] Stale peek, changed model/version/path, mismatched active projection and
+    editor disposal reject intent; inline diff binds modified editor only.
+    Seven focused tests exercise the actual transformed widget methods and
+    frontend binding/composition. Combined mention/mobile/Sidebar/autosave run:
+    33 tests pass. TypeScript check, Monaco bootstrap build and host build pass;
+    existing Node module-type warning remains visible.
+  - [x] Matching client asset update/reload and user live acceptance of the
+    inline Problems header's Mention in conversation action. No mypyc/backend
+    change, runtime restart, Android publication or commit performed.
+  - [x] User live report found button present but no delivery. Bounded Cefrium
+    probe (publication explicitly blocked) confirmed widget dispatch without
+    listener invocation. Monaco source shows getDomNode belongs to the model view;
+    the once-per-editor listener stayed attached to the replaced view. Both ends
+    now use getContainerDomNode. Regression replaces the view and verifies the
+    real transformed action still reaches the existing sender exactly once.
+    Shared editor sender now awaits the existing mention RPC and emits local
+    success/failure toasts, including code/line mentions; no replay/new route.
+    Nine focused mention tests and 35 combined tests pass; TypeScript check passes.
+    Matching updated assets/reload and fresh user live acceptance confirmed below.
+  - [x] 2026-10-18 user live acceptance: inline diagnostic mention delivered the
+    expected file/line and severity/code/message/source text to ALS, and the
+    acknowledgement toast appeared. User authorizes checkpoint commit/push.
+    This supersedes the pending live-acceptance gates immediately above; no
+    backend/mypyc or agent-performed runtime restart was required.
 - [x] Original note 6 — User confirms ALS file links after project switches are
   fixed by the completed routing work; do not reopen as missing acceptance.
 - [ ] U5 / original note 7 — Terminal Sidebar opening uses ALS-style immediate

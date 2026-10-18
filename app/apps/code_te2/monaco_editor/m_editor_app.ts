@@ -133,6 +133,7 @@ import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.
 import { createEditorExtensionNavigationRuntime } from "./editor_extension_navigation_runtime.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
+import { createEditorMentionSender } from "./editor_mention_request_runtime.ts";
 import { installEditorKeyboardRuntime } from './editor_keyboard_runtime.ts';
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
 import { createEditorExtensionStateRuntime, buildExtensionEditorSelection } from "./editor_extension_state_runtime.ts";
@@ -492,20 +493,18 @@ interface MonacoBootWindowLike extends Window {
     getCurrentPath: function () {
       return currentPath;
     },
-    sendEditorMentionRequest: function (payload) {
-      const buildTargetedPayload =
-        bootWindow.__te2InlineMonacoBuildSidebarMentionPayload;
-      if (typeof buildTargetedPayload !== "function") return false;
-      try {
-        return editorRpcNotify(
-          EDITOR_RPC_METHODS.mentionRequest,
-          buildTargetedPayload(payload),
-        );
-      } catch (error) {
-        console.warn("[mention] no active agent presentation", error);
-        return false;
-      }
-    },
+    sendEditorMentionRequest: createEditorMentionSender({
+      isConnected: () => isEditorRpcConnected(),
+      buildTargetedPayload(payload) {
+        const build = bootWindow.__te2InlineMonacoBuildSidebarMentionPayload;
+        if (typeof build !== 'function') throw new Error('No active agent presentation');
+        return build(payload);
+      },
+      request: payload => editorRpcCall(EDITOR_RPC_METHODS.mentionRequest, payload),
+      toast: message => window.dispatchEvent(new CustomEvent('code-te2:editor-notify', {
+        detail: { message },
+      })),
+    }),
     goToDefinition: function () {
       codeInspectorRuntime?.goToDefinition();
     },

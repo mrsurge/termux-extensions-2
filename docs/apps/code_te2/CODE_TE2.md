@@ -2948,6 +2948,34 @@ command/handler registration rather than merely the separate bootstrap artifact.
 
 ## 33) Diagnostics owner-keyed markers
 
+### Mentions from diagnostic surfaces
+
+Explorer diagnostic rows and Monaco's inline Problems peek share
+`src/diagnostics/diagnostic-mention.ts` for severity/code/message/source and range
+formatting. The inline action uses the displayed marker, not the editor's current
+selection. `scripts/monaco_problem_mentions.mjs` adds the action to the pinned
+widget at bootstrap build time, with exact integration-point checks; vendored
+Monaco source remains unchanged. The widget captures model identity/version,
+updates its receipt when the displayed diagnostic changes, and clears it when
+the widget becomes stale.
+
+`editor_problem_mention_runtime.ts` binds the editor's stable container once and
+removes the listener at editor disposal. Monaco's `getDomNode()` is the transient
+model view, so neither widget dispatch nor binding may use it for this event.
+It rejects malformed ranges, stale model/version,
+path or active-model mismatches. Inline diff binds only the modified editor.
+Accepted intent goes through the existing `sendEditorMentionRequest` callback,
+which attaches exact-client Sidebar target proof and uses `editor.mention.request`;
+no new backend lane, global target or console-ID routing is introduced. Shared
+`editor_mention_request_runtime.ts` uses the existing acknowledged editor request
+and local host notification event for success/failure feedback for both inline
+Problems and editor code/line mentions; failed/disconnected requests never replay.
+Rebuild
+Monaco bootstrap then host, and publish/reload matching client assets. No Python,
+mypyc or WBA restart is required.
+
+### Owner-scoped projection
+
 Extension-host diagnostics preserve their original owner. Monaco marker writes are
 replace-all only within an owner, so sharing one owner would make a later
 TypeScript, ESLint, or other update erase earlier markers.

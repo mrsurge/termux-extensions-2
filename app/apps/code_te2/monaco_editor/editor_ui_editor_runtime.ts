@@ -4,6 +4,7 @@ import { ensureTouchSelection as ensureTouchSelectionUtil } from './editor_touch
 import type { CodeInspectorMode } from './editor_touch_menu_utils.ts';
 import { syncReadOnlyInputMode } from './editor_readonly_input_mode_utils.ts';
 import { onEditorConfigChanged } from './editor_config_change_utils.ts';
+import { installProblemMentionBinding } from './editor_problem_mention_runtime.ts';
 
 interface EditorUiEditorRuntimeDeps {
   updatePreference(payload: Record<string, unknown>): Promise<unknown>;
@@ -117,6 +118,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
   }
 
   function installMarkerNavBindingsRuntime(targetEditor: unknown): void {
+    installProblemMentionBinding(targetEditor as Parameters<typeof installProblemMentionBinding>[0], deps);
     try {
       installMarkerNavBindings(deps.getMonaco() as MonacoRuntimeGlobal | null, targetEditor, (dir: DirectionLike) => {
         jumpToMarker(deps.getMonaco() as MonacoRuntimeGlobal | null, targetEditor, deps.getModel(), dir as number);
@@ -125,6 +127,11 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
   }
 
   function ensureTouchSelection(reason: string): void {
+    const diff = deps.getDiffEditor() as { getModifiedEditor?(): unknown } | null;
+    const mentionEditor = diff?.getModifiedEditor?.() ?? deps.getEditor();
+    if (mentionEditor) {
+      installProblemMentionBinding(mentionEditor as Parameters<typeof installProblemMentionBinding>[0], deps);
+    }
     ensureTouchSelectionUtil(reason, {
       getEditor: () => deps.getEditor() as MonacoRuntimeEditorLike | null,
       getDiffEditor: () => deps.getDiffEditor() as MonacoRuntimeDiffEditorLike | null,

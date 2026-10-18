@@ -109,6 +109,12 @@ original user notes verbatim in the tracker.
    its small red between-line deletion marker pattern in the draft gutter.
 4. Mentions from the inline problem widget: reuse the existing mention owner and
    exact-client destination path rather than a parallel mechanism.
+   Approved implementation adds a native Monaco peek-title action via a checked
+   bootstrap adapter; capture the displayed marker/model/version, reject stale
+   intent in the editor bridge, and reuse the existing targeted mention sender.
+   Share diagnostic text/range formatting with Explorer rows. Validate actual
+   transformed widget methods plus frontend composition, then bootstrap/host
+   builds. Client publication/reload and live acceptance remain separate.
 5. Terminal Sidebar launch: use the existing ALS-style immediate state-based
    window opening without the transition animation, retaining session identity.
 

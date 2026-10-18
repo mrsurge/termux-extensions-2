@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { preserveRelativeGotoGutter, gateGotoPositionPreview } from './monaco_preserve_relative_gutter.mjs';
+import { addProblemMentionAction } from './monaco_problem_mentions.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +45,10 @@ function pluginResolveMonacoEntryAndContrib() {
   return {
     name: "te2-monaco-bootstrap-alias",
     setup(ctx) {
+      ctx.onLoad({ filter: /[/\\]contrib[/\\]gotoError[/\\]browser[/\\]gotoErrorWidget\.js$/ }, ({ path: modulePath }) => ({
+        contents: addProblemMentionAction(fs.readFileSync(modulePath, 'utf8')),
+        loader: 'js',
+      }));
       ctx.onLoad({ filter: /[/\\]contrib[/\\]quickAccess[/\\]browser[/\\]gotoLineQuickAccess\.js$/ }, ({ path: modulePath }) => ({
         contents: gateGotoPositionPreview(preserveRelativeGotoGutter(fs.readFileSync(modulePath, 'utf8'))),
         loader: 'js',
