@@ -83,9 +83,30 @@ async def check():
     ns.enter_room.assert_not_awaited()
     await rt.on_console_register(ns, 'sid', {'workerId':'worker-a'})
     assert rt.list_console_workers() == ['worker-a']
-    ns.enter_room.assert_awaited_once_with('sid', 'console:worker-a')
+    ns.enter_room.assert_not_awaited()  # Worker evals target the exact registered SID.
     await rt.on_console_eval(ns, 'sid', {'targetWorkerId':'worker-b', 'reqId':'r', 'code':'1'})
-    assert ns.emit.await_args.kwargs['room'] == 'console:worker-b'
+    assert ns.emit.await_args.args[0] == 'console:evalResult'
+    assert ns.emit.await_args.args[1]['ok'] is False
+    assert ns.emit.await_args.kwargs['to'] == 'sid'
+    await rt.on_console_register(ns, 'target-sid', {'workerId':'worker-b'})
+    original_server = rt.TE2_CONSOLE_SIO
+    async def deliver(event, payload, **kwargs):
+        assert event == 'console:eval' and kwargs['room'] == 'target-sid'
+        assert payload['targetWorkerId'] == 'worker-b'
+        await rt.on_console_eval_result(ns, 'sid', {'reqId': payload['reqId'], 'value': 'spoof'})
+        assert not rt._pending_eval_results[payload['reqId']].done()
+        await rt.on_console_eval_result(ns, 'target-sid', {'reqId': payload['reqId'], 'ok': True, 'value': 1})
+    server = SimpleNamespace(emit=AsyncMock(side_effect=deliver))
+    rt.TE2_CONSOLE_SIO = server
+    try:
+        await rt.on_console_eval(ns, 'sid', {'targetWorkerId':'worker-b', 'reqId':'r2', 'code':'1'})
+        server.emit.assert_awaited_once()
+        assert ns.emit.await_args.args[1]['value'] == 1
+        assert ns.emit.await_args.args[1]['reqId'] == 'r2'
+        assert not rt._pending_eval_results and not rt._eval_owners
+    finally:
+        rt.TE2_CONSOLE_SIO = original_server
+    await rt.on_console_disconnect(ns, 'target-sid')
     await rt.on_console_disconnect(ns, 'sid')
     assert not rt.list_console_workers()
     await rt.on_console_eval_result(ns, 'sid', {'reqId': [], 'value': 1})

@@ -39,6 +39,8 @@ tests, three real Electron asset-mapping tests and four isolated shared Android/
 Cefrium Kotlin/JUnit route tests pass. Electron typecheck and vendor script ty
 pass. Existing package/asset Python run: 22 pass; one pre-existing retired Python
 Code TE2 mount assertion fails as documented below (not changed by this slice).
+Follow-up: that historical assertion is now aligned with native serving/domain
+ownership; current validation is in release_0_2_354/TRACKER.md, R4 cleanup.
 Installed ALS 0.2.132 raw static files match all 148 source snapshot hashes.
 Measured Deflate ZIP for the ALS snapshot alone: 1,597,583 bytes (~1.52 MiB);
 this is not a measured APK/wheel size change. No APK/OTA/seed publication occurred.

@@ -92,5 +92,6 @@ transferred user notes about drafts are not closed by earlier draft acceptance.
 
 ## Other known tests
 
-- [ ] Separate existing test issue: suppressed-preview MRU assertion in
-  change_statistics.test.mjs fails against committed renderer too; see PLAN.md.
+- [x] Historical suppressed-preview MRU assertion failure resolved by aligning
+  change_statistics.test.mjs with whole-file-group outlines; see the current
+  release_0_2_354/TRACKER.md R4 cleanup for validation.

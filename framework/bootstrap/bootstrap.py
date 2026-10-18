@@ -29,6 +29,7 @@ from app.node_toolchain import merge_login_shell_path
 from app.release_runtime import ReleaseRuntimeError, packaged_server_path
 from app.te2_paths import ensure_runtime_home, resolve_te2_paths
 from app.cli import framework_startup_progress as startup_progress
+from app.cli.console_usage import CONSOLE_USAGE
 
 APP_ID = "te2"
 DEFAULT_HOST = "127.0.0.1"
@@ -189,9 +190,11 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     parser = argparse.ArgumentParser(
         prog="te2",
         description="Build and launch the TE2 Rust framework.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Standalone commands: te2 console <command>; te2 framework <command>; "
-            "te2 migrate-legacy-roots [--apply] [--json]"
+            CONSOLE_USAGE + "\nOther standalone commands:\n"
+            "  te2 framework <command>\n"
+            "  te2 migrate-legacy-roots [--apply] [--json]"
         ),
     )
     parser.add_argument("--host", default=os.environ.get("TE2_SERVER_HOST", DEFAULT_HOST))

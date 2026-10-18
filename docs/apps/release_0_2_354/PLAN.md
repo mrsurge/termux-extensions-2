@@ -317,24 +317,36 @@ refresh persistence without duplicating registrations.
 - Group the remaining small correctness/test-maintenance items into one cleanup
   slice rather than a standalone terminal-profile task:
   - Terminal extension profile generator: the documented TS2488/unknown iterable
-    still exists in activation-events.ts. Narrow profiles with Array.isArray and
+    was in activation-events.ts. Narrow profiles with Array.isArray and
     add valid/missing/malformed fixtures. This is defensive extension-manifest
     bookkeeping, not VS Code terminal support; valid arrays already work and the
     existing outer catch contains malformed-contribution errors.
   - Record pre-existing test failures separately from runtime bugs; modernize
     stale retired-Python mount assertions without restoring obsolete architecture.
-    The suppressed-preview MRU test needs bounded triage, not a new Explorer
-    redesign. Investigate and approve the combined edit scope before implementation.
+    The suppressed-preview MRU test targets the whole-file-group outline, not
+    retired header styling. Console fixtures must target exact registered SIDs,
+    not retired worker-ID rooms. This approved cleanup is implemented and locally
+    validated; results and runtime-adoption boundaries are in TRACKER.md.
 
 ### 5. Packaging and final release verification
 
-Do not infer clean dependency closure from source imports. TE2 currently requires
-FWS 0.2.65 and ALS 0.2.132; the latter's old FWS pin conflicts with that cleanup.
-Sibling ALS source is 0.2.136 and requires FWS 0.2.65, but source is not published
-wheel evidence. Verify/build compatible cleaned ALS native wheels, update the TE2
-pin/target dependency locks, and validate optional uvloop target selection and
+Do not infer clean dependency closure from source imports. User policy is latest
+compatible ALS/FWS releases, with minimums only: TE2 requires FWS>=0.2.65 and
+ALS>=0.2.139; ALS requires FWS>=0.2.65. Do not reintroduce exact runtime pins or
+upper caps. Release-validation locks may record exact tested versions, but do
+not impose those on normal installs. ALS source is 0.2.139.dev1, not published
+release evidence. Verify/build cleaned ALS native wheels, regenerate target
+validation locks, and validate optional uvloop target selection and
 private-runtime ABI. FWS 0.2.65 is already published: do not repeat its release
 merely because a historical checkbox remains open.
+
+Approved 2026-10-18 source slice: ALS development bump/checkpoint/push; default
+target-exclusive uvloop requirements in ALS/TE2 and private Linux runtime;
+normal Termux installer switches to binary-only PyPI staging while preserving
+offline payloads and activation/rollback. This does not authorize tags, uploads,
+device installation or heavy builds. Cleaned ALS wheels, remaining Android native
+dependency coverage and regenerated locks still gate release. Pixel is user-owned
+for concurrent Android compilation validation; do not interfere.
 
 Build matched current-source Linux/Termux wheels, native worker/domain receipts,
 OTA and staging APK assets. Reuse artifacts only under the established fingerprint

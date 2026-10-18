@@ -759,16 +759,63 @@ mandatory full-device matrix is added for the latest smoke acceptance.
   by regression tests; no live snapshot was deleted to exercise that case.
   User performed the runtime transition; no native/mypyc build or publication
   was needed for this bootstrap change.
-- [ ] R4 grouped correctness/test-maintenance slice (user direction 2026-10-17):
-  - [ ] Fix terminal profiles Array.isArray narrowing with valid/missing/malformed
+- [x] R4 grouped correctness/test-maintenance slice (approved 2026-10-18):
+  - [x] Fix terminal profiles Array.isArray narrowing with valid/missing/malformed
     fixtures alongside the other cleanup, not as a standalone slice. Defensive
     extension-manifest bookkeeping only; no VS Code terminal feature work.
-  - [ ] Triage stale retired-Python mount and suppressed-preview MRU assertions;
-    record known pre-existing failures accurately, without restoring old architecture.
-  Combined implementation scope remains subject to investigation/approval;
-  grouping alone does not mark any of these fixes implemented.
-- [ ] R5: verify cleaned ALS native wheel publication and choose compatible TE2
-  pin/locks; preserve already-published FWS 0.2.65 rather than release it twice.
+  - [x] Replace the retired Python HTTP-mount expectation with domain lifecycle/
+    pipe-hook checks and absence of Python HTTP assembly. Keep existing resource
+    boundary tests; do not restore obsolete serving architecture.
+  - [x] MRU regression now checks whole-file-group outlines, cached DOM identity
+    and current selection after batch replacement, not obsolete header classes.
+  - [x] Align an additional stale console fixture with exact-SID eval delivery,
+    unknown-target rejection and wrong-SID reply rejection. Production console
+    and Explorer rendering are unchanged.
+  Validation: 13 focused activation/MRU Node tests and 8 isolated Python
+  resource/bridge tests pass, including isolated console eval regressions.
+  Code TE2 typecheck, targeted strict activation-module TypeScript check and
+  normal frontend/WBA build pass. This is not a whole-adapter typecheck claim.
+  Existing Node MODULE_TYPELESS_PACKAGE_JSON build warning remains.
+  WBA output is rebuilt; adopting the defensive manifest guard needs a fresh WBA.
+  No runtime restart, client publication, native/mypyc build or wheel replacement
+  was performed. This does not reopen accepted feature behavior.
+- [x] 2026-10-18 user-approved TE2 source checkpoint/push: combined regression
+  rerun passes 117 Python tests (4 subtests) and 13 Node tests; shell syntax and
+  whitespace checks pass. Existing setuptools FutureWarning remains. No native
+  build, device change or artifact publication is part of this checkpoint.
+- [ ] R5: verify cleaned ALS native wheel publication and regenerate validation
+  locks; preserve already-published FWS 0.2.65 rather than release it twice.
+  2026-10-18 PyPI inspection confirms TE2 0.2.353 Android cp314/Linux wheels,
+  FWS 0.2.65 Android ABI3/Linux ABI3+free-threaded wheels and uvloop-te2
+  0.23.0.post1 Android cp314. Public ALS remains 0.2.132; source preparation is
+  0.2.139.dev1. User requires latest compatible ALS/FWS, not exact runtime pins:
+  requirements now use ALS>=0.2.139 and FWS>=0.2.65 (including ALS's FWS edge).
+  Regression tests reject exact/upper constraints and admit newer releases.
+  Fresh TE2 resolution still awaits public ALS>=0.2.139; do not lower the floor
+  or retain an old pin merely to make an unpublished release resolve.
+- [x] R5 installer source: normal Termux launch uses binary-only PyPI staging
+  instead of a GitHub wheelhouse archive. Missing wheels fail before activation;
+  offline payloads and managed rollback/uninstall remain. New prerequisites omit
+  crypto/Bun, retaining Node/npm/native libraries and node-pty build tools.
+  Closure checks reject retired dependencies and verify uvloop-te2/native payload.
+- [x] Bootstrap console help (2026-10-18): shared dependency-free usage text lists
+  all four console subcommands, exact worker evaluation, stdin input and offline
+  log commands. `te2 console -h/--help` now succeeds; subcommand help is retained.
+  18 help/identity/bootstrap-discovery tests pass without runtime preparation or
+  live console access. No native build, restart, version bump or commit performed.
+- [x] R5 uvloop metadata: target-exclusive runtime requirements in TE2/ALS and
+  separate private Linux Python requirements. Existing ALS performance extra and
+  absent/disabled/broken-import loop policy remain compatible.
+  Validation: 91 TE2 installer/release/loop tests (4 subtests) and 36 ALS
+  metadata/bootstrap/wheel/loop tests (2 subtests) pass; shell syntax/diff checks
+  pass. Existing setuptools warning remains. Installer ty reports two existing
+  helper-return diagnostics and a contextmanager deprecation, not a clean pass.
+- [ ] R5 Android wheel coverage: current msgspec PyPI releases lack Android
+  wheels; ALS's stale watchfiles requirement was removed after a source audit
+  and 36 focused tests/2 subtests pass. Pixel confirms android/aarch64 CPython 3.14.6 and installed
+  uvloop-te2, but installed pip packages are not fresh-wheel evidence. No device
+  changes; user owns current Android compilation. Legacy lock regeneration waits
+  for the complete verified target closure and new ALS release.
 - [ ] R5: fresh target dependency closure, exclusive optional uvloop distributions,
   ordinary CPython/private runtime/native ABI, libarchive.file_reader smoke.
 - [ ] R5: matched Linux/Termux wheels (<100,000,000 bytes), assets and staging APKs.

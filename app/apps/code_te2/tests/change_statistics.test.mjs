@@ -42,7 +42,7 @@ test('full retained totals render right-aligned and incomplete results are label
   } finally { win.happyDOM.abort(); }
 });
 
-test('suppressed file pills and header MRU survive cached rows and live batch replacement', () => {
+test('suppressed file pills and whole-group MRU survive cached rows and live batch replacement', () => {
   const win = new Window();
   Object.assign(globalThis, { document: win.document, window: win, HTMLElement: win.HTMLElement, HTMLInputElement: win.HTMLInputElement });
   try {
@@ -50,13 +50,15 @@ test('suppressed file pills and header MRU survive cached rows and live batch re
     const renderer = createExplorerChangesResultsRenderer({ getGitDiffBase: () => ({ ref: 'HEAD', mode: 'head' }), ensureInlineDiffs: async () => {}, openFileAndMaybeJump: async () => {}, restoreFile: async () => {} });
     const b = { ...large, rel: 'b.js', error: 'Preview limit' }, c = { ...large, rel: 'c.js' };
     let data = { changes: [large, b, c], recentChanges: { paths: [] } };
-    const selected = () => [...container.querySelectorAll('.fe-search-change-header.is-recent')].map(e => e.parentElement.dataset.rel);
+    const selected = () => [...container.querySelectorAll('.fe-search-change-group.is-recent')].map(e => e.dataset.rel);
     renderer.renderChangesResults(container, data);
+    const originalGroup = container.querySelector('.fe-search-change-group');
     assert.deepEqual([...container.querySelectorAll('.fe-search-change-count')].map(e => e.textContent), ['+305', '-305', '+305', '-305', '+305', '-305']);
     container.querySelector('.fe-search-change-toggle').click();
     assert.deepEqual(selected(), ['host.js']);
     data = { ...data, recentChanges: { paths: ['b.js', 'c.js'] } };
     renderer.renderChangesResults(container, data);
+    assert.equal(container.querySelector('.fe-search-change-group'), originalGroup);
     assert.deepEqual(selected(), ['b.js', 'c.js']);
     container.querySelector('.fe-search-change-toggle').click();
     assert.deepEqual(data.recentChanges.paths, ['host.js'], 'cached listeners use current selection object');
@@ -65,5 +67,6 @@ test('suppressed file pills and header MRU survive cached rows and live batch re
     renderer.renderChangesResults(container, data);
     assert.deepEqual(selected(), []);
     assert.equal(container.querySelector('.fe-search-change-body.is-recent'), null);
+    assert.equal(container.querySelector('.fe-search-change-header.is-recent'), null);
   } finally { win.happyDOM.abort(); }
 });

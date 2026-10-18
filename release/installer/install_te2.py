@@ -32,6 +32,18 @@ LINUX_APT_PACKAGES = ("git", "build-essential", "python3-venv")
 LINUX_LIBARCHIVE_PACKAGES = ("libarchive13t64", "libarchive13")
 LINUX_TARGET = "linux-glibc-x86_64"
 TERMUX_TARGET = "termux-android-aarch64"
+TERMUX_APT_PACKAGES = (
+    {"name": "tur-repo"},
+    {"name": "python", "executables": ["python"], "libraries": ["lib/libpython3.14.so"]},
+    {"name": "python-pip", "executables": ["pip"]},
+    {"name": "git", "executables": ["git"]},
+    {"name": "nodejs-lts", "executables": ["node"], "majorVersion": 24},
+    {"name": "npm", "executables": ["npm"]},
+    # node-pty still builds on first use; Python package installation is binary-only.
+    {"name": "build-essential", "executables": ["cc", "c++", "make"]},
+    {"name": "libarchive", "libraries": ["lib/libarchive.so"]},
+    {"name": "libgit2", "libraries": ["lib/libgit2.so"]},
+)
 REQUIRED_SERVER_FEATURE = "ferrous-framework-native"
 
 
@@ -61,13 +73,22 @@ def _run_termux(args: argparse.Namespace, payload: Path, install_root: Path) -> 
             print(f"TE2 current release rolled back to {args.rollback}.")
             return 0
 
-        manifest = _load_manifest(payload)
-        _validate_target(manifest, prefix)
-        _verify_payload(payload, manifest)
-        _ensure_prerequisites(manifest, prefix, assume_yes=args.yes)
-        _check_free_space(install_root)
-        version = _manifest_version(manifest)
-        release = _materialize_release(payload, manifest, install_root, prefix, version)
+        if args.release_version:
+            version = _release_version(args.release_version)
+            if sys.version_info[:2] != (3, 14) or platform.machine().lower() != "aarch64":
+                raise SystemExit("Termux binary releases require ordinary CPython 3.14 on aarch64")
+            _ensure_prerequisites({"aptPackages": list(TERMUX_APT_PACKAGES)}, prefix, assume_yes=args.yes)
+            _check_free_space(install_root)
+            release = _materialize_termux_pypi_release(install_root, prefix, version)
+        else:
+            # Explicit local/offline payloads retain the verified archive contract.
+            manifest = _load_manifest(payload)
+            _validate_target(manifest, prefix)
+            _verify_payload(payload, manifest)
+            _ensure_prerequisites(manifest, prefix, assume_yes=args.yes)
+            _check_free_space(install_root)
+            version = _manifest_version(manifest)
+            release = _materialize_release(payload, manifest, install_root, prefix, version)
         try:
             _activate_release(install_root, prefix, release, version)
         except BaseException:
@@ -337,7 +358,7 @@ def _ensure_prerequisites(
             node = _command_output([str(prefix / "bin" / "node"), "--version"], required=True)
             if not node.startswith(f"v{major}."):
                 raise SystemExit(f"Node major version mismatch: {node}")
-        for executable in _string_list(item.get("executables"), f"{name}.executables"):
+        for executable in _string_list(item.get("executables", []), f"{name}.executables"):
             if shutil.which(executable, path=str(prefix / "bin")) is None:
                 raise SystemExit(f"Package {name} did not provide executable: {executable}")
         for library in _string_list(item.get("libraries", []), f"{name}.libraries"):
@@ -348,7 +369,7 @@ def _ensure_prerequisites(
         {
             module
             for item in packages
-            for module in _string_list(item.get("imports"), f"{item['name']}.imports")
+            for module in _string_list(item.get("imports", []), f"{item['name']}.imports")
         }
     )
     if imports:
@@ -528,6 +549,75 @@ def _relocate_linux_venv(source: Path, target: Path) -> None:
         path.write_bytes(content.replace(source_bytes, target_bytes))
 
 
+def _materialize_termux_pypi_release(install_root: Path, prefix: Path, version: str) -> Path:
+    """Stage platform-selected PyPI wheels; never compile or alter the active tree."""
+    releases = install_root / "releases"
+    releases.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f".{version}.stage-", dir=releases))
+    python_tree = stage / "python"
+    python_tree.mkdir()
+    env = os.environ.copy()
+    for name in ("PYTHONPATH", "PYTHONHOME"):
+        env.pop(name, None)
+    env["PYTHONNOUSERSITE"] = "1"
+    try:
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "--isolated", "install",
+                 "--index-url", "https://pypi.org/simple", "--only-binary=:all:",
+                 "--no-compile", "--target", str(python_tree), f"te2=={version}"],
+                env=env, cwd=stage, check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise SystemExit(
+                "Termux PyPI binary installation failed. Check the pip error above for "
+                "missing compatible wheels; no source-build fallback was attempted. "
+                "The active TE2 release was not changed."
+            ) from exc
+        env["PYTHONPATH"] = str(python_tree)
+        probe = (
+            "import importlib.metadata as m, json; "
+            f"installed = {{d.metadata['Name'].lower().replace('_', '-') for d in m.distributions(path=[{str(python_tree)!r}])}}; "
+            "assert not installed.intersection({'fastapi', 'fastmcp', 'fastmcp-slim', 'mcp', "
+            "'pydantic', 'pydantic-core', 'cryptography'}), 'Retired dependency stack in PyPI closure'; "
+            "assert 'uvloop-te2' in installed and 'uvloop' not in installed, 'Invalid Android loop distribution'; "
+            "import uvloop; loop = uvloop.new_event_loop(); loop.close(); "
+            f"assert m.version('te2') == {version!r}; "
+            "from app.release_runtime import packaged_server_path; "
+            "server = packaged_server_path(); "
+            "assert server is not None, 'PyPI TE2 wheel has no packaged server'; "
+            "print(json.dumps({'server': str(server), 'distribution': "
+            "{'version': m.version('te2'), 'frameworkShellsVersion': m.version('framework-shells'), "
+            "'agentLogServerVersion': m.version('agent-log-server')}}))"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], env=env, cwd=stage,
+                                check=True, capture_output=True, text=True, timeout=60)
+        selected = _mapping(json.loads(result.stdout), "installed PyPI runtime")
+        source_server = Path(str(selected["server"]))
+        if not source_server.is_relative_to(python_tree) or not source_server.is_file():
+            raise SystemExit("PyPI server is outside the staged wheel payload")
+        libexec = stage / "libexec"
+        libexec.mkdir()
+        server = libexec / "te2-server"
+        shutil.copy2(source_server, server)
+        server.chmod(0o755)
+        manifest = {
+            "schemaVersion": 1,
+            "distribution": selected["distribution"],
+            "server": {"buildInfo": _inspect_server_build_info(server)},
+        }
+        _validate_installed_tree(stage, manifest, prefix)
+        receipt = {"schemaVersion": 1, "installedAtVersion": version,
+                   "target": TERMUX_TARGET, "source": "pypi", "prefix": str(prefix),
+                   "serverSha256": _sha256(server)}
+        (stage / "target-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        (stage / "install-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        return stage
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+
+
 def _materialize_release(
     payload: Path,
     manifest: Mapping[str, object],
@@ -613,7 +703,7 @@ def _validate_installed_tree(
     versions = _mapping(manifest.get("distribution"), "distribution")
     script = (
         "import importlib.metadata as m; "
-        "import app, framework_shells, agent_log_server_rs, fastapi, msgspec; "
+        "import app, framework_shells, agent_log_server_rs, msgspec; "
         f"assert m.version('te2') == {str(versions['version'])!r}; "
         f"assert m.version('framework-shells') == {str(versions['frameworkShellsVersion'])!r}; "
         f"assert m.version('agent-log-server') == {str(versions['agentLogServerVersion'])!r}"
@@ -622,13 +712,13 @@ def _validate_installed_tree(
         "validate_runtime(Path(app.__file__).parent / 'release_runtime/code_te2', "
         "package_version=m.version('te2'))"
     )
-    subprocess.run([sys.executable, "-c", script], env=env, check=True, timeout=60)
+    subprocess.run([sys.executable, "-c", script], env=env, cwd=release, check=True, timeout=60)
     for command in (
         [sys.executable, "-m", "app.cli.run_rust_framework", "--help"],
         [str(python_tree / "bin" / "fws"), "--help"],
         [str(python_tree / "bin" / "als-rs"), "--help"],
     ):
-        subprocess.run(command, env=env, check=True, timeout=60, stdout=subprocess.DEVNULL)
+        subprocess.run(command, env=env, cwd=release, check=True, timeout=60, stdout=subprocess.DEVNULL)
     _validate_aarch64_elf(release / "libexec" / "te2-server")
     declared_build_info = _manifest_server_build_info(manifest)
     actual_build_info = _inspect_server_build_info(release / "libexec" / "te2-server")
