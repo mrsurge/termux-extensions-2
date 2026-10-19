@@ -1,6 +1,7 @@
 package com.cefrium
 
 import org.chromium.content_public.browser.GestureListenerManager
+import org.chromium.content_public.browser.HostZoomMap
 import org.chromium.content_public.browser.WebContents
 
 /** Exposes Cefrium's package-private WebContents for app-owned Chromium integrations. */
@@ -14,7 +15,7 @@ object Te2CefriumBrowserAccess {
     fun webContents(browser: CefriumBrowser): WebContents? = browser.webContents
 
     @JvmStatic
-    fun disablePageZoom(browser: CefriumBrowser): Boolean {
+    fun disableGestureZoom(browser: CefriumBrowser): Boolean {
         ensureWebContentsConnected(browser)
         val webContents = browser.webContents ?: return false
         if (
@@ -28,7 +29,15 @@ object Te2CefriumBrowserAccess {
             updateMultiTouchZoomSupport(false)
             updateDoubleTapSupport(false)
         }
-        browser.setZoomLevel(0.0)
+        return true
+    }
+
+    /** Chrome Android accessibility page zoom, not CefBrowserHost desktop zoom. */
+    @JvmStatic
+    fun setAccessibilityPageZoom(browser: CefriumBrowser, level: Double): Boolean {
+        if (!disableGestureZoom(browser)) return false
+        val webContents = browser.webContents ?: return false
+        HostZoomMap.setZoomLevel(webContents, level)
         return true
     }
 }

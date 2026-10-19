@@ -4019,6 +4019,14 @@ is selected.
 - The native context menu contains only Copy and Paste and invokes the focused renderer's native commands directly.
 - Offline framework state leaves the app view intact and exposes a native-header route back to the local launcher. Recovery clears that control without restarting Electron.
 - Electron modal/dialog windows use the shared modal presenter and retain parent-modal ownership without global always-on-top behavior.
+- Floating custom surfaces have incarnation-scoped unload/observer callbacks;
+  retired popup events cannot close a successor or clear its portal records.
+  Queued close-focus restoration yields to a newly opened surface, preventing
+  a New Project → picker handoff from focusing the main page and triggering
+  Electron's close-on-focus-handoff policy. Dialog dropdowns resolve their current
+  owner document when opened, since live controls may have been adopted into
+  the floating window. New Project uses the existing modal frame/declarative form,
+  with conditional clone URL and unchanged Explorer/backend creation intent.
 
 Validation owner docs live in `desktop_client/desktop_client.md` and `desktop_client/electron/README.md`.
 

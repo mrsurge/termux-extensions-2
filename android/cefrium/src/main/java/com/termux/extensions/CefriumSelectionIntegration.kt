@@ -44,7 +44,8 @@ internal class CefriumSelectionIntegration(
 
     private fun install(): Boolean {
         SelectionPopupController.setAllowSurfaceControlMagnifier()
-        if (!Te2CefriumBrowserAccess.disablePageZoom(browser)) return false
+        // Selection setup must never reset the independently selected page scale.
+        if (!Te2CefriumBrowserAccess.disableGestureZoom(browser)) return false
         val webContents = Te2CefriumBrowserAccess.webContents(browser) ?: return false
         val controller = SelectionPopupController.fromWebContentsNoCreate(webContents)
             ?: try {

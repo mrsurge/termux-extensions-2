@@ -1,9 +1,11 @@
 :root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #050c1f; color: #dae1ee; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
-nav { display: flex; align-items: center; gap: 4px; height: 48px; padding: 2px 4px; overflow-x: auto; scrollbar-width: none; }
-button { flex: 0 0 auto; min-width: 40px; min-height: 44px; padding: 0 8px; border: 1px solid #263249; border-radius: 6px; background: #111b2e; color: inherit; font: inherit; touch-action: manipulation; }
-button[data-action="recents"] { margin-inline-start: auto; }
+nav { display: flex; align-items: center; gap: 3px; height: 44px; padding: 0 4px; overflow-x: auto; scrollbar-width: none; }
+button { flex: 0 0 auto; min-width: 32px; height: 44px; padding: 0 6px; border: 1px solid #263249; border-radius: 5px; background: #111b2e; color: inherit; font: inherit; touch-action: manipulation; }
+#chrome-title { flex: 1 1 auto; min-width: 24px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; padding-inline: 3px; }
+button[data-action="scale-reset"] { min-width: 44px; padding-inline: 3px; font-size: 12px; }
+button svg { display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 button:active { background: #283957; }
 button:focus-visible { outline: 2px solid #9dacf0; outline-offset: -3px; }
 #chrome-error { position: fixed; inset: auto 0 0; background: #502434; font-size: 11px; pointer-events: none; }

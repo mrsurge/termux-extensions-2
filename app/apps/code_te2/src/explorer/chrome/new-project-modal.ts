@@ -1,5 +1,5 @@
-
-const STYLE_ID = 'fe-new-project-style';
+import { createDeclarativeForm } from '../../../main_page/frontend/ui/declarative-modal.ts';
+import { createModalFrame } from '../../../main_page/frontend/ui/modal-kit/modal-frame.tsx';
 
 type ToastFn = (message: string) => void;
 
@@ -8,172 +8,99 @@ export interface NewProjectModalResult {
     url: string;
 }
 
-function ensureStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
-        .fe-modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 5000;
-        }
-        .fe-modal-box {
-            background: var(--card, #181818); border: 1px solid var(--border, #333);
-            border-radius: 12px; width: 420px; max-width: 92vw;
-            display: flex; flex-direction: column;
-            color: var(--foreground, #eee);
-            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
-            font-family: system-ui, -apple-system, sans-serif;
-        }
-        .fe-modal-header {
-            padding: 16px 20px; font-weight: 600; font-size: 1.1rem;
-            border-bottom: 1px solid var(--border, #333);
-        }
-        .fe-modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-        .fe-modal-footer {
-            padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px;
-            border-top: 1px solid var(--border, #333); background: rgba(255,255,255,0.02);
-        }
-        .fe-radio-group { display: flex; flex-direction: column; gap: 12px; }
-        .fe-radio-label {
-            display: flex; align-items: center; gap: 10px; cursor: pointer;
-            padding: 10px; border-radius: 6px; border: 1px solid transparent;
-            transition: background 0.2s;
-        }
-        .fe-radio-label:hover { background: rgba(255,255,255,0.05); }
-        .fe-radio-label.checked {
-            background: rgba(80, 120, 255, 0.15);
-            border-color: var(--primary, #5078ff);
-        }
-        .fe-radio-input { accent-color: var(--primary, #5078ff); transform: scale(1.1); }
-        .fe-modal-input-group { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; margin-left: 28px; margin-right: 4px; }
-        .fe-modal-input {
-            background: var(--input, #222); border: 1px solid var(--border, #444);
-            padding: 10px 12px; border-radius: 6px; color: inherit; width: 100%; font-size: 0.95rem;
-            box-sizing: border-box;
-        }
-        .fe-modal-input:focus { outline: 2px solid var(--primary, #5078ff); border-color: transparent; }
-        .fe-modal-btn {
-            padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border, #444);
-            background: var(--secondary, #333); color: inherit; cursor: pointer; font-weight: 500;
-            transition: all 0.2s;
-        }
-        .fe-modal-btn:hover { background: var(--hover, #444); }
-        .fe-modal-btn.primary {
-            background: var(--primary, #5078ff); border-color: var(--primary, #5078ff); color: white;
-        }
-        .fe-modal-btn.primary:hover { opacity: 0.9; }
-        .fe-modal-hint { font-size: 0.85rem; color: var(--muted-foreground, #888); }
-        .fe-hidden { display: none !important; }
-    `;
-    document.head.appendChild(style);
-}
-
-function queryRequiredElement<TElement extends Element>(
-    root: ParentNode,
-    selector: string,
-): TElement {
-    const element = root.querySelector<TElement>(selector);
-    if (!element) {
-        throw new Error(`Missing new-project modal element: ${selector}`);
-    }
-    return element;
-}
-
-export function showNewProjectModal(toastFn?: ToastFn): Promise<NewProjectModalResult> {
-    ensureStyle();
+export function showNewProjectModal(
+    toastFn?: ToastFn,
+    document: Document = globalThis.document,
+): Promise<NewProjectModalResult> {
     return new Promise((resolve, reject) => {
-        const overlay = document.createElement('div');
-        overlay.className = 'fe-modal-overlay';
-        overlay.dataset.teDialogSurface = 'code-te2.new-project';
-        
-        const box = document.createElement('div');
-        box.className = 'fe-modal-box';
-        
-        box.innerHTML = `
-            <div class="fe-modal-header">New Project</div>
-            <div class="fe-modal-body">
-                <div class="fe-radio-group">
-                    <label class="fe-radio-label checked">
-                        <input type="radio" name="proj_type" value="local" checked class="fe-radio-input">
-                        <div style="display:flex; flex-direction:column;">
-                            <span style="font-weight:500">Local Project</span>
-                            <span class="fe-modal-hint">Create a new empty folder</span>
-                        </div>
-                    </label>
-                    <label class="fe-radio-label">
-                        <input type="radio" name="proj_type" value="clone" class="fe-radio-input">
-                        <div style="display:flex; flex-direction:column;">
-                            <span style="font-weight:500">Clone Repository</span>
-                            <span class="fe-modal-hint">Clone from a Git URL</span>
-                        </div>
-                    </label>
-                </div>
-                <div id="fe-clone-opts" class="fe-modal-input-group fe-hidden">
-                    <input type="text" id="fe-git-url" class="fe-modal-input" placeholder="https://github.com/user/repo.git">
-                </div>
-            </div>
-            <div class="fe-modal-footer">
-                <button class="fe-modal-btn" id="fe-modal-cancel">Cancel</button>
-                <button class="fe-modal-btn primary" id="fe-modal-continue">Continue</button>
-            </div>
-        `;
-        
-        overlay.appendChild(box);
-        document.body.appendChild(overlay);
-        
-        const radios = box.querySelectorAll<HTMLInputElement>('input[name="proj_type"]');
-        const cloneOpts = queryRequiredElement<HTMLElement>(box, '#fe-clone-opts');
-        const urlInput = queryRequiredElement<HTMLInputElement>(box, '#fe-git-url');
-        
-        radios.forEach(r => {
-            r.addEventListener('change', () => {
-                radios.forEach(rb => rb.parentElement?.classList.toggle('checked', rb.checked));
-                const isClone = r.value === 'clone';
-                cloneOpts.classList.toggle('fe-hidden', !isClone);
-                if (isClone) setTimeout(() => urlInput.focus(), 50);
-            });
+        let settled = false;
+        let previousType: unknown = 'local';
+        const cancel = () => finish(null);
+        const frame = createModalFrame(document, {
+            id: 'fe-new-project-modal',
+            surfaceId: 'code-te2.new-project',
+            title: 'New Project',
+            width: 'min(460px, 92vw)',
+            onClose: cancel,
         });
-        
-        const cleanup = () => {
-            overlay.remove();
-            document.removeEventListener('keydown', onEsc);
-        };
-        
-        const onEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                cleanup();
-                reject('cancelled');
-            }
-        };
-        document.addEventListener('keydown', onEsc);
-        
-        queryRequiredElement<HTMLButtonElement>(box, '#fe-modal-cancel').addEventListener('click', () => {
-            cleanup();
-            reject('cancelled');
+        const form = createDeclarativeForm(frame.body, {
+            fields: [
+                {key: 'type', label: 'Project type', kind: 'select', options: [
+                    {value: 'local', label: 'Local Project — create an empty folder'},
+                    {value: 'clone', label: 'Clone Repository — clone from a Git URL'},
+                ]},
+                {key: 'url', label: 'Git URL', kind: 'text',
+                    placeholder: 'https://github.com/user/repo.git',
+                    visibleWhen: {field: 'type', equals: 'clone'}},
+            ],
+        }, {type: 'local', url: ''}, {
+            onChange(values) {
+                if (typeof values.url === 'string' && values.url.trim()) urlInput.removeAttribute('aria-invalid');
+                if (values.type === 'clone' && previousType !== 'clone') {
+                    frame.root.ownerDocument.defaultView?.setTimeout(() => {
+                        if (!settled && form.getValues().type === 'clone') urlInput.focus();
+                    }, 0);
+                }
+                previousType = values.type;
+            },
         });
-        
-        queryRequiredElement<HTMLButtonElement>(box, '#fe-modal-continue').addEventListener('click', () => {
-            const checked = queryRequiredElement<HTMLInputElement>(box, 'input[name="proj_type"]:checked');
-            const type = checked.value === 'clone' ? 'clone' : 'local';
-            const url = urlInput.value.trim();
-            
+        const input = frame.body.querySelector<HTMLInputElement>('input');
+        if (!input) {
+            form.destroy(); frame.dispose();
+            throw new Error('New Project form did not create its Git URL input');
+        }
+        const urlInput = input;
+        urlInput.setAttribute('aria-label', 'Git URL');
+        urlInput.setAttribute('autocapitalize', 'off');
+        urlInput.setAttribute('autocorrect', 'off');
+        urlInput.spellcheck = false;
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'fe-btn';
+        cancelButton.textContent = 'Cancel';
+        cancelButton.addEventListener('click', cancel);
+        const continueButton = document.createElement('button');
+        continueButton.type = 'button';
+        continueButton.className = 'fe-btn fe-btn-primary';
+        continueButton.textContent = 'Continue';
+        continueButton.addEventListener('click', accept);
+        frame.footer.append(cancelButton, continueButton);
+        frame.root.addEventListener('keydown', onKeyDown);
+        frame.root.classList.add('show');
+        frame.root.setAttribute('aria-hidden', 'false');
+        document.body.append(frame.root);
+
+        function finish(value: NewProjectModalResult | null): void {
+            if (settled) return;
+            settled = true;
+            frame.root.removeEventListener('keydown', onKeyDown);
+            cancelButton.removeEventListener('click', cancel);
+            continueButton.removeEventListener('click', accept);
+            form.destroy();
+            frame.dispose();
+            frame.root.remove();
+            if (value) resolve(value);
+            else reject('cancelled');
+        }
+        function accept(): void {
+            const values = form.getValues();
+            const type = values.type === 'clone' ? 'clone' : 'local';
+            const url = typeof values.url === 'string' ? values.url.trim() : '';
             if (type === 'clone' && !url) {
-                if (toastFn) toastFn('Please enter a valid Git URL');
+                toastFn?.('Please enter a valid Git URL');
+                urlInput.setAttribute('aria-invalid', 'true');
                 urlInput.focus();
                 return;
             }
-            
-            cleanup();
-            resolve({ type, url });
-        });
-        
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                cleanup();
-                reject('cancelled');
+            finish({type, url});
+        }
+        function onKeyDown(event: KeyboardEvent): void {
+            if (event.defaultPrevented || event.isComposing) return;
+            if (event.key === 'Escape') {
+                event.preventDefault(); event.stopPropagation(); cancel();
+            } else if (event.key === 'Enter' && event.target === urlInput) {
+                event.preventDefault(); accept();
             }
-        });
+        }
     });
 }

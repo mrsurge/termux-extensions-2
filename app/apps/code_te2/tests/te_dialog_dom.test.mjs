@@ -6,10 +6,82 @@ import { Window } from "happy-dom";
 import {
   createDialogService,
 } from "../../../static/js/te_dialog.mjs";
+import { createSurfacePortalPresenter } from "../../../static/js/te_modal_surface_portal.mjs";
 
 function nextTask() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+test("retired popup unload cannot close the next modal surface", () => {
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const first = new Window({ url: "http://127.0.0.1/app/test" });
+  const second = new Window({ url: "http://127.0.0.1/app/test" });
+  window.te2DesktopSurfaceWindows = { enabled: true };
+  const delayed = [];
+  const add = first.addEventListener.bind(first);
+  first.addEventListener = (name, listener, ...rest) => {
+    if (name === 'beforeunload' || name === 'pagehide') delayed.push(listener);
+    return add(name, listener, ...rest);
+  };
+  const reallyClose = first.close.bind(first);
+  first.close = () => {}; // Native window teardown delivers these events later.
+  let opens = 0;
+  window.open = () => ++opens === 1 ? first : second;
+  const presenter = createSurfacePortalPresenter(window);
+  const make = id => {
+    const element = window.document.createElement('div');
+    element.dataset.teDialogSurface = id;
+    window.document.body.append(element);
+    return {id, element, requestClose() { element.hidden = true; }};
+  };
+  const project = make('test.project');
+  const picker = make('framework.file-picker');
+  try {
+    assert.equal(presenter.open(project), true);
+    presenter.close(project);
+    assert.equal(presenter.open(picker), true);
+    for (const callback of delayed) callback(new first.Event('pagehide'));
+    assert.equal(presenter.size, 1);
+    assert.equal(picker.element.ownerDocument, second.document);
+    assert.equal(picker.element.hidden, false);
+  } finally {
+    presenter.closeAll();
+    reallyClose(); second.close(); window.close();
+  }
+});
+
+test("sequential modal handoff does not restore focus into the main window", async () => {
+  const window = new Window({url:'http://127.0.0.1/app/test'});
+  const child = new Window({url:'http://127.0.0.1/app/test'});
+  window.te2DesktopSurfaceWindows = {enabled:true};
+  child.close = () => {};
+  window.open = () => child;
+  const opener = window.document.createElement('button');
+  window.document.body.append(opener);
+  opener.focus();
+  let restored = 0;
+  opener.focus = () => {restored++;};
+  const make = id => {
+    const element = window.document.createElement('div');
+    element.dataset.teDialogSurface = id;
+    element.setAttribute('aria-hidden','true');
+    element.innerHTML = '<section role="dialog"><button>Action</button></section>';
+    window.document.body.append(element);
+    return element;
+  };
+  const first = make('test.project');
+  const second = make('framework.file-picker');
+  const service = createDialogService(window);
+  try {
+    first.setAttribute('aria-hidden','false');
+    await nextTask();
+    first.setAttribute('aria-hidden','true');
+    second.setAttribute('aria-hidden','false');
+    await nextTask(); await nextTask();
+    assert.deepEqual(service.surfaceRegistry.openIds, ['framework.file-picker']);
+    assert.equal(restored,0,'old dialog must not steal focus from its successor');
+  } finally {service.surfaceRegistry.destroy();window.close();}
+});
 
 test("inline dialogs stack, trap focus, settle, and restore focus", async () => {
   const window = new Window({ url: "http://127.0.0.1/app/test" });

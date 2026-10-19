@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Build
 import android.os.Handler
@@ -43,6 +44,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 class MainActivity : AppCompatActivity() {
     private var termuxLocalPageBridge: TermuxLocalPageBridge? = null
     private var termuxChrome: TermuxChromeSurface? = null
+    private lateinit var mainViewport: CefriumViewportController
+    private var inspectorViewport: CefriumViewportController? = null
+    private var processesViewport: CefriumViewportController? = null
+    private var clientUiScale = CefriumViewportPolicy.DEFAULT_SCALE
+    private var chromeTitle = "TE2 Termux"
     private var termuxNavigationLoading = false
     private lateinit var browser: CefriumBrowser
     private lateinit var selectionIntegration: CefriumSelectionIntegration
@@ -335,6 +341,11 @@ class MainActivity : AppCompatActivity() {
         diagnostics = AndroidDiagnostics(applicationContext)
         diagnostics.beginSession()
         settingsStore = AndroidAppSettingsStore(applicationContext)
+        if (BuildConfig.TE2_TERMUX) {
+            clientUiScale = CefriumViewportPolicy.normalizeScale(
+                prefs().getInt(KEY_UI_SCALE, CefriumViewportPolicy.DEFAULT_SCALE),
+            )
+        }
         sidebarPresentationStore = AndroidSidebarPresentationStore(applicationContext)
         toolsStateStore = AndroidToolsStateStore(applicationContext)
         toolsState = toolsStateStore.load()
@@ -520,6 +531,9 @@ class MainActivity : AppCompatActivity() {
         browser.setDownloadHandler(downloadCoordinator)
         // Apply the SDK's native pinch policy before any page loads.
         browser.setPinchToZoomEnabled(false)
+        mainViewport = CefriumViewportController(browser) {
+            if (BuildConfig.TE2_TERMUX && inAppShell) clientUiScale else 100
+        }
         selectionIntegration = CefriumSelectionIntegration(browser)
         browser.setQueryHandler { _, request, origin, callback ->
             handleNativeQuery(request, origin, callback)
@@ -538,15 +552,23 @@ class MainActivity : AppCompatActivity() {
         browser.setOnUrlChangedListener { url ->
             runOnUiThread { termuxLocalPageBridge?.changePage(url); handleUrlChanged(url) }
         }
+        if (BuildConfig.TE2_TERMUX) browser.setOnTitleChangedListener { title ->
+            runOnUiThread {
+                chromeTitle = title?.takeIf { it.isNotBlank() }?.take(512) ?: currentAppId
+                termuxChrome?.update(inAppShell)
+            }
+        }
         browser.setOnLoadingStateChangedListener { isLoading, canGoBack, _ ->
             runOnUiThread {
                 if (isLoading && !termuxNavigationLoading) termuxLocalPageBridge?.beginNavigation()
                 termuxNavigationLoading = isLoading
                 this.canNavigateBack = canGoBack
                 if (isLoading) {
+                    mainViewport.suspend()
                     mainBrowserReady = false
                 }
                 if (!isLoading) {
+                    mainViewport.reapply()
                     selectionIntegration.installWhenReady()
                     browser.evaluateJavaScript(CefriumPagePolicy.installScript())
                     termuxLocalPageBridge?.pageReady()
@@ -588,9 +610,13 @@ class MainActivity : AppCompatActivity() {
                         "lock" -> toggleLock()
                         "quit" -> quitCurrentApp()
                         "tools" -> toggleTools()
+                        "scale-down" -> changeClientUiScale(clientUiScale - CefriumViewportPolicy.SCALE_STEP)
+                        "scale-reset" -> changeClientUiScale(CefriumViewportPolicy.DEFAULT_SCALE)
+                        "scale-up" -> changeClientUiScale(clientUiScale + CefriumViewportPolicy.SCALE_STEP)
                     }
                 }, { JSONObject().put("inAppShell", inAppShell).put("locked", isLocked)
-                    .put("appId", currentAppId) },
+                    .put("appId", currentAppId).put("title", chromeTitle)
+                    .put("uiScalePercent", clientUiScale) },
                 { message -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show() })
             updateToolbar()
         }
@@ -598,6 +624,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateToolbar() {
         nativeHeader.visibility = if (inAppShell && !BuildConfig.TE2_TERMUX) View.VISIBLE else View.GONE
+        termuxChrome?.update(inAppShell)
+    }
+
+    private fun changeClientUiScale(value: Int) {
+        if (!BuildConfig.TE2_TERMUX) return
+        clientUiScale = CefriumViewportPolicy.normalizeScale(value)
+        prefs().edit().putInt(KEY_UI_SCALE, clientUiScale).apply()
+        mainViewport.reapply()
         termuxChrome?.update(inAppShell)
     }
 
@@ -823,6 +857,7 @@ class MainActivity : AppCompatActivity() {
                 ?.takeIf { it.isNotBlank() }
                 ?.let { currentAppId = it }
         }
+        if (wasInAppShell != inAppShell) mainViewport.reapply()
         updateToolbar()
         updatePersistentNetworkService()
         appHealthFailureCount = 0
@@ -1233,6 +1268,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun recoverRenderer(status: Int, errorCode: Int) {
+        mainViewport.suspend()
         Log.e(TAG, "Renderer terminated status=$status errorCode=$errorCode")
         Toast.makeText(this, "Browser renderer restarted", Toast.LENGTH_SHORT).show()
         browser.loadUrl(nativeFrameworkUrl(currentPath) ?: return)
@@ -1564,6 +1600,7 @@ class MainActivity : AppCompatActivity() {
         val inspector = existingInspector ?: CefriumBrowser.createWithSurface(this).also { next ->
             // Inspector pages follow the same no-pinch policy as the main surface.
             next.setPinchToZoomEnabled(false)
+            inspectorViewport = CefriumViewportController(next)
             inspectorClientReady = false
             inspectorPageLoaded = false
             inspectorDeliveredGeneration = 0L
@@ -1573,6 +1610,7 @@ class MainActivity : AppCompatActivity() {
             }
             next.setOnLoadingStateChangedListener { isLoading, _, _ ->
                 runOnUiThread {
+                    if (isLoading) inspectorViewport?.suspend() else inspectorViewport?.reapply()
                     if (
                         inspectorBrowser === next &&
                         shouldRequestCefriumInspectorClientReady(
@@ -1608,6 +1646,7 @@ class MainActivity : AppCompatActivity() {
             )
         ) {
             inspector.onResume()
+            inspectorViewport?.reapply()
         }
         reconcileInspectorClient(forceTargetReplay = false)
         updateInspectorSurface()
@@ -1804,6 +1843,10 @@ class MainActivity : AppCompatActivity() {
         val processes = processesBrowser ?: CefriumBrowser.createWithSurface(this).also {
             // Keep the Processes surface at its intended page scale too.
             it.setPinchToZoomEnabled(false)
+            processesViewport = CefriumViewportController(it)
+            it.setOnLoadingStateChangedListener { loading, _, _ -> runOnUiThread {
+                if (loading) processesViewport?.suspend() else processesViewport?.reapply()
+            } }
             it.setPullToRefreshEnabled(false)
             processesPanel.addView(
                 it.surfaceContainer,
@@ -1819,7 +1862,10 @@ class MainActivity : AppCompatActivity() {
             processesLoadedUrl = url
             processes.loadUrl(url)
         }
-        if (activityResumed) processes.onResume()
+        if (activityResumed) {
+            processes.onResume()
+            processesViewport?.reapply()
+        }
     }
 
     private fun loadAndroidDiagnostics() {
@@ -1929,6 +1975,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::browser.isInitialized) browser.surfaceContainer.post {
+            if (activityResumed && ::mainViewport.isInitialized) mainViewport.reapply()
+        }
+        if (activityResumed) {
+            inspectorViewport?.reapply()
+            processesViewport?.reapply()
+            termuxChrome?.reapplyViewport()
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && activityResumed && ::mainViewport.isInitialized) {
+            mainViewport.reapply()
+            inspectorViewport?.reapply()
+            processesViewport?.reapply()
+            termuxChrome?.reapplyViewport()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         imeDismissalReducer.reset()
@@ -1945,7 +2013,11 @@ class MainActivity : AppCompatActivity() {
         if (::browserContainer.isInitialized) {
             ViewCompat.requestApplyInsets(browserContainer)
         }
-        if (::browser.isInitialized) browser.onResume()
+        if (::browser.isInitialized) {
+            browser.onResume()
+            mainViewport.reapply()
+            selectionIntegration.installWhenReady()
+        }
         termuxChrome?.resume()
         if (inAppShell) {
             ensureInspectorBrowser(resumeExisting = true)
@@ -1960,6 +2032,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        if (::mainViewport.isInitialized) mainViewport.suspend()
+        inspectorViewport?.suspend()
+        processesViewport?.suspend()
         termuxChrome?.pause()
         activityResumed = false
         imeDismissalReducer.reset()
@@ -2015,6 +2090,10 @@ class MainActivity : AppCompatActivity() {
         clientRuntimeService = null
         devToolsRuntime?.close()
         devToolsRuntime = null
+        inspectorViewport?.close()
+        inspectorViewport = null
+        processesViewport?.close()
+        processesViewport = null
         inspectorBrowser?.let { inspector ->
             inspectorBrowserContainer.removeView(inspector.surfaceContainer)
             inspector.close()
@@ -2026,6 +2105,7 @@ class MainActivity : AppCompatActivity() {
                 browser.setDownloadHandler(null)
             }
             selectionIntegration.close()
+            mainViewport.close()
             browserContainer.removeView(browser.surfaceContainer)
             browser.close()
         }
@@ -2042,6 +2122,7 @@ class MainActivity : AppCompatActivity() {
         private val LAUNCHER_PATH = if (BuildConfig.TE2_TERMUX) TermuxShellAssets.LAUNCHER else "/android-shell/index.html"
         private const val DEFAULT_APP_ID = CODE_TE2_APP_ID
         private const val KEY_LAST_PATH = "last_path"
+        private const val KEY_UI_SCALE = "termux_ui_scale_percent"
         private const val KEY_NOTIFICATION_PERMISSION_REQUESTED =
             "notification_permission_requested"
         private const val CONSOLE_TAIL_LINES = 500

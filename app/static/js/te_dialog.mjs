@@ -370,7 +370,14 @@ export function createSurfaceRegistry(targetWindow, options = {}) {
     activateTop();
     const restore = entry.previousFocus;
     entry.previousFocus = null;
-    if (restore?.isConnected) targetWindow.setTimeout?.(() => restore.focus?.(), 0);
+    const expectedTop = stack.at(-1);
+    if (restore?.isConnected) targetWindow.setTimeout?.(() => {
+      // A successor may have opened since this close was queued. Focusing the
+      // source document would dismiss its floating window on desktop.
+      if (stack.at(-1) !== expectedTop || !restore.isConnected) return;
+      if (expectedTop && !expectedTop.element.contains(restore)) return;
+      restore.focus?.();
+    }, 0);
     entry.element.dispatchEvent?.(new targetWindow.CustomEvent("te-dialog-surface-closed", {
       detail: { id: entry.id },
     }));

@@ -34,7 +34,8 @@ internal object TermuxChromePolicy {
         "view_action" to { params ->
             require(params.length() == 1)
             val name = params.getString("action")
-            require(name in setOf("home", "reload", "recents", "lock", "quit", "tools"))
+            require(name in setOf("home", "reload", "recents", "lock", "quit", "tools",
+                "scale-down", "scale-reset", "scale-up"))
             action(name)
             ConsumerResult(state())
         },
@@ -52,7 +53,7 @@ internal class TermuxChromeSurface(
 ) : Closeable {
     private val page = "${origin.trimEnd('/')}/electromux-shell/chrome.html"
     private val descriptor = TermuxChromePolicy.descriptor(origin)
-    private val spec = ChromeSurfaceSpec(descriptor, 48)
+    private val spec = ChromeSurfaceSpec(descriptor, 44)
     private val gate = RendererEventGate(descriptor.routes.keys)
     private val main = Handler(Looper.getMainLooper())
     private val pending = AtomicInteger()
@@ -60,6 +61,7 @@ internal class TermuxChromeSurface(
     private var loading = false
     private var recovered = false
     private var renderer: CefriumBrowser? = null
+    private var viewport: CefriumViewportController? = null
     private val protocol = TermuxChromePolicy.protocol(descriptor, action, state)
     private val attachment = spec.attach(ChromeSurfaceHost { declared ->
         check(declared.placement == ChromeSurfaceSpec.Placement.TOP)
@@ -68,6 +70,7 @@ internal class TermuxChromeSurface(
         }
         val browser = CefriumBrowser.createWithSurface(context)
         renderer = browser
+        viewport = CefriumViewportController(browser)
         browser.setPinchToZoomEnabled(false)
         browser.setPullToRefreshEnabled(false)
         browser.setQueryHandler { _, raw, caller, callback ->
@@ -102,6 +105,7 @@ internal class TermuxChromeSurface(
             if (!closed) {
                 if (busy && !loading) gate.beginNavigation()
                 loading = busy
+                if (busy) viewport?.suspend() else viewport?.reapply()
                 gate.changePage(browser.url)
                 if (!busy && browser.url == page) browser.evaluateJavaScript(
                     "window.dispatchEvent(new Event('electromux:page-ready'))")
@@ -110,6 +114,7 @@ internal class TermuxChromeSurface(
         browser.setOnRenderProcessTerminatedListener { _, _ -> main.post {
             if (!closed) {
                 gate.beginNavigation()
+                viewport?.suspend()
                 if (!recovered) { recovered = true; browser.loadUrl(page) }
                 else failure("Toolbar renderer stopped; reopen the client to recover")
             }
@@ -129,13 +134,16 @@ internal class TermuxChromeSurface(
             .put("name", "chrome-state").put("payload", state()).toString()
         renderer?.evaluateJavaScript("window.__electromuxReceiveEvent?.(${JSONObject.quote(envelope)})")
     }
-    fun resume() { renderer?.onResume() }
-    fun pause() { renderer?.onPause() }
+    fun resume() { renderer?.onResume(); viewport?.reapply() }
+    fun reapplyViewport() { viewport?.reapply() }
+    fun pause() { viewport?.suspend(); renderer?.onPause() }
     override fun close() {
         if (closed) return
         closed = true
         gate.close()
         main.removeCallbacksAndMessages(null)
+        viewport?.close()
+        viewport = null
         attachment.close()
         renderer = null
     }

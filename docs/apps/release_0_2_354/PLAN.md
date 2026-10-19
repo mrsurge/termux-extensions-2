@@ -1,10 +1,21 @@
 # 0.2.354 release finish plan
 
+Post-publication corrective artifact execution now lives in
+`../release_0_2_355/PLAN.md` and its tracker. This document retains .354 history;
+the new version does not un-defer architectural work listed here.
+
 Consolidated 2026-10-15 at `2e77c843`. Source wins over historical planning.
 This is the release cut line, not permission to reopen every unchecked old task.
 Execution status, acceptance and the owning-document index are in TRACKER.md.
 
 ## Approval and release boundary
+
+Post-publication frontend blocker (2026-10-18): user approves read-only inspection
+of Electron's empty floating New Project follow-up, then isolated reproduction,
+popup lifecycle/focus fixes, shared New Project frame/form reuse and regressions,
+typechecks/builds before live validation. Preserve Local/Clone backend intent and
+do not broaden this into a global dialog redesign. No version bump, wheel/APK
+publication, shared-runtime restart or client reload is implied by this slice.
 
 User approved documentation consolidation and read-only investigation, followed
 by the two R1 proven asset fixes and focused regressions/audit updates recorded
@@ -406,6 +417,31 @@ refresh persistence without duplicating registrations.
     validated; results and runtime-adoption boundaries are in TRACKER.md.
 
 ### 5. Packaging and final release verification
+
+Post-wheel APK-only approval (2026-10-18): keep Cefrium 0.9.0 after the newer
+0.10.1 ARM64 libcef compressed-size precheck grows 3,536,438 bytes (classes.jar
+also grows 1,174,802 compressed bytes). No newer-engine APK size or lifecycle
+fix is claimed. Strengthen native zoom guards across creation/load/resume/focus,
+configuration changes and renderer recovery; separate client-persisted native
+page scaling from user-controlled pinch/double-tap zoom. TE2 Termux chrome becomes 44 dp,
+adds title and scale down/reset/up, and replaces Recents text with a small SVG.
+Keep generic Electromux and published wheels/tags unchanged. Validate source,
+JVM/native packaging and signatures/assets, build changed staging APKs on Debian,
+then stop for grouped live validation. No installation/publication in this slice.
+Superseding scaling correction approved after drawer trial: remove CSS root zoom
+and injected viewport compensation entirely. Use Cefrium native page scaling with
+the existing native-persisted percentage; keep pinch/double-tap guards independent
+and ensure selection installation cannot reset scale. Verify the unchanged shell
+and Explorer drawer CSS using real Chromium native page zoom across scale/reset,
+reload and viewport changes, then rebuild validation APKs. Sticky-scope coordinate
+normalization and removal of legacy depth nudges are deferred until after APKs;
+do not change that system to compensate for the discarded CSS scaling approach.
+Native-wrapper device trial failed. User approves checking Chromium Android's
+accessibility page-zoom path next: pinned ZoomController/PageZoomUtils call
+HostZoomMap.setZoomLevel(WebContents,...), not CefriumBrowser.setZoomLevel. Build
+one debug Termux test APK for this focused probe, preserving exact identity/signing
+and assets; do not repeat final staging builds or claim Android support from
+Electron geometry tests. No automatic installation/publication is authorized.
 
 Approved installer/documentation closure: preserve pre-0.2.354 Termux tagged
 archive installs while current/latest releases use PyPI, choosing by verified

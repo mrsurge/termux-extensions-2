@@ -204,7 +204,6 @@ export function createCustomSelectControl(options: {
   ariaLabel?: string;
 }): CustomSelectHandle {
   const document = options.document;
-  const targetWindow = document.defaultView || window;
   const root = document.createElement("div");
   root.className = "declarative-select";
   const button = document.createElement("button");
@@ -233,6 +232,10 @@ export function createCustomSelectControl(options: {
 
   function openMenu(): void {
     if (popup || button.disabled || !selectOptions.length) return;
+    // Desktop modal surfaces adopt the live control into another document.
+    // Menu DOM, event listeners and realm checks must follow its current owner.
+    const document = button.ownerDocument;
+    const targetWindow = document.defaultView || window;
     const menu = document.createElement("div");
     menu.className = "declarative-select-menu";
     menu.setAttribute("role", "listbox");

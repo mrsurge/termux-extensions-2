@@ -1,5 +1,8 @@
 # 0.2.354 consolidated release tracker
 
+Current corrective artifact gates: `../release_0_2_355/TRACKER.md`. All historical
+acceptance and transferred user notes below are retained, not replaced.
+
 Updated 2026-10-17; recent-work consolidation at TE2 `38b6fb26` / ALS `fcc716b`.
 This is the single current pre-release status/acceptance tracker. See PLAN.md
 for the cut line. Workstream plans/contracts retain technical detail; their
@@ -7,6 +10,152 @@ trackers retain historical evidence, not independent current release gates.
 Old unchecked boxes are evidence to reconcile, not automatic release tasks.
 
 ## Recent work — 2026-10-15 through 2026-10-17
+
+### Electron New Project / empty floating picker — 2026-10-18
+
+- [x] User approves source/test/build repair. Exact live client `main_page:8Ybo`
+  identifies Electron with valid .354 local assets; `main_page:ql4Q` is Android.
+  Observed picker populated but hidden in the main document, with no active
+  portal records. User clarifies the symptom is an empty floating window, not
+  a blocking overlay. Live runtime was inspected without reloading or mutations.
+- [x] Two deterministic failing-then-passing regressions: retired popup unload
+  reset successor records, and queued focus restoration moved focus back to the
+  source page during a sequential modal handoff. Popup generations and listener
+  cleanup fence callbacks; focus restoration yields to a newly opened surface.
+- [x] New Project now uses existing modal frame/declarative form, shared buttons
+  and conditional clone URL, eliminating global ad-hoc `.fe-modal-*` styles.
+  Shared custom select resolves its current owner document on open after adoption.
+  Local/Clone results and backend ownership unchanged; invalid clone URL keeps
+  the dialog open. Six New Project DOM regressions cover intent, clone/reparent,
+  validation and cancellation paths.
+- [x] Isolated real Electron test (hidden windows, mocked read-only browse API)
+  runs three New Project → populated floating-picker → Cancel cycles, checking
+  visible content, geometry and child-window cleanup. No actual project is created.
+- [x] Code TE2/Electron typechecks, host frontend/Electron compilation, 123 Electron
+  tests and 30 focused dialog/form/component regressions pass. Broad `test:dialogs` has a pre-existing source-gate
+  false-positive failure over unchanged typed declarations/callbacks and generated
+  File Explorer JS; 28/29 suite tests pass. Do not claim that broad gate is green.
+  Generated host.js has inherited literal whitespace findings; authored-source
+  whitespace checks are separate, with no generated JS patching.
+- [x] User independently updates/reloads the Electron client and reports
+  “I just did. Its fixed” (2026-10-19). New Project/follow-up floating picker is
+  live accepted. Agent did not issue another update/reload or restart the shared
+  framework. Version/wheel/release decisions remain separate; no commit or
+  version bump has been made for this repair.
+
+### Post-wheel APK toolbar and zoom guards — 2026-10-18
+
+- [x] User rejects native-scale candidate: scaling has no working effect on
+  device. Desktop Electron geometry tests did not establish Android API behavior.
+  Read-only pinned-SDK inspection finds Android accessibility PageZoomUtils /
+  ZoomController uses HostZoomMap.setZoomLevel(WebContents,...), separately from
+  CefriumBrowser's native wrapper. User approves focused accessibility-path probe
+  before returning to CSS/sticky changes. Source now invokes the Android owner,
+  retaining existing scale persistence and independent gesture/selection guards.
+- [x] Accessibility-path Termux debug APK builds in 2m01s with 29 consumer JVM
+  tests passing. Audit confirms intended public Termux certificate, 16-KiB ZIP
+  alignment/integrity, all 445 exact seed files and packaged toolbar assets.
+  APK 280,841,110 bytes, SHA-256
+  `f922a755765a41d29d47b5dcd1c2c44d49743cecf87a9964311d0ee9795cb25a`;
+  local candidate `te2-0.2.354-termux-debug-arm64-accessibility.apk` in the same
+  candidate folder. Debug is deliberately unminified, not a release size result;
+  audit receipt is `termux-accessibility-audit.json`. No install/publication.
+- [x] User live accepts accessibility-path scaling: “Yep, that works. Its perfect.”
+  This accepts the debug probe, not final staging packaging/publication. User
+  requests pause for newly discovered release issues. Gecko parity is a separate
+  follow-up candidate, not implemented or accepted.
+- [x] Superseding user-approved correction: CSS scaling/height compensation
+  candidates below are not accepted. Below-100% drawer width and sticky offsets
+  expose mixed coordinate systems. Replace CSS injection with native Cefrium
+  page scaling (`ln(percent/100)/ln(1.2)`), retaining saved percentages, scope and
+  limits. Gesture guard no longer resets page zoom; selection setup cannot undo
+  scaling. Native Chromium regression executes unchanged shell metrics and
+  Explorer drawer CSS: 42 portrait/landscape, 60–180%, reload and resize samples
+  pass; source checks forbid CSS injection and selection-time scale resets.
+- [x] Native-page-scaling Debian builds/audits pass (build.exit=0). Cefrium
+  174,935,604 bytes, SHA-256
+  `6b6ed48746723270c17517d145effee7fbeae00a8acbc0c4f7736381a0ad1635`;
+  Termux 171,096,483 bytes, SHA-256
+  `c5a71db5cafba93915f17a49542258badf7a3203ade3e41e2299146692df7edc`.
+  Both intended signatures, ZIP integrity, 16-KiB alignment, 445 exact editor
+  seed files and consumer JVM suites (62/29 tests) pass. Matching mappings retained
+  as `cefrium-native-scale-mapping.txt` / `termux-native-scale-mapping.txt` in
+  Debian build root, SHA-256
+  `d3b37e532c7d13c6273ee0e12d216564f10da1ddfb83f9a66b21e378cb5b1184` /
+  `ab80f41d17cf9fb5d340d50c5491e53618db8af8919f17b5a03e3ad445439f87`.
+  Local APK/audit candidates use `-native-scale` suffix. No install, publication,
+  wheel changes or commit; prior failed candidates retained separately.
+- [ ] Native-page-scaling physical acceptance: below-100% drawer bounds, height,
+  reset/reload/persistence, toolbar size and pinch/double-tap lifecycle guards.
+- [ ] After APKs: sticky-scope coordinate normalization; remove legacy depth-based
+  subpixel nudges in favor of consistent source geometry. Explicitly deferred,
+  not implemented or an APK prerequisite.
+- [x] User approves Android read-only audit, then 0.9.0 retention, 44-dp Termux
+  title/icon/layout-scaling controls and lifecycle zoom-guard correction, tests
+  and APK builds. No installation/publication, new wheel or generic-host edits.
+- [x] Current SDK 0.9.0 vs Maven 0.10.1 ARM64 libcef ZIP entry comparison:
+  89,845,347 -> 93,381,785 compressed bytes; raw 219,351,704 -> 226,953,880.
+  classes.jar 55,836,706 -> 57,011,508 compressed bytes. SDK precheck is not a
+  measured APK delta. Reject newer engine under user's no-larger size rule.
+- [x] Source adds client-owned bounded layout scale, title projection, compact
+  Recents SVG, 44-dp chrome and bounded native WebContents zoom-guard reapplication
+  independent of layout scale. All four browser surfaces use the guard; paused
+  and disposed instances cancel pending work. Published release tags untouched.
+- [x] Browser chrome VM regression covers initial/live title, scale display and
+  limits, allowlisted actions, failure/no retry and disposal.
+- [x] Local JDK25/SDK37 JVM validation: Cefrium 62 tests, Termux 29 tests,
+  Electromux host 29 and Node runtime 18; zero failures/errors/skips. Generic
+  host source/pin remains unchanged. Tests are not device lifecycle proof.
+- [x] Run Android JVM/compile tests; assemble/signature/packaged-asset audit of
+  changed Cefrium/TE2 Termux staging APKs on Debian, then grouped live handoff.
+- [x] Debian Cefrium JVM suite (62 tests) and staging assembly complete. APK
+  174,935,988 bytes (166.83 MiB), SHA-256
+  `7b9cca68daa006b224995c1f1e36341ef7adb3129b6208027836e08aa70c2cf9`;
+  expected development signer, 16-KiB zipalign, ZIP integrity, manifest/resources
+  and all 445 editor seed files/version .354 verified. Mapping SHA-256
+  `803d15bc5446e4da64681345f86ce5df738349198a4b78b195522c76c8dcc25a`.
+  Existing generated-final-resource/optional Chromium-module R8 warnings remain
+  visible. Retained build/audit source at Debian
+  `/root/.cache/te2-android-build/`; local candidate under
+  `.codex-scratch/apk-0.2.354-toolbar/`. No device acceptance claimed.
+- [x] Debian TE2 Termux staging build and JVM tests complete (29 consumer,
+  29 generic host and 18 Node runtime tests; no failures). APK 171,096,611 bytes
+  (163.17 MiB), SHA-256
+  `505f5fcafee4f5eedca324475457bdd88c61deb0ad3aa0a8cfd03dc49df83dae`;
+  public GitHub-Termux certificate matches supplied test key, 16-KiB zipalign,
+  ZIP integrity, manifest/resources, all 445 seed files, generated chrome HTML
+  and exact current chrome JS/CSS verified. libcef/libnode and DEX are Deflated.
+  Mapping SHA-256
+  `c1070ccc17d43a665f662701cb50fbd02da758c4cf6f4eebda9ccaa1efe9a24b`.
+  Remote build.exit=0; about 115 GiB free. APKs are validation candidates from
+  tagged base 76b1f84e plus this source slice (hashes in audit JSON), not published
+  source-tag artifacts. No commit, retag, install or upload in this slice.
+- [ ] Live validation: layout scaling/reset/persistence, title/icon/shorter bar,
+  pinch/double-tap disabled after resume/rotation/focus/navigation/renderer recovery.
+- [x] User reports reduced vertical geometry after scaling, persisting across
+  reload/relaunch. Real Chromium reproduces 800x913 viewport -> 800x730 shell at
+  80%: viewport API height is unscaled but consumed within CSS zoom. Approved
+  APK-only correction compensates the existing shell height variable with a
+  stylesheet-important metric, leaving framework/wheel sources unchanged.
+  Scale replacement/reset disposes old listeners/styles; viewport resize/scroll
+  refreshes height without a resize-dispatch loop. Real Chromium regressions
+  execute actual native policy and shell metric producer: 28 geometry samples
+  across portrait/landscape, scale limits, repeated application, reset and a
+  simulated keyboard-height reduction pass. Physical validation remains pending.
+- [x] Geometry-corrected Debian staging rebuilds and audits pass (exit 0):
+  Cefrium 174,937,740 bytes, SHA-256
+  `fb0eb199d808c3992e53a3196aa6ac926638bc98d5b2475f8d43040276bf15f5`;
+  Termux 171,097,279 bytes, SHA-256
+  `4dead6cbfa63fc97c162cb4aa2fba71abcaba06c61bba2c6bdb96123aef1d391`.
+  Both retain intended signer, 16-KiB alignment, ZIP integrity and all 445 exact
+  seed files. Cefrium 62/Termux 29 consumer JVM tests pass. Matching mappings
+  retained as `cefrium-geometry-mapping.txt` / `termux-geometry-mapping.txt` in
+  Debian build root; mapping SHA-256 respectively
+  `141fe321c2b7187dda55448d943963565a608b99c47c09b090c0ec391ff8e7ff` /
+  `815a6f1ce5990562dfe0183403fd75f82d198f667dff61a9a1fc9879b5656c73`.
+  Local replacements use `-geometry.apk` suffix under the same candidate folder;
+  old candidates are preserved. Source remains uncommitted, with no installation
+  or publication. Physical scaling/reload/lifecycle validation still required.
 
 ### Installer compatibility and release README — 2026-10-18
 

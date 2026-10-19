@@ -57,6 +57,22 @@ implementation; source reuse is not physical parity acceptance.
 
 ## Source validation
 
+The packaged toolbar is 44 dp high, with Home/Reload on the left, a truncated
+page title, layout scale down/reset/up, and compact Recents/Tools controls.
+Layout scale is client-owned (60–180%, 10-point steps), persisted in native
+preferences and applied only to the app document, not the toolbar. The percentage
+button resets to 100%. The current scaling probe uses Chromium Android's
+accessibility `HostZoomMap.setZoomLevel(WebContents, level)` path
+(`factor = 1.2^level`), not Cefrium's separate zoom wrapper, CSS root zoom or pinch
+magnification. Chromium owns viewport/layout conversion; no page CSS or height
+overrides are injected. Pinch/double-tap remain disabled independently. Guards
+and the selected page scale are reapplied on load, resume, focus and configuration
+changes; renderer recovery re-enters the same load path. Selection installation
+does not reset page scale. Physical lifecycle/gesture acceptance is recorded
+separately; native desktop geometry tests do not establish Android parity. The
+preceding Cefrium-wrapper candidate failed live validation; this accessibility
+path remains a probe until accepted on-device.
+
 The consumer-only Android settings section exposes the existing active-session
 keep-alive notification/power policy, current permission/CPU/Wi-Fi lock state,
 and native system-settings actions. The keep-alive checkbox saves immediately

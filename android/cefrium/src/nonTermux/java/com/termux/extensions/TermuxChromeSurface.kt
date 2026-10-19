@@ -11,6 +11,7 @@ internal class TermuxChromeSurface(
 ) : java.io.Closeable {
     fun update(visible: Boolean) {}
     fun resume() {}
+    fun reapplyViewport() {}
     fun pause() {}
     override fun close() {}
 }

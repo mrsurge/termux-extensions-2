@@ -154,6 +154,14 @@ export function createSurfacePortalPresenter(
   let dialogPresenter = null;
   let popupObserver = null;
   let closingProgrammatically = false;
+  let popupGeneration = 0;
+  let disposePopupLifecycle = null;
+
+  function retirePopupLifecycle() {
+    popupGeneration += 1;
+    disposePopupLifecycle?.();
+    disposePopupLifecycle = null;
+  }
 
   function enabled() {
     return Boolean(
@@ -222,6 +230,7 @@ export function createSurfacePortalPresenter(
   }
 
   function resetPopup(requestClose = false) {
+    retirePopupLifecycle();
     restoreAll(requestClose);
     popupObserver?.disconnect?.();
     popupObserver = null;
@@ -230,13 +239,9 @@ export function createSurfacePortalPresenter(
     dialogPresenter = null;
   }
 
-  function handlePopupUnload() {
-    if (closingProgrammatically) return;
-    resetPopup(true);
-  }
-
   function preparePopup(candidate) {
     popup = candidate;
+    const generation = ++popupGeneration;
     const popupDocument = candidate.document;
     popupDocument.title = "TE2";
     mirrorDocumentStyles(sourceDocument, popupDocument);
@@ -250,6 +255,7 @@ export function createSurfacePortalPresenter(
     const Observer = candidate.MutationObserver;
     if (Observer) {
       popupObserver = new Observer(() => {
+        if (popup !== candidate || generation !== popupGeneration) return;
         for (const record of [...records.values()]) {
           if (portalRoot?.contains(record.element)) continue;
           records.delete(record.element);
@@ -262,6 +268,7 @@ export function createSurfacePortalPresenter(
           dialogPresenter?.closeAll?.("closed");
           popupObserver?.disconnect?.();
           popupObserver = null;
+          retirePopupLifecycle();
           closingProgrammatically = true;
           try {
             popup.close();
@@ -275,8 +282,16 @@ export function createSurfacePortalPresenter(
       });
       popupObserver.observe(portalRoot, { childList: true });
     }
+    const handlePopupUnload = () => {
+      if (closingProgrammatically || popup !== candidate || generation !== popupGeneration) return;
+      resetPopup(true);
+    };
     candidate.addEventListener("beforeunload", handlePopupUnload);
     candidate.addEventListener("pagehide", handlePopupUnload);
+    disposePopupLifecycle = () => {
+      candidate.removeEventListener("beforeunload", handlePopupUnload);
+      candidate.removeEventListener("pagehide", handlePopupUnload);
+    };
   }
 
   function ensurePopup() {
@@ -339,6 +354,7 @@ export function createSurfacePortalPresenter(
       return;
     }
     if (!popup || popup.closed) {
+      retirePopupLifecycle();
       popupObserver?.disconnect?.();
       popupObserver = null;
       popup = null;
@@ -349,6 +365,7 @@ export function createSurfacePortalPresenter(
     dialogPresenter?.closeAll?.("closed");
     popupObserver?.disconnect?.();
     popupObserver = null;
+    retirePopupLifecycle();
     closingProgrammatically = true;
     try {
       popup.close();
@@ -361,6 +378,7 @@ export function createSurfacePortalPresenter(
   }
 
   function closeAll() {
+    retirePopupLifecycle();
     restoreAll(true);
     popupObserver?.disconnect?.();
     popupObserver = null;

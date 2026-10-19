@@ -19,20 +19,21 @@ class TermuxChromeTest {
         val seen = mutableListOf<String>()
         val protocol = TermuxChromePolicy.protocol(descriptor, { seen.add(it) },
             { JSONObject().put("locked", true) })
-        for (name in listOf("home", "reload", "recents", "lock", "quit", "tools")) {
+        for (name in listOf("home", "reload", "recents", "lock", "quit", "tools",
+            "scale-down", "scale-reset", "scale-up")) {
             val request = protocol.parse(JSONObject().put("id", 1).put("method", "view_action")
                 .put("documentId", "1234567890abcdef")
                 .put("params", JSONObject().put("action", name)).toString(), descriptor.entrypoint)
             assertTrue(protocol.execute(request).getJSONObject("result").getBoolean("ok"))
             assertEquals(name, seen.last())
         }
-        assertEquals(6, seen.size)
+        assertEquals(9, seen.size)
         for (params in listOf(JSONObject().put("action", "exec"),
             JSONObject().put("action", "home").put("script", "x"))) {
             val request = protocol.parse(JSONObject().put("id", 1).put("method", "view_action")
                 .put("params", params).toString(), descriptor.entrypoint)
             assertFalse(protocol.execute(request).getJSONObject("result").getBoolean("ok"))
         }
-        assertEquals(6, seen.size)
+        assertEquals(9, seen.size)
     }
 }

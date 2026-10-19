@@ -635,8 +635,8 @@ not a hidden product dependency.
 ### Add A Second-Root App
 
 A second-root app is a user-installed app outside TE2's built-in app tree.
-Download the [second-root app template ZIP](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.354/te2-second-root-app-template.zip)
-from the `0.2.354` release assets when published. Extract its `proxy_shell_wrapper`
+Download the [second-root app template ZIP](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.355/te2-second-root-app-template.zip)
+from the `0.2.355` release assets when published. Extract its `proxy_shell_wrapper`
 directory to `~/.local/share/te2/apps/<your_app_id>` (or
 `$TE2_DATA_HOME/apps/<your_app_id>` when overridden).
 
