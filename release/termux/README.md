@@ -79,6 +79,14 @@ snapshot. No command here uploads artifacts. Build the production archive withou
 
 ## Publication transport
 
+For .354+ public metadata, use `release/build_public_release.py --pypi` with
+`--version`, matching `--tag` / `--source-commit`, `--agent-log-server-version`
+and `--framework-shells-version`. Include wheels/APKs/template ZIP with repeated
+`--asset`. This emits both installer scripts, release-manifest.json and SHA256SUMS
+without an obsolete Termux wheelhouse. Source/tag identity and clean eligibility
+checks still apply; component versions describe tested release evidence, not
+normal dependency pins. Legacy `--termux-archive` mode remains available.
+
 Run publishing tools in an isolated environment: inherited developer
 `PYTHONPATH` can make a system Twine command import development dependencies.
 Keep publication tooling separate from the installed TE2 runtime.

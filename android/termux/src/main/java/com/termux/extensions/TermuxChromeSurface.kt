@@ -68,7 +68,9 @@ internal class TermuxChromeSurface(
         container.layoutParams = container.layoutParams.apply {
             height = (declared.heightDp * context.resources.displayMetrics.density).toInt()
         }
-        val browser = CefriumBrowser.createWithSurface(context)
+        // HostZoomMap writes host-scoped zoom. Auxiliary chrome must not share
+        // the persistent app context or its 100% scale resets the main page.
+        val browser = CefriumBrowser.createWithSurface(context, true)
         renderer = browser
         viewport = CefriumViewportController(browser)
         browser.setPinchToZoomEnabled(false)

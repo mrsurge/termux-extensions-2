@@ -531,7 +531,7 @@ class MainActivity : AppCompatActivity() {
         browser.setDownloadHandler(downloadCoordinator)
         // Apply the SDK's native pinch policy before any page loads.
         browser.setPinchToZoomEnabled(false)
-        mainViewport = CefriumViewportController(browser) {
+        mainViewport = CefriumViewportController(browser, observeRendererLifecycle = BuildConfig.TE2_TERMUX) {
             if (BuildConfig.TE2_TERMUX && inAppShell) clientUiScale else 100
         }
         selectionIntegration = CefriumSelectionIntegration(browser)
@@ -1597,7 +1597,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (devToolsRuntime == null) return
         val existingInspector = inspectorBrowser
-        val inspector = existingInspector ?: CefriumBrowser.createWithSurface(this).also { next ->
+        // Termux auxiliary surfaces share an ephemeral context, separate from
+        // the main page's persistent context and host-scoped accessibility zoom.
+        val inspector = existingInspector ?: CefriumBrowser.createWithSurface(this, BuildConfig.TE2_TERMUX).also { next ->
             // Inspector pages follow the same no-pinch policy as the main surface.
             next.setPinchToZoomEnabled(false)
             inspectorViewport = CefriumViewportController(next)
@@ -1840,7 +1842,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureProcessesBrowser() {
         val runtime = clientRuntimeService ?: return
-        val processes = processesBrowser ?: CefriumBrowser.createWithSurface(this).also {
+        val processes = processesBrowser ?: CefriumBrowser.createWithSurface(this, BuildConfig.TE2_TERMUX).also {
             // Keep the Processes surface at its intended page scale too.
             it.setPinchToZoomEnabled(false)
             processesViewport = CefriumViewportController(it)
@@ -2014,8 +2016,11 @@ class MainActivity : AppCompatActivity() {
             ViewCompat.requestApplyInsets(browserContainer)
         }
         if (::browser.isInitialized) {
+            // Restore before Chromium is told to show the page. The native
+            // surface observer handles the subsequent compositor reattachment.
+            if (BuildConfig.TE2_TERMUX) mainViewport.reapply()
             browser.onResume()
-            mainViewport.reapply()
+            if (!BuildConfig.TE2_TERMUX) mainViewport.reapply()
             selectionIntegration.installWhenReady()
         }
         termuxChrome?.resume()

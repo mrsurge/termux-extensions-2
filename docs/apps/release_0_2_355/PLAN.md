@@ -18,6 +18,54 @@ No shared runtime restart, data clearing or automatic device installation.
 
 ## Ordered procedure
 
+2026-10-19 renewed approval supersedes the APK-build hold: build all three .355
+staging APKs on Debian, audit them, and copy to desktop Downloads. No device
+installation or publication is approved. Include the latest Termux lifecycle and
+auxiliary-context fix; preserve the current uncommitted source patch provenance.
+
+### Termux scale lifecycle correction — approved 2026-10-19
+
+User reports selected accessibility scale disappears after background/foreground;
+the briefly visible old scale does not survive actual renderer reattachment.
+Other APKs work. Approved scope is Termux-only main-browser native lifecycle
+correction, focused unit/source checks and docs, with NO APK assembly/install.
+
+Source/pinned SDK inspection: Activity resume/focus reapplies scale, but the
+controller stops after its first WebContents-ready success. It did not observe
+the SurfaceView or Chromium WebContents reattachment. In pinned Cefrium 0.9.0,
+setPinchToZoomEnabled(false) also asynchronously rewrites viewport metadata;
+calling it on each reapply introduces an unnecessary competing update. These
+are confirmed source gaps, not a captured proof of the exact device reset order.
+
+Further source-backed cause: main, toolbar and tools previously used the same
+normal browser context/loopback host. Their resume order writes the chosen main
+scale followed by auxiliary 100% resets. Chromium's HostZoomMap JNI writes both
+the underlying host preference and the adjusted rendered scale; it is not an
+isolated per-view property. Reference:
+[Chromium host zoom implementation](https://chromium.googlesource.com/chromium/src.git/+/refs/heads/main/content/browser/host_zoom_map_impl.cc).
+User separately approves isolating Termux auxiliary browsers through Cefrium's
+existing private-context creation overload. Toolbar/inspector/process UI shares
+an ephemeral context; the main page keeps its existing normal persistent context.
+No profile migration or cookie/storage loss for the main page; auxiliary UI
+storage becomes ephemeral. Non-Termux targets keep normal context creation.
+
+Restore saved scale before browser.onResume(), then use SurfaceHolder and
+WebContents visibility/native-window/frame/page callbacks for native restoration.
+Apply synchronously and once after the current UI-thread handoff; fence stale
+callbacks/queued work and remove listeners on close. Preserve initial SDK pinch
+policy plus native gesture suppression, but omit repeat viewport-JS injection
+for the Termux lifecycle path. No global host/default zoom, engine fork, CSS zoom,
+infinite polling, altered background-rendering policy or other-renderer change.
+Compile shared Android source and run JVM/source tests only. Device seamlessness
+remains pending a separately approved APK. The connected Pixel has an older POC,
+not the user's current reported test build, so do not claim live reproduction.
+
+The shared source seed is refreshed to .355 (445 files); no .355 APK exists yet.
+Android source-only changes do not change the already-built candidate wheel
+runtime payload. Final source/tag provenance still needs normal reconciliation.
+
+### Artifact sequence (APK steps on hold)
+
 1. Approve the concrete source checkpoint/build scope, then align package,
    framework, Electron and three APK versions/codes to .355. Preserve the
    installer's .354 compatibility cutoff. Commit only the approved source,

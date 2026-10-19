@@ -37,14 +37,30 @@ def main() -> int:
 
     output = Path(cast(str, args.output)).expanduser().absolute()
     _require_empty_output(output)
-    termux_archive = Path(cast(str, args.termux_archive)).expanduser().absolute()
-    termux_manifest = _read_termux_manifest(termux_archive)
-    _validate_termux_manifest(
-        termux_manifest,
-        version=version,
-        source_commit=source_commit,
-        allow_ineligible=cast(bool, args.allow_ineligible_termux),
-    )
+    termux_archive: Path | None = None
+    if args.pypi:
+        if tuple(map(int, version.split('.'))) < (0, 2, 354):
+            raise SystemExit('PyPI release mode requires version 0.2.354 or newer')
+        if args.allow_ineligible_termux:
+            raise SystemExit('Archive eligibility override is invalid in PyPI mode')
+        distribution: Mapping[str, object] = {
+            'agentLogServerVersion': _release_version(args.agent_log_server_version or ''),
+            'frameworkShellsVersion': _release_version(args.framework_shells_version or ''),
+        }
+        if (args.tag or version) != version or _git_output('rev-parse', f'{version}^{{commit}}') != source_commit:
+            raise SystemExit('PyPI release assembly requires the version tag at source HEAD')
+        eligible_target = True
+    else:
+        if args.agent_log_server_version or args.framework_shells_version:
+            raise SystemExit('Component overrides require --pypi; archive metadata owns legacy components')
+        termux_archive = Path(cast(str, args.termux_archive)).expanduser().absolute()
+        termux_manifest = _read_termux_manifest(termux_archive)
+        _validate_termux_manifest(
+            termux_manifest, version=version, source_commit=source_commit,
+            allow_ineligible=cast(bool, args.allow_ineligible_termux),
+        )
+        distribution = _mapping(termux_manifest.get('distribution'), 'distribution')
+        eligible_target = bool(_mapping(termux_manifest.get('releaseProvenance'), 'releaseProvenance').get('publicationEligible'))
 
     output.mkdir(parents=True)
     assets: dict[str, dict[str, object]] = {}
@@ -61,13 +77,8 @@ def main() -> int:
         assets,
         role="installer",
     )
-    _publish_asset(
-        termux_archive,
-        output,
-        assets,
-        role="termux-archive",
-        target="termux-android-aarch64",
-    )
+    if termux_archive is not None:
+        _publish_asset(termux_archive, output, assets, role='termux-archive', target='termux-android-aarch64')
     for raw in cast(list[str], args.asset):
         _publish_asset(
             Path(raw).expanduser().absolute(),
@@ -76,12 +87,7 @@ def main() -> int:
             role="release-asset",
         )
 
-    distribution = _mapping(termux_manifest.get("distribution"), "distribution")
-    publication_eligible = not source_dirty and bool(
-        _mapping(termux_manifest.get("releaseProvenance"), "releaseProvenance").get(
-            "publicationEligible"
-        )
-    )
+    publication_eligible = not source_dirty and eligible_target
     tag_arg = cast(str | None, args.tag)
     manifest = {
         "assets": assets,
@@ -102,7 +108,9 @@ def main() -> int:
                 "installer": "install_te2.py",
             },
             "termux-android-aarch64": {
-                "archive": termux_archive.name,
+                **({'archive': termux_archive.name} if termux_archive else {
+                    'distribution': {'name': 'te2', 'version': version}, 'source': 'pypi',
+                }),
                 "installer": "install_te2.py",
             },
         },
@@ -135,7 +143,11 @@ def _parse_args() -> argparse.Namespace:
     _ = parser.add_argument("--version", required=True)
     _ = parser.add_argument("--tag")
     _ = parser.add_argument("--source-commit", required=True)
-    _ = parser.add_argument("--termux-archive", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    _ = mode.add_argument('--termux-archive')
+    _ = mode.add_argument('--pypi', action='store_true', help='Modern .354+ release; no Termux archive')
+    _ = parser.add_argument('--agent-log-server-version')
+    _ = parser.add_argument('--framework-shells-version')
     _ = parser.add_argument(
         "--asset",
         action="append",

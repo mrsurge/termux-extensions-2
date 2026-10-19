@@ -61,17 +61,30 @@ The packaged toolbar is 44 dp high, with Home/Reload on the left, a truncated
 page title, layout scale down/reset/up, and compact Recents/Tools controls.
 Layout scale is client-owned (60–180%, 10-point steps), persisted in native
 preferences and applied only to the app document, not the toolbar. The percentage
-button resets to 100%. The current scaling probe uses Chromium Android's
+button resets to 100%. Scaling uses Chromium Android's
 accessibility `HostZoomMap.setZoomLevel(WebContents, level)` path
 (`factor = 1.2^level`), not Cefrium's separate zoom wrapper, CSS root zoom or pinch
 magnification. Chromium owns viewport/layout conversion; no page CSS or height
 overrides are injected. Pinch/double-tap remain disabled independently. Guards
-and the selected page scale are reapplied on load, resume, focus and configuration
-changes; renderer recovery re-enters the same load path. Selection installation
+and the selected page scale are reapplied on load, focus and configuration
+changes. Termux restores scale before foreground visibility and observes the
+actual Chromium surface/WebContents reattachment, rather than treating a
+successful Activity-resume setter as completion. Surface restoration applies
+native scale synchronously and once after the current UI handoff; observers and
+pending work are fenced/removed on pause, replacement or close. This does not
+keep rendering in the background or continuously poll. Resume does not reinject
+the SDK's viewport-changing pinch-disable JavaScript; initial policy remains
+before document load, with native gesture guards restored independently.
+Toolbar/inspector/process surfaces use Cefrium's shared private context, separate
+from the app page's normal persistent context: HostZoomMap's host-scoped writes
+otherwise let their 100% restore overwrite the main page's chosen scale. Only
+auxiliary UI storage is ephemeral; app cookies/storage remain persistent.
+Renderer recovery re-enters the same load path. Selection installation
 does not reset page scale. Physical lifecycle/gesture acceptance is recorded
 separately; native desktop geometry tests do not establish Android parity. The
 preceding Cefrium-wrapper candidate failed live validation; this accessibility
-path remains a probe until accepted on-device.
+path passed initial on-device scaling acceptance; the subsequent background /
+foreground lifecycle correction requires a new APK and separate device acceptance.
 
 The consumer-only Android settings section exposes the existing active-session
 keep-alive notification/power policy, current permission/CPU/Wi-Fi lock state,

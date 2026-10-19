@@ -18,6 +18,7 @@ object Te2CefriumBrowserAccess {
     fun disableGestureZoom(browser: CefriumBrowser): Boolean {
         ensureWebContentsConnected(browser)
         val webContents = browser.webContents ?: return false
+        if (webContents.isDestroyed) return false
         if (
             webContents.viewAndroidDelegate == null ||
             webContents.topLevelNativeWindow == null
