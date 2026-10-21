@@ -61,8 +61,7 @@ def test_snapshot_barrier_and_shutdown_release_consumer() -> None:
             order.append("event")
             delivered.set()
 
-        _ = client.on("connect", snapshot, namespace="/fws")
-        _ = client.on("fws_notification", notification, namespace="/fws")
+        client.set_handlers(on_connect=snapshot, on_notification=notification)
         await connect(client)
         _ = await asyncio.wait_for(entered.wait(), 2)
         bridge.events.put({"event": "notification", "epoch": 1, "data": {}})
@@ -89,13 +88,43 @@ def test_failed_handler_fences_notifications_until_reconnect() -> None:
             entered.set()
             raise ValueError("domain failed")
 
-        _ = client.on("fws_notification", notification, namespace="/fws")
+        client.set_handlers(on_notification=notification)
         await connect(client)
         bridge.events.put({"event": "notification", "epoch": 1, "data": "first"})
         bridge.events.put({"event": "notification", "epoch": 1, "data": "gap"})
         _ = await asyncio.wait_for(entered.wait(), 2)
         await client.shutdown()
         assert attempts == ["first"] and bridge.reconnections == [1]
+    asyncio.run(run())
+
+
+def test_fixed_callback_arities_preserve_connect_notification_disconnect_order() -> None:
+    async def run() -> None:
+        bridge = Bridge()
+        with patch.object(native_fws, "_bridge", bridge):
+            client = native_fws.ObserverClient()
+        events: list[object] = []
+        disconnected = asyncio.Event()
+
+        async def on_connect() -> None:
+            events.append("connected")
+
+        async def on_notification(payload: object) -> None:
+            events.append(payload)
+
+        async def on_disconnect() -> None:
+            events.append("disconnected")
+            disconnected.set()
+
+        client.set_handlers(on_connect=on_connect, on_notification=on_notification,
+                            on_disconnect=on_disconnect)
+        await connect(client)
+        bridge.events.put({"event": "notification", "epoch": 1, "data": {"hello": "world"}})
+        bridge.events.put({"event": "disconnect", "epoch": 1})
+        await asyncio.wait_for(disconnected.wait(), 2)
+        await client.shutdown()
+        assert events == ["connected", {"hello": "world"}, "disconnected"]
+
     asyncio.run(run())
 
 

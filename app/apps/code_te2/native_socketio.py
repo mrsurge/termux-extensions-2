@@ -7,12 +7,26 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Protocol, cast
+from typing import ParamSpec, Protocol, TypeVar, cast, runtime_checkable
 from .persistence_io import NativePersistence
 from .native_shells import NativeShellBridge
 from .terminal_log_io import NativeTerminalLog
 from .native_fws import NativeFwsBridge
 from .wba_pipe_codec import NativeWbaCodec
+
+_Args = ParamSpec("_Args")
+_Result = TypeVar("_Result")
+
+
+@runtime_checkable
+class NativeEventHandler(Protocol):
+    """Invocation boundary for native-decoded positional event arguments.
+
+    Event owners retain their concrete signatures and payload validation. This
+    only checks callability; invocation still raises on wrong argument arity.
+    """
+
+    def __call__(self, *args: object) -> Awaitable[object]: ...
 
 
 class NativeBridge(NativePersistence, NativeShellBridge, NativeTerminalLog, NativeFwsBridge, NativeWbaCodec, Protocol):
@@ -46,7 +60,7 @@ class NativeNamespace:
         return self.server
 
     async def trigger_event(self, event: str, *args: object) -> object:
-        handler = cast(Callable[..., Awaitable[object]] | None, getattr(self, "on_" + event, None))
+        handler = self._event_handler(event)
         if handler is None:
             return None
         try:
@@ -55,8 +69,16 @@ class NativeNamespace:
             # Preserve the previous async namespace dispatch cancellation result.
             return None
 
+    def _event_handler(self, event: str) -> NativeEventHandler | None:
+        handler: object = getattr(self, "on_" + event, None)
+        if handler is None:
+            return None
+        if not isinstance(handler, NativeEventHandler):
+            raise TypeError("native event handler is not callable")
+        return handler
+
     async def emit(self, event: str, data: object = None, *, to: str | None = None,
-                   room: str | None = None, skip_sid: str | None = None,
+                   room: str | None = None, skip_sid: str | list[str] | None = None,
                    namespace: str | None = None) -> None:
         await self._server().emit(event, data, to=to, room=room, skip_sid=skip_sid,
                                   namespace=namespace or self.namespace)
@@ -94,7 +116,7 @@ class NativeSocketServer:
         self._bridge.socket_op(payload)
 
     async def emit(self, event: str, data: object = None, *, to: str | None = None,
-                   room: str | None = None, skip_sid: str | None = None,
+                   room: str | None = None, skip_sid: str | list[str] | None = None,
                    namespace: str | None = None, callback: object = None,
                    ignore_queue: bool = False) -> None:
         if callback is not None:
@@ -117,9 +139,12 @@ class NativeSocketServer:
     async def get_session(self, sid: str, namespace: str | None = None) -> dict[str, object]:
         return self._sessions.setdefault((namespace or "/", sid), {})
 
-    def start_background_task(self, target: Callable[..., Awaitable[object]], *args: object) -> asyncio.Task[object]:
-        async def run() -> object:
-            return await target(*args)
+    def start_background_task(
+        self, target: Callable[_Args, Awaitable[_Result]],
+        *args: _Args.args, **kwargs: _Args.kwargs,
+    ) -> asyncio.Task[_Result]:
+        async def run() -> _Result:
+            return await target(*args, **kwargs)
         return asyncio.create_task(run())
 
     async def deliver(self, event: dict[str, object]) -> object:
@@ -128,7 +153,8 @@ class NativeSocketServer:
         kind = str(event["event"])
         handler = self.namespace_handlers[namespace]
         if kind == "connect":
-            args: tuple[object, ...] = (sid, event.get("environ", {}))
+            empty_environ: dict[str, object] = {}
+            args: tuple[object, ...] = (sid, event.get("environ", empty_environ))
             if namespace != "/terminal":
                 args += (event.get("auth"),)
         elif kind == "disconnect":
@@ -139,4 +165,4 @@ class NativeSocketServer:
             return await handler.trigger_event(kind, *args)
         finally:
             if kind == "disconnect":
-                _ = self._sessions.pop((namespace, sid), None)
+                self._sessions.pop((namespace, sid), None)

@@ -52,13 +52,11 @@ class AsyncSocketIoClient(Protocol):
 
     def shutdown(self) -> Awaitable[None]: ...
 
-    def on(
-        self,
-        event: str,
-        handler: Callable[..., Awaitable[object | None]],
-        *,
-        namespace: str,
-    ) -> object: ...
+    def set_handlers(
+        self, *, on_connect: Callable[[], Awaitable[None]] | None = None,
+        on_disconnect: Callable[[], Awaitable[None]] | None = None,
+        on_notification: Callable[[object], Awaitable[None]] | None = None,
+    ) -> None: ...
 
     def connect(
         self,
@@ -164,14 +162,11 @@ def start_run_profile_fws_bridge() -> None:
 
     client: AsyncSocketIoClient = ObserverClient()
     _client = client
-    _ = client.on("connect", _on_connect, namespace=FWS_NAMESPACE)
-    _ = client.on(
-        FWS_NOTIFICATION_EVENT,
-        _on_notification,
-        namespace=FWS_NAMESPACE,
+    client.set_handlers(
+        on_connect=_on_connect,
+        on_disconnect=_on_disconnect,
+        on_notification=_on_notification,
     )
-    _ = client.on("connect_error", _on_connect_error, namespace=FWS_NAMESPACE)
-    _ = client.on("disconnect", _on_disconnect, namespace=FWS_NAMESPACE)
     _connect_task = asyncio.create_task(
         _connect(client),
         name="code_te2_run_profile_fws_bridge",
@@ -350,7 +345,7 @@ async def _on_notification(payload: object) -> None:
             return
         if shell_id:
             if method == "fws.shell.exited":
-                _ = _relevant_shell_labels.pop(shell_id, None)
+                _relevant_shell_labels.pop(shell_id, None)
                 _ = remove_run_profile_shell(shell_id=shell_id, label=label)
             else:
                 _relevant_shell_labels[shell_id] = label

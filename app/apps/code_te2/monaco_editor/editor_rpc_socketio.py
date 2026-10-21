@@ -1,7 +1,6 @@
 # pyright: strict, reportMissingTypeStubs=false
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import cast
 
 from ..native_socketio import NativeNamespace, ConnectionRefusedError
@@ -39,12 +38,10 @@ from .editor_ws import editor_runtime_build_connect_snapshot, editor_runtime_emi
 
 class EditorRpcSocketIONamespace(NativeNamespace):
     async def _emit_to_sid(self, sid: str, event_name: str, payload: object) -> None:
-        emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
-        _ = await emit_to_room(event_name, payload, room=sid)
+        await self.emit(event_name, payload, room=sid)
 
     async def _emit_to_room(self, room: str, event_name: str, payload: object) -> None:
-        emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
-        _ = await emit_to_room(event_name, payload, room=room)
+        await self.emit(event_name, payload, room=room)
 
     async def _deliver_notification(self, sid: str, notification: EditorNotification) -> None:
         # Resolve logical recipients only at the transport edge. The service
@@ -75,9 +72,8 @@ class EditorRpcSocketIONamespace(NativeNamespace):
             raise ConnectionRefusedError(str(exc)) from exc
         assert identity is not None
         register_editor_client(sid, identity)
-        enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
-        _ = await enter_room(sid, "code_te2")
-        _ = await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
+        await self.enter_room(sid, "code_te2")
+        await self.enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
         def read_adapter_state() -> dict[str, object]:
             from ..workbench_adapter_shell_manager import get_adapter_state
 
@@ -95,10 +91,9 @@ class EditorRpcSocketIONamespace(NativeNamespace):
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
         identity = unregister_editor_client(sid)
         try:
-            leave_room = cast(Callable[..., Awaitable[object]], self.leave_room)
-            _ = await leave_room(sid, "code_te2")
+            await self.leave_room(sid, "code_te2")
             if identity is not None:
-                _ = await leave_room(
+                await self.leave_room(
                     sid,
                     client_presentation_room(identity["clientInstanceId"]),
                 )

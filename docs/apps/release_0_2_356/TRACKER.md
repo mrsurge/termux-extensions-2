@@ -3,8 +3,8 @@
 ## Current work order
 
 1. Startup/HTTP initialization: user live accepted 2026-10-20, complete.
-2. Framework-pipe/Sidebar intents (O1): approved foundation/app-call slice in progress.
-   Follow immediately with Code TE2's user-supplied Any audit; see below.
+2. Framework-pipe/Sidebar intents (O1): source checkpointed; grouped live gates remain.
+   Code TE2's user-supplied Any audit is now approved/in progress before another build.
 3. Pipe concurrency and bounded DTO/PyO3 buffering (O2): follows intents.
 4. Native debug/internal console-bridge retirement: deferred behind both.
 5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
@@ -16,14 +16,31 @@ Validation belongs within each work phase, never a replacement for actual work.
 - [x] Record user-provided root mypy_typecheck_errors.txt as the seed for the
   large strict/extra/all-Any-disallow typing pass. Preserve the report unchanged;
   it is currently untracked user work, not a generated file to remove.
-- [ ] After ALS/Code TE2 cutover, reproduce the exact command/tool version and
-  refresh the baseline against the new source; group diagnostics by root cause.
-- [ ] Investigate and obtain bounded cleanup approval; prioritize typed callback,
+- [x] Reconstruct the requested strict/extra/all-Any invocation against the new
+  source with mypy 2.3.0/CPython 3.14.4; the original command/version are absent
+  from the preserved report and cannot be claimed exactly reproduced. Initial
+  baseline: 323 diagnostics/75 files, 297 outside tests and 26 in tests.
+- [x] Investigate and obtain staged cleanup approval; prioritize typed callback,
   event/DTO, service and worker boundaries without Any/cast/suppression escapes.
+- [x] First source slice: native FWS callbacks, namespace/editor/terminal transport,
+  task lifecycle and lazy project/Git hooks. Eleven production modules pass
+  stronger flags. Full check now reports 215 diagnostics/65 files: 189 outside
+  tests, 26 in tests. Detailed command/scope: TYPING_AUDIT.md.
+- [x] Grouped Python regressions: 163 tests and 15 subtests pass. Two stale
+  prior-cutover project assertions now include the existing before_switch=None
+  argument; production guards are unchanged. git diff --check and native-file
+  rustfmt --check pass. No runtime/compilation/asset publication performed.
+- [x] User separately approves fixing the discovered single-vs-list `skipSid`
+  native delivery gap, with regression source but no rebuild/restart. Python
+  adapters and native filter align; native test execution/activation remain open.
+- [ ] Continue remaining DTO/event/state, build-helper and test-fixture groups;
+  distinguish library-stub/unused-expression inference from actual dynamic DTOs.
 - [ ] Validate with the agreed stronger mypy command, owner regressions and mypyc
   checks; document remaining external-stub seams instead of masking them.
 
-Recording only: no typing cleanup, build-policy change or report edits now.
+User reports interpreted modules running well. No compiled activation, frontend
+publication or original-report edits; typing work does not authorize build-policy
+changes, commits or restarts. Native/mypyc compilation is intentionally deferred.
 
 ## Startup recovery
 
@@ -268,6 +285,9 @@ approved for blanket changes merely because the order is now recorded.
   plus native-client asset publication/reload. No active runtime changed so far.
 - [ ] Grouped user live acceptance: multiple clients/conversations, in/out-of-root
   file opens, project switches/consent, mentions, review/MCP drafts and standalone.
+
+2026-10-21: user reports Code TE2 running interpreted and working well; prioritize
+the typing audit before another build. Agent performs no runtime transition.
 
 Current changes are source-only. No version bump, installation, shared restart,
 OTA/APK publication or push was performed. Existing compiler cfg/dead-code

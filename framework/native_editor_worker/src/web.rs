@@ -32,6 +32,25 @@ use std::{
 use tokio_util::io::ReaderStream;
 
 type Body = UnsyncBoxBody<Bytes, std::io::Error>;
+
+fn excluded_sids(value: &Value) -> Result<Vec<&str>> {
+    match get(value, "skipSid") {
+        None | Some(Value::Nil) => Ok(Vec::new()),
+        Some(Value::String(sid)) => sid
+            .as_str()
+            .map(|sid| vec![sid])
+            .ok_or_else(|| anyhow::anyhow!("skipSid must contain UTF-8 strings")),
+        Some(Value::Array(sids)) => sids
+            .iter()
+            .map(|sid| {
+                sid.as_str()
+                    .ok_or_else(|| anyhow::anyhow!("skipSid must contain strings"))
+            })
+            .collect(),
+        Some(_) => bail!("skipSid must be a string or list of strings"),
+    }
+}
+
 struct Entry {
     socket: SocketRef,
     gzip: bool,
@@ -103,10 +122,10 @@ impl Sockets {
                 let data = encoded.as_ref().unwrap_or(data);
                 let mut compressed = None;
                 let room = text(value, "room");
-                let skip = text(value, "skipSid");
+                let skip = excluded_sids(value)?;
                 for ((ns, sid), entry) in entries.iter_mut() {
                     if ns != namespace
-                        || skip == Some(sid.as_str())
+                        || skip.contains(&sid.as_str())
                         || room.is_some_and(|r| !entry.rooms.contains(r))
                     {
                         continue;
@@ -493,6 +512,33 @@ fn grammar_query(query: &str) -> Result<Value> {
 #[cfg(test)]
 mod grammar_tests {
     use super::*;
+
+    #[test]
+    fn emit_exclusions_accept_single_and_multiple_exact_sids() {
+        assert!(excluded_sids(&map([])).unwrap().is_empty());
+        assert!(
+            excluded_sids(&map([("skipSid", Value::Nil)]))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            excluded_sids(&map([("skipSid", "one".into())])).unwrap(),
+            vec!["one"]
+        );
+        let operation = map([("skipSid", Value::Array(vec!["one".into(), "two".into()]))]);
+        let excluded = excluded_sids(&operation).unwrap();
+        assert!(excluded.contains(&"one"));
+        assert!(excluded.contains(&"two"));
+        assert!(!excluded.contains(&"other"));
+        assert!(
+            excluded_sids(&map([("skipSid", Value::Array(vec![]))]))
+                .unwrap()
+                .is_empty()
+        );
+        for invalid in [true.into(), Value::Array(vec!["one".into(), 1.into()])] {
+            assert!(excluded_sids(&map([("skipSid", invalid)])).is_err());
+        }
+    }
 
     #[tokio::test]
     async fn language_startup_http_is_uncached_and_failure_is_not_unsupported() {

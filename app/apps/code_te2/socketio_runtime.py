@@ -13,7 +13,7 @@ class SocketIOServer(Protocol):
         *,
         to: str | None = None,
         room: str | None = None,
-        skip_sid: str | None = None,
+        skip_sid: str | list[str] | None = None,
         namespace: str | None = None,
     ) -> Awaitable[None]: ...
 
@@ -32,7 +32,7 @@ async def emit_code_te2_socketio(
     *,
     to: str | None = None,
     room: str | None = None,
-    skip_sid: str | None = None,
+    skip_sid: str | list[str] | None = None,
     namespace: str,
 ) -> None:
     server = _server

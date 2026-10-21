@@ -31,15 +31,21 @@ class ObserverClient:
         self.bridge: NativeFwsBridge = _bridge
         self.connected: bool = False
         self.epoch: int = 0
-        self.handlers: dict[str, Callable[..., Awaitable[object | None]]] = {}
+        self.connect_handler: Callable[[], Awaitable[None]] | None = None
+        self.disconnect_handler: Callable[[], Awaitable[None]] | None = None
+        self.notification_handler: Callable[[object], Awaitable[None]] | None = None
         self.reader: asyncio.Task[None] | None = None
         self.stopped: bool = False
 
-    def on(self, event: str, handler: Callable[..., Awaitable[object | None]], *, namespace: str) -> object:
-        if namespace != "/fws":
-            raise ValueError("native observer only supports /fws")
-        self.handlers[event] = handler
-        return None
+    def set_handlers(
+        self, *, on_connect: Callable[[], Awaitable[None]] | None = None,
+        on_disconnect: Callable[[], Awaitable[None]] | None = None,
+        on_notification: Callable[[object], Awaitable[None]] | None = None,
+    ) -> None:
+        """Register the observer's actual callbacks, with their distinct arities."""
+        self.connect_handler = on_connect
+        self.disconnect_handler = on_disconnect
+        self.notification_handler = on_notification
 
     async def connect(self, url: str, *, namespaces: list[str], socketio_path: str,
                       transports: list[str], wait: bool, wait_timeout: int, retry: bool) -> None:
@@ -71,18 +77,15 @@ class ObserverClient:
                 try:
                     if name == "connect":
                         self.connected = True
-                        handler = self.handlers.get("connect")
-                        if handler is not None:
-                            _ = await handler()
+                        if self.connect_handler is not None:
+                            await self.connect_handler()
                     elif name == "disconnect":
                         self.connected = False
-                        handler = self.handlers.get("disconnect")
-                        if handler is not None:
-                            _ = await handler()
+                        if self.disconnect_handler is not None:
+                            await self.disconnect_handler()
                     elif name == "notification" and self.connected:
-                        handler = self.handlers.get("fws_notification")
-                        if handler is not None:
-                            _ = await handler(event.get("data"))
+                        if self.notification_handler is not None:
+                            await self.notification_handler(event.get("data"))
                 except Exception:
                     logger.exception("Native FWS event failed; reconnecting for fresh state")
                     self.connected = False

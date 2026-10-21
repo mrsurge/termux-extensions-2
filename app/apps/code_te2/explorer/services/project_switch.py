@@ -1,7 +1,6 @@
 # pyright: strict
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 import asyncio
@@ -22,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 AdapterRpc = Callable[[str, dict[str, object] | None, float], Awaitable[object]]
 EnsureWatchexecShell = Callable[[str, int], Awaitable[object | None]]
-MarkAdapterWorkspaceStateFn = Callable[..., Awaitable[None]]
 SyncExplorerProject = Callable[[Path], None]
 RefreshExplorerProject = Callable[[Path, int], Awaitable[bool]]
 _project_switch_seq = 0
@@ -210,12 +208,11 @@ def _require_current_switch(project_root: Path, generation: int) -> None:
 def _get_explorer_project_hooks() -> tuple[SyncExplorerProject, RefreshExplorerProject]:
     # Resolve required runtime hooks lazily: the Explorer dispatcher imports this
     # service too, so eager transport imports would form an initialization cycle.
-    module = importlib.import_module("app.apps.code_te2.explorer.transport.rpc_socketio")
-    sync = getattr(module, "sync_active_explorer_dispatchers_project_root", None)
-    refresh = getattr(module, "refresh_active_explorer_project", None)
-    if not callable(sync) or not callable(refresh):
-        raise RuntimeError("Explorer project lifecycle hooks unavailable")
-    return cast(SyncExplorerProject, sync), cast(RefreshExplorerProject, refresh)
+    from ..transport.rpc_socketio import (
+        sync_active_explorer_dispatchers_project_root,
+        refresh_active_explorer_project,
+    )
+    return sync_active_explorer_dispatchers_project_root, refresh_active_explorer_project
 
 
 async def _start_project_watchexec_if_needed(project_root: Path) -> None:
@@ -251,18 +248,14 @@ async def _replay_sidecar_open_state(
     source: str,
     project_generation: int,
 ) -> dict[str, object] | None:
-    editor_module = importlib.import_module("app.apps.code_te2.monaco_editor.editor_ws")
-    replay_obj = getattr(editor_module, "editor_runtime_replay_sidecar_open_state", None)
-    if not callable(replay_obj):
-        raise RuntimeError("editor_runtime_replay_sidecar_open_state unavailable")
-    replay = cast(Callable[..., Awaitable[object | None]], replay_obj)
-    result = await replay(
+    from ...monaco_editor.editor_ws import editor_runtime_replay_sidecar_open_state
+
+    return await editor_runtime_replay_sidecar_open_state(
         str(project_root),
         reason=reason,
         source=source,
         project_generation=project_generation,
     )
-    return cast(dict[str, object], result) if isinstance(result, dict) else None
 
 
 async def _broadcast_project_git_state(
@@ -288,37 +281,21 @@ async def _reset_project_diagnostics(
     project_generation: int,
 ) -> None:
     try:
-        diagnostics_module = importlib.import_module(
-            "app.apps.code_te2.diagnostics_bridge"
-        )
-        reset_obj = getattr(
-            diagnostics_module,
-            "reset_diagnostics_projection_for_project",
-            None,
-        )
-        if not callable(reset_obj):
-            return
-        reset = cast(Callable[..., Awaitable[None]], reset_obj)
-        await reset(project_root, project_generation=project_generation)
+        from ...diagnostics_bridge import reset_diagnostics_projection_for_project
+
+        await reset_diagnostics_projection_for_project(project_root, project_generation=project_generation)
     except Exception as exc:
         logger.warning("[project_open] diagnostics reset failed: %s", exc)
 
 
-def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[object, object] | None:
-    data = getattr(sidecar, "_data", None)
-    if not isinstance(data, dict):
-        return None
-    return cast(dict[object, object], data)
+def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[str, object]:
+    return sidecar._data
 
 
 def _get_adapter_rpc() -> AdapterRpc:
-    adapter_module = importlib.import_module(
-        "app.apps.code_te2.workbench_adapter_shell_manager"
-    )
-    adapter_rpc_obj = getattr(adapter_module, "adapter_rpc", None)
-    if not callable(adapter_rpc_obj):
-        raise RuntimeError("adapter_rpc unavailable")
-    return cast(AdapterRpc, adapter_rpc_obj)
+    from ...workbench_adapter_shell_manager import adapter_rpc
+
+    return adapter_rpc
 
 
 def _require_switch_ack(response: object, *, method: str = "adapter.switchWorkspace") -> None:
@@ -339,43 +316,24 @@ def _require_switch_ack(response: object, *, method: str = "adapter.switchWorksp
 
 
 async def _mark_adapter_workspace_switching(project_root: Path) -> None:
-    adapter_module = importlib.import_module(
-        "app.apps.code_te2.workbench_adapter_shell_manager"
-    )
-    marker_obj = getattr(adapter_module, "mark_adapter_workspace_switching", None)
-    if not callable(marker_obj):
-        return
-    marker = cast(MarkAdapterWorkspaceStateFn, marker_obj)
-    await marker(str(project_root))
+    from ...workbench_adapter_shell_manager import mark_adapter_workspace_switching
+
+    await mark_adapter_workspace_switching(str(project_root))
 
 
 async def _mark_adapter_workspace_ready(project_root: Path) -> None:
-    adapter_module = importlib.import_module(
-        "app.apps.code_te2.workbench_adapter_shell_manager"
-    )
-    marker_obj = getattr(adapter_module, "mark_adapter_workspace_ready", None)
-    if not callable(marker_obj):
-        return
-    marker = cast(MarkAdapterWorkspaceStateFn, marker_obj)
-    await marker(str(project_root))
+    from ...workbench_adapter_shell_manager import mark_adapter_workspace_ready
+
+    await mark_adapter_workspace_ready(str(project_root))
 
 
 async def _mark_adapter_workspace_error(project_root: Path, error: str) -> None:
-    adapter_module = importlib.import_module(
-        "app.apps.code_te2.workbench_adapter_shell_manager"
-    )
-    marker_obj = getattr(adapter_module, "mark_adapter_workspace_error", None)
-    if not callable(marker_obj):
-        return
-    marker = cast(MarkAdapterWorkspaceStateFn, marker_obj)
-    await marker(str(project_root), str(error))
+    from ...workbench_adapter_shell_manager import mark_adapter_workspace_error
+
+    await mark_adapter_workspace_error(str(project_root), error)
 
 
 def _get_ensure_watchexec_shell() -> EnsureWatchexecShell:
-    watchexec_module = importlib.import_module(
-        "app.apps.code_te2.watchexec_shell_manager"
-    )
-    ensure_shell_obj = getattr(watchexec_module, "ensure_watchexec_shell", None)
-    if not callable(ensure_shell_obj):
-        raise RuntimeError("ensure_watchexec_shell unavailable")
-    return cast(EnsureWatchexecShell, ensure_shell_obj)
+    from ...watchexec_shell_manager import ensure_watchexec_shell
+
+    return ensure_watchexec_shell

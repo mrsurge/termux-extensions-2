@@ -10,7 +10,7 @@ import shlex
 import re
 import shutil
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Mapping
 from pathlib import Path
 from typing import Protocol, TypeAlias, cast
 from .terminal_outcomes import TerminalServiceError
@@ -71,7 +71,7 @@ def _socket(obj: object) -> TerminalSocketLike:
 
 
 def _as_int(value: object, default: int) -> int:
-    if not isinstance(value, int | float | str):
+    if not isinstance(value, (int, float, str)):
         return default
     try:
         return int(value)
@@ -85,18 +85,15 @@ async def _create_editor_shell(
     project_path: str | None,
     sequence: int | None = None,
 ) -> JsonObject:
-    fn = cast(Callable[..., Awaitable[object]], getattr(_terminal_shell, "create_editor_shell"))
-    return _json_object(await fn(cwd=cwd, project_path=project_path, sequence=sequence))
+    return await _terminal_shell.create_editor_shell(cwd=cwd, project_path=project_path, sequence=sequence)
 
 
 async def _destroy_editor_shell(shell_id: str) -> bool:
-    fn = cast(Callable[..., Awaitable[object]], getattr(_terminal_shell, "destroy_editor_shell"))
-    return bool(await fn(shell_id))
+    return bool(await _terminal_shell.destroy_editor_shell(shell_id))
 
 
 async def _resize_editor_shell(shell_id: str, cols: int, rows: int) -> bool:
-    fn = cast(Callable[..., Awaitable[object]], getattr(_terminal_shell, "resize_editor_shell"))
-    return bool(await fn(shell_id, cols, rows))
+    return bool(await _terminal_shell.resize_editor_shell(shell_id, cols, rows))
 
 
 async def _get_terminal_manager() -> TerminalShellManager:
@@ -322,7 +319,8 @@ async def _emit_terminal_history_to_sid(
         )
     except Exception as exc:
         payload["ok"] = False
-        payload["error"] = str(getattr(exc, "detail", exc))
+        detail: object = getattr(exc, "detail", exc)
+        payload["error"] = str(detail)
     async with _terminal_sid_lock:
         if (
             _terminal_sid_shells.get(sid) != shell_id
@@ -363,7 +361,8 @@ async def _start_terminal_history_task(
         finally:
             async with _terminal_sid_lock:
                 current = _terminal_history_tasks.get(sid)
-                if current is asyncio.current_task():
+                running: asyncio.Task[object] | None = asyncio.current_task()
+                if current is running:
                     _terminal_history_tasks.pop(sid, None)
 
     task = asyncio.create_task(
@@ -413,13 +412,13 @@ async def _forward_terminal_fws_chunk(shell_id: str, _chunk: str) -> None:
 
 async def _reset_terminal_fws_projection(shell_id: str) -> None:
     await terminal_screen_projections.discard(shell_id)
-    _ = _terminal_output_locks.pop(shell_id, None)
+    _terminal_output_locks.pop(shell_id, None)
     await _rebind_terminal_fws_stream(shell_id)
 
 
 async def _remove_terminal_fws_projection(shell_id: str) -> None:
     await terminal_screen_projections.discard(shell_id)
-    _ = _terminal_output_locks.pop(shell_id, None)
+    _terminal_output_locks.pop(shell_id, None)
 
 
 async def _rebind_terminal_fws_stream(shell_id: str) -> None:
@@ -480,11 +479,10 @@ async def _resolve_terminal_event_shell(
 class TerminalSocketIONamespace(NativeNamespace):
     async def trigger_event(self, event: str, *args: object) -> object | None:
         normalized = event.replace(":", "_") if event else event
-        handler = cast(Callable[..., Awaitable[object | None]] | None, getattr(self, "on_" + (normalized or ""), None))
-        if handler:
+        handler = self._event_handler(normalized or "")
+        if handler is not None:
             return await handler(*args)
-        trigger = cast(Callable[..., Awaitable[object | None]], super().trigger_event)
-        return await trigger(event, *args)
+        return await super().trigger_event(event, *args)
 
     async def on_connect(self, sid: str, environ: object) -> None:
         print(f"[terminal_ws] connect sid={sid}", flush=True)
@@ -543,7 +541,7 @@ class TerminalSocketIONamespace(NativeNamespace):
             columns,
             lines,
         )
-        _ = asyncio.create_task(
+        _shell_list_task: asyncio.Task[None] = asyncio.create_task(
             _emit_terminal_shell_list_to_sid(sid, shell_project_path),
             name=f"terminal-shell-list-{sid}-{bind_generation}",
         )
@@ -583,10 +581,11 @@ class TerminalSocketIONamespace(NativeNamespace):
                 raise ValueError(f"Unsupported terminal request '{method}'")
             return {"id": request_id, "ok": True, "result": result}
         except Exception as exc:
+            detail: object = getattr(exc, "detail", exc)
             return {
                 "id": request_id,
                 "ok": False,
-                "error": str(getattr(exc, "detail", exc)),
+                "error": str(detail),
             }
 
     async def on_terminal_input(self, sid: str, data: object) -> None:
@@ -986,7 +985,7 @@ async def _destroy_terminal_shell_data(shell_id: str) -> JsonObject:
         sidecar.save()
     _ = remove_terminal_shell_fact(shell_id)
     await terminal_screen_projections.discard(shell_id)
-    _ = _terminal_output_locks.pop(shell_id, None)
+    _terminal_output_locks.pop(shell_id, None)
     if was_active:
         await close_active_terminal_sockets("terminal closed")
     if project_path:

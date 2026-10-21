@@ -71,7 +71,7 @@ class SocketIOServer(Protocol):
         *,
         to: str | None = None,
         room: str | None = None,
-        skip_sid: str | None = None,
+        skip_sid: str | list[str] | None = None,
         namespace: str | None = None,
     ) -> Awaitable[None]: ...
 
@@ -86,7 +86,7 @@ class SocketIONamespace(Protocol):
         *,
         to: str | None = None,
         room: str | None = None,
-        skip_sid: str | None = None,
+        skip_sid: str | list[str] | None = None,
         namespace: str | None = None,
     ) -> Awaitable[None]: ...
 
@@ -97,10 +97,6 @@ class SocketIONamespace(Protocol):
     def get_session(self, sid: str) -> Awaitable[object]: ...
 
     def trigger_event(self, event: str, *args: object) -> Awaitable[object | None]: ...
-
-
-class SocketIOEventHandler(Protocol):
-    def __call__(self, *args: object) -> Awaitable[object | None]: ...
 
 
 def _json_object(value: object) -> JsonObject:
@@ -175,9 +171,8 @@ class UIIPCNamespace(NativeNamespace):
     @override
     async def trigger_event(self, event: str, *args: object) -> object | None:
         normalized = event.replace(':', '_') if event else event
-        handler_name = 'on_' + (normalized or '')
-        handler = cast(SocketIOEventHandler | None, getattr(self, handler_name, None))
-        if handler:
+        handler = self._event_handler(normalized or '')
+        if handler is not None:
             return await handler(*args)
         return await _namespace(super()).trigger_event(event, *args)
 
@@ -268,7 +263,7 @@ class UIIPCNamespace(NativeNamespace):
             # The Socket.IO connect acknowledgement must not wait for disk-backed
             # host/sidebar/run-profile snapshots. Browser boot/reconnect owns one
             # explicit snapshot request after the transport becomes usable.
-            _ = asyncio.create_task(
+            _connect_projection: asyncio.Task[None] = asyncio.create_task(
                 _emit_browser_connect_adapter_state(ns, sid_text),
                 name="code_te2_ui_ipc_connect_projection",
             )
@@ -289,7 +284,7 @@ class UIIPCNamespace(NativeNamespace):
         method: str,
         params: JsonObject,
         *,
-        skip_sid: str | None = None,
+        skip_sid: str | list[str] | None = None,
     ) -> None:
         await _namespace(self).emit(
             UI_IPC_RPC_NOTIFICATION_EVENT,

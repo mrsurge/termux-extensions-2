@@ -52,6 +52,14 @@ surface any genuine policy tradeoff before weakening a check. Changing durable
 build/typecheck policy, activating compiled code or fixing the whole report needs
 its own concrete implementation approval; this entry records the follow-up only.
 
+2026-10-21: user reports interpreted Code TE2 working well and prioritizes typing
+before another build, then approves staged production/test cleanup. Current
+reproduction, grouped boundaries and remaining diagnostics are maintained in
+`TYPING_AUDIT.md`. Build/typecheck policy is unchanged; no compilation, activation,
+restart or commit is authorized by this cleanup. A separately approved native
+worker correction aligns `skipSid` list delivery with the Python Sidebar
+contract; its tests remain unexecuted until a build/test compilation is approved.
+
 ## Pre-IPC inspection affordance — Electron DevTools
 
 User approves an immediate small Electron-only affordance before the next major

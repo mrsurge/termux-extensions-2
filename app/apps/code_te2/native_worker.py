@@ -137,7 +137,7 @@ def start(bridge: NativeBridge) -> dict[str, object]:
         finally:
             if _intents is not None:
                 _intents.close()
-            pending = asyncio.all_tasks(_loop)
+            pending: set[asyncio.Task[object]] = asyncio.all_tasks(_loop)
             for task in pending:
                 _ = task.cancel()
             _ = _loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))

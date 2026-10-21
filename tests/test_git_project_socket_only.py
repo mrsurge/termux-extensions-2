@@ -91,6 +91,7 @@ class GitProjectSocketTests(unittest.IsolatedAsyncioTestCase):
             _ = call.assert_awaited_once_with(
                 deps, "/project", require_known_sidecar=True,
                 reason="sidebar_project_open", file_target="/project/file.py",
+                before_switch=None,
             )
         self.assertEqual(result, {"ok": True, "source": "sidebar-a"})
 
@@ -103,7 +104,7 @@ class GitProjectSocketTests(unittest.IsolatedAsyncioTestCase):
             result = await project_backend.handle_sidebar_project_create_request(
                 {"path": "/project", "adoptExisting": True, "open": False}, source_name="sidebar-a",
             )
-            _ = call.assert_awaited_once_with(deps, path="/project", adopt_existing=True, open_after=False)
+            _ = call.assert_awaited_once_with(deps, path="/project", adopt_existing=True, open_after=False, before_switch=None)
         self.assertEqual(result, {"ok": True, "source": "sidebar-a"})
 
     async def test_sidebar_failure_does_not_gain_a_success_projection(self) -> None:

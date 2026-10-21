@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
 import os
 from pathlib import Path
-from typing import Callable, Protocol, cast
+from typing import Protocol
 
 from ..contracts.project import (
     GitCloneParams,
@@ -23,7 +22,6 @@ from ..services.tracked_jobs import forget_tracked_job, remember_tracked_job
 from ...worker_services import git_service as worker_git_service
 
 logger = logging.getLogger(__name__)
-ExplorerHelperCall = Callable[..., object]
 
 
 class ExplorerHistoryStore(Protocol):
@@ -60,11 +58,9 @@ async def handle_project_create(
     params: ProjectCreateParams,
     msg_id: str | None,
 ) -> ExplorerProjectSwitchResult:
-    project_payload = _call_explorer_helper_dict(
-        "create_project",
-        params["parent_path"],
-        params["name"],
-    )
+    from ..services.file_ops import create_project
+
+    project_payload = create_project(params["parent_path"], params["name"])
     project_path = _require_project_path(project_payload)
     open_params: ProjectOpenParams = {"path": project_path}
     return await handle_project_open(context, open_params, msg_id)
@@ -109,7 +105,7 @@ async def handle_git_clone(
     op_id = worker_git_service.new_git_job_op_id("git_clone")
     remember_tracked_job(switch_result.project_root, context.tracked_job_ids, op_id)
     try:
-        _ = await asyncio.to_thread(
+        await asyncio.to_thread(
             worker_git_service.start_clone_job,
             switch_result.project_root,
             url=params["url"],
@@ -141,26 +137,6 @@ def _clone_depth(value: int | str | None) -> int | None:
     return parsed if parsed > 0 else None
 
 
-def _call_explorer_helper_dict(name: str, *args: object) -> dict[str, object]:
-    helper = _get_explorer_helper_callable(name)
-    result = helper(*args)
-    if not isinstance(result, dict):
-        return {}
-    normalized: dict[str, object] = {}
-    for key, item in cast(dict[object, object], result).items():
-        if isinstance(key, str):
-            normalized[key] = item
-    return normalized
-
-
-def _get_explorer_helper_callable(name: str) -> ExplorerHelperCall:
-    helper_module = importlib.import_module("app.apps.code_te2.explorer.services.file_ops")
-    helper = getattr(helper_module, name, None)
-    if not callable(helper):
-        raise RuntimeError(f"explorer.services.file_ops.{name} unavailable")
-    return cast(ExplorerHelperCall, helper)
-
-
 def _require_project_path(payload: dict[str, object]) -> str:
     path = payload.get("path")
     if isinstance(path, str) and path:
@@ -169,8 +145,6 @@ def _require_project_path(payload: dict[str, object]) -> str:
 
 
 def _get_history_store() -> ExplorerHistoryStore:
-    stores_module = importlib.import_module("app.apps.code_te2.stores")
-    history_store = getattr(stores_module, "_history_store", None)
-    if history_store is None:
-        raise RuntimeError("_history_store unavailable")
-    return cast(ExplorerHistoryStore, history_store)
+    from ...stores import get_history_store
+
+    return get_history_store()

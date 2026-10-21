@@ -33,6 +33,14 @@ for live extension install/uninstall acceptance of the full compiled runtime.
 
 ## Actual Code TE2 worker
 
+Native namespace emission accepts `skipSid` as null/absent, one string, or a list
+of exact SID strings. Validate the complete list before fan-out; never ignore a
+list as though no exclusion was supplied. Namespace and room membership still
+gate recipients. Python transport protocols and the native filter must agree;
+annotations alone cannot establish delivery semantics. The 2026-10-21 correction
+requires a matching worker build before live list-exclusion acceptance; see
+`docs/apps/release_0_2_356/TYPING_AUDIT.md`.
+
 Rust owns Hyper HTTP resources, Socketioxide's five existing namespaces, rooms,
 Engine.IO lifecycle and framework MessagePack stdin/stdout. A dedicated Python
 asyncio thread runs the real `main.py` lifecycle and existing namespace/domain

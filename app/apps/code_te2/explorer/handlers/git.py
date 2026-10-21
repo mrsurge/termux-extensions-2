@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 from functools import partial
 import logging
-from typing import Protocol, cast
+from typing import Protocol
 
 from ..contracts.git import (
     GitCommitParams,
@@ -52,10 +51,8 @@ async def handle_git_stage(
 ) -> None:
     del msg_id
     require_head(context.project_root)
-    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.stage_paths,
-        context.project_root,
-        params["paths"],
-    ))
+    await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.stage_paths,
+        context.project_root, params["paths"]))
     await _mark_dirty_and_refresh(context)
 
 
@@ -65,7 +62,7 @@ async def handle_git_unstage(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    _ = await asyncio.to_thread(
+    await asyncio.to_thread(
         worker_git_service.unstage_paths,
         context.project_root,
         params["paths"],
@@ -80,7 +77,7 @@ async def handle_git_stage_all(
 ) -> None:
     del params, msg_id
     require_head(context.project_root)
-    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.stage_all, context.project_root))
+    await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.stage_all, context.project_root))
     await _mark_dirty_and_refresh(context)
 
 
@@ -90,7 +87,7 @@ async def handle_git_unstage_all(
     msg_id: str | None,
 ) -> None:
     del params, msg_id
-    _ = await asyncio.to_thread(worker_git_service.unstage_all, context.project_root)
+    await asyncio.to_thread(worker_git_service.unstage_all, context.project_root)
     await _mark_dirty_and_refresh(context)
 
 
@@ -144,13 +141,10 @@ async def handle_git_commit(
         status = await asyncio.to_thread(worker_git_service.get_status, context.project_root)
         if status.staged:
             raise ValueError("Staged selection changed; start Commit again")
-        _ = await asyncio.to_thread(head_action, context.project_root,
+        await asyncio.to_thread(head_action, context.project_root,
             partial(worker_git_service.stage_all, context.project_root))
-    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.commit_changes,
-        context.project_root,
-        params["message"],
-        params["amend"],
-    ))
+    await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.commit_changes,
+        context.project_root, params["message"], params["amend"]))
     await _mark_dirty_and_refresh(context)
     await publish_git_diff_base_changed(
         context.project_root,
@@ -175,7 +169,7 @@ async def handle_git_push(
     remember_tracked_job(context.project_root, context.tracked_job_ids, op_id)
     logger.info("[GIT_PUSH] Starting pipe push job %s for %s", op_id, context.project_root)
     try:
-        _ = await asyncio.to_thread(
+        await asyncio.to_thread(
             worker_git_service.start_push_job,
             context.project_root,
             remote=params["remote"],
@@ -198,7 +192,7 @@ async def handle_git_pull(
     op_id = worker_git_service.new_git_job_op_id("git_pull")
     remember_tracked_job(context.project_root, context.tracked_job_ids, op_id)
     try:
-        _ = await asyncio.to_thread(
+        await asyncio.to_thread(
             worker_git_service.start_pull_job,
             context.project_root,
             remote=params["remote"],
@@ -220,9 +214,7 @@ async def handle_git_reset(
     del msg_id
     require_head(context.project_root)
     await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.reset_hard,
-        context.project_root,
-        params["commit"],
-    ))
+        context.project_root, params["commit"]))
     await _mark_dirty_and_refresh(context)
 
 
@@ -232,7 +224,7 @@ async def handle_git_init(
     msg_id: str | None,
 ) -> None:
     del params, msg_id
-    _ = await asyncio.to_thread(worker_git_service.init_repository, context.project_root)
+    await asyncio.to_thread(worker_git_service.init_repository, context.project_root)
     await context.broadcast_git_status()
 
 
@@ -242,7 +234,7 @@ async def handle_git_set_diff_base(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    _ = await asyncio.to_thread(
+    await asyncio.to_thread(
         worker_git_service.get_commit_info,
         context.project_root,
         params["ref"],
@@ -364,8 +356,6 @@ async def _mark_dirty_and_refresh(context: ExplorerGitHandlerContext) -> None:
 
 
 def _get_history_store() -> ExplorerHistoryStore:
-    stores_module = importlib.import_module("app.apps.code_te2.stores")
-    history_store = getattr(stores_module, "_history_store", None)
-    if history_store is None:
-        raise RuntimeError("_history_store unavailable")
-    return cast(ExplorerHistoryStore, history_store)
+    from ...stores import get_history_store
+
+    return get_history_store()

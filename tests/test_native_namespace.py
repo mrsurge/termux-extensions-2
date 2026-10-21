@@ -60,5 +60,41 @@ def test_dispatch_and_namespace_scoping():
         assert [entry["op"] for entry in operations] == ["join", "emit", "leave"]
         assert all(entry["namespace"] == "/one" for entry in operations)
         assert operations[1]["skipSid"] == "other"
+        await first.emit("rpc", {"result": 2}, skip_sid=["one", "two"])
+        assert operations[-1]["skipSid"] == ["one", "two"]
+
+    asyncio.run(run())
+
+
+def test_native_event_call_boundary_preserves_arity_and_failures() -> None:
+    async def run() -> None:
+        class Handler(NativeNamespace):
+            calls: int = 0
+
+            async def on_rpc(self, sid: str, data: object) -> object:
+                self.calls += 1
+                return data
+
+            on_broken: int = 1
+
+        handler = Handler("/test")
+        assert await handler.trigger_event("rpc", "sid", {"value": 1}) == {"value": 1}
+        with pytest.raises(TypeError):
+            await handler.trigger_event("rpc", "sid")
+        assert handler.calls == 1
+        with pytest.raises(TypeError, match="not callable"):
+            await handler.trigger_event("broken")
+
+    asyncio.run(run())
+
+
+def test_native_background_task_retains_callback_arguments_and_result() -> None:
+    async def run() -> None:
+        async def callback(number: int, *, label: str) -> str:
+            return f"{label}:{number}"
+
+        server = NativeSocketServer()
+        task: asyncio.Task[str] = server.start_background_task(callback, 3, label="value")
+        assert await task == "value:3"
 
     asyncio.run(run())
