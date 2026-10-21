@@ -128,6 +128,43 @@ async function settlePromises() {
   await Promise.resolve();
 }
 
+test('boot snapshot uses a sixty-second budget on the unchanged MessagePack RPC', async (t) => {
+  const { createUiIpcConnections } = await importTypeScript('main_page/frontend/connections/ui-ipc.ts');
+  const { messagePackRpcWireCodec: codec } = await importTypeScript('src/rpc/codec.ts');
+  const socket = new FakeSocket();
+  let ack, envelope;
+  socket.emit = (_event, payload, callback) => { envelope = codec.decode(payload); ack = callback; };
+  const connection = createUiIpcConnections({
+    ensureSocketIoLoaded: async () => () => socket,
+    getSocketQuery: () => ({ client_instance_id: 'client_abcdefghijkl' }),
+    getClientId: () => 'client_abcdefghijkl', getConsoleWorkerId: () => 'test',
+    initConsoleBridge: () => ({}),
+  });
+  await connection.connectUIIPC();
+  socket.trigger('connect');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let settled = false;
+  const pending = connection.requestBackendBootSnapshot().finally(() => { settled = true; });
+  await settlePromises();
+  assert.equal(envelope.method, 'ui.host.bootSnapshot.get');
+  assert.deepEqual(envelope.params, {});
+  t.mock.timers.tick(8001);
+  await settlePromises();
+  assert.equal(settled, false);
+  ack(codec.encode({ jsonrpc: '2.0', id: envelope.id, result: { ok: true, snapshot: { code_server: { compatible: true } } } }));
+  assert.equal((await pending).ok, true);
+  const expires = connection.requestBackendBootSnapshot();
+  const rejected = assert.rejects(expires, /RPC request timeout/);
+  await settlePromises();
+  t.mock.timers.tick(60000);
+  await rejected;
+  const smallRead = connection.requestBackendBootSnapshot({ scope: 'hostState' });
+  const smallRejected = assert.rejects(smallRead, /RPC request timeout/);
+  await settlePromises();
+  t.mock.timers.tick(8000);
+  await smallRejected;
+});
+
 test('host-lane sidebar close survives MessagePack and notification parsing', async () => {
   const { createUiIpcConnections } = await importTypeScript('main_page/frontend/connections/ui-ipc.ts');
   const { messagePackRpcWireCodec } = await importTypeScript('src/rpc/codec.ts');

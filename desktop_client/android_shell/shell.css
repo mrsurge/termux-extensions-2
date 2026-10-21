@@ -300,6 +300,8 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+.settings-section[hidden] { display: none; }
+
 .section-header,
 .toggle-row,
 .section-actions {

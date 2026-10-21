@@ -164,6 +164,9 @@ def submit(value: dict[str, object]) -> concurrent.futures.Future[object]:
         raise RuntimeError("native domain loop unavailable")
 
     async def deliver() -> object:
+        if value.get("kind") == "language_startup":
+            from .boot_snapshot_backend import build_language_startup_snapshot
+            return await asyncio.to_thread(build_language_startup_snapshot)
         if value.get("kind") == "loop":
             loop = asyncio.get_running_loop()
             return {"ok": True, "data": {"process_kind": "app_worker", "app_id": "code_te2",

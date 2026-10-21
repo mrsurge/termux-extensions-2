@@ -1,5 +1,47 @@
 # 0.2.355 candidate wheel evidence
 
+## Final clean-tag wheel receipts
+
+Tag `0.2.355` at `499d2014aec6b646e4e09ae038a9502872754a79`.
+User accepts all APKs/wheels and specifically confirms Termux zoom lifecycle.
+Candidate evidence below is retained for comparison, not the upload selection.
+
+| Final target | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Linux x86_64 | 98,413,110 | `5f9c1d3400c3fcb035735d41c6112d234ff3b8fb1f20a144486624625f7749a7` |
+| Android ARM64 | 49,429,574 | `daaefaea94e53ec9e9e074f1a86823a56ffe95525deb075ae5886d4006164624` |
+| Source distribution | 21,240,212 | `4dfd6054f306d48fe89425be61fd36efe292391615ff729076e5ebee79ebcbd3` |
+
+Both final wheel receipts are publicationEligible=true, from separate clean
+tagged source checkouts. All native files equal accepted .355 candidates (163
+Linux, 146 Android); final fresh venv/compiled/WBA/uvloop/FWS/ALS checks pass on
+both targets. Linux private CPython and ALS private-libpython checks pass again.
+No native code recompilation or acceptance-artifact replacement was necessary.
+
+Debian final root: /root/.cache/te2-release-build/final-wheels-0.2.355/;
+Linux output/, final venv/, qualification.log, native-comparison.json, and
+als-private-qualification.log. Android original root on Pixel:
+~/.cache/te2-release-build/final-termux-0.2.355/ (wheel/, venv/, logs/receipts).
+Android wheel copied to Debian and digest rechecked before public staging.
+
+Debian public/ contains nine hashed assets plus manifest/checksums, including
+both installer scripts and no obsolete Termux wheelhouse. Checksum verification
+and real generated-installer Linux/Termux --help routing pass without install.
+APK executable/assets source matches final tag across 1,159 files; accepted APK
+hashes below remain the final selected APK bytes. R8 mappings retained remotely.
+User approved publication on 2026-10-19. Both wheels are published on PyPI with
+the exact hashes above. Existing GitHub draft was transitioned to .355 and is
+now the normal Latest release, with all eleven staged files. Every public asset
+was downloaded/stream-hashed and matched staging; latest/download/install-te2
+redirects to .355 and matches the recorded installer hash. Published .354 wheels
+and tags remain unchanged. No source distribution was uploaded to PyPI; the
+source archive is a GitHub attachment.
+
+Public endpoints: https://pypi.org/project/te2/0.2.355/ and
+https://github.com/mrsurge/termux-extensions-2/releases/tag/0.2.355 .
+
+## Earlier candidate evidence (historical)
+
 2026-10-19; source `6ce09cddf3faeab678d94ba7ca285d1baa3fba8b`.
 These are validation candidates, not tagged/published final artifacts.
 Published .354 artifacts remain unchanged. The earlier APK hold was superseded

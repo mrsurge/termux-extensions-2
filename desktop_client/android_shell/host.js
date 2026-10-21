@@ -29,6 +29,7 @@ const parentBridge = (() => {
     return null;
   }
 })();
+const supportsDevToolsButton = !!parentBridge && !platformBridge && !nativeBridge;
 
 if (!nativeBridge && !parentBridge && typeof platformBridge?.request !== "function") {
   throw new Error("Desktop native bridge is unavailable");
@@ -106,6 +107,7 @@ function normalizeSettings(settings = {}) {
     startLocalFrameworkOnLaunch: settings.startLocalFrameworkOnLaunch === true,
     autostart: settings.autostart === true,
     preferredAppId: String(settings.preferredAppId || "").trim(),
+    ...(supportsDevToolsButton ? { showDevToolsButton: settings.showDevToolsButton === true } : {}),
   };
 }
 
@@ -123,6 +125,7 @@ export async function saveSettings(settings) {
     startLocalFrameworkOnLaunch: settings?.startLocalFrameworkOnLaunch === true,
     autostart: settings?.autostart === true,
     preferredAppId: String(settings?.preferredAppId || "").trim(),
+    ...(supportsDevToolsButton ? { showDevToolsButton: settings?.showDevToolsButton === true } : {}),
   });
   const nextSettings = result?.settings || result;
   cachedSettings = normalizeSettings(nextSettings);
@@ -324,6 +327,7 @@ export function toast(message) {
 }
 
 export const desktopShellHost = {
+  supportsDevToolsButton,
   assetOwnerLabel: platformBridge?.capabilities?.assetUpdates ? "Android" : "Desktop",
   localFrameworkOwnerLabel: platformBridge?.capabilities?.localFramework ? "TE2 Termux" : "Electron",
   getLocalApps,

@@ -51,6 +51,7 @@ interface BootSequenceDeps {
   onNoRestoredPath(serverState: Record<string, unknown>): void;
   setBranchMenuHandle(handle: unknown): void;
   requestBackendBootSnapshot(payload?: Record<string, unknown>): Promise<unknown>;
+  requestBackendLanguageBootstrap?(): Promise<HostBootSnapshot | null>;
   mountInlineEditorHost(snapshot: HostBootSnapshot | null): Promise<unknown>;
   requestProjectDirectory(params: Record<string, unknown>): Promise<unknown>;
 }
@@ -74,6 +75,53 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+export async function requestStartupBootSnapshot(
+  deps: Pick<BootSequenceDeps, 'requestBackendBootSnapshot' | 'spinnerSetStep' | 'setStartupInteraction'>,
+): Promise<HostBootSnapshot> {
+  return requestStartupRead(async () => {
+    const snapshot = await requestHostBootSnapshot({
+      requestBackendBootSnapshot: (payload) => deps.requestBackendBootSnapshot(payload),
+    });
+    if (!snapshot) throw new Error('The backend did not return a valid startup snapshot.');
+    return snapshot;
+  }, deps);
+}
+
+async function requestStartupRead<T>(
+  read: () => Promise<T>,
+  deps: Pick<BootSequenceDeps, 'spinnerSetStep' | 'setStartupInteraction'>,
+): Promise<T> {
+  for (;;) {
+    deps.spinnerSetStep('Waiting for backend startup state\u2026');
+    try {
+      return await read();
+    } catch (error) {
+      // This is a read, not an installation/mode decision. Only explicit user
+      // intent reissues it; never replay project launches or mutations here.
+      deps.spinnerSetStep('Backend startup state unavailable', true);
+      deps.setStartupInteraction?.(true);
+      let retry = false;
+      try {
+        const result = await window.teUI.dialog.open({
+          kind: 'confirm', title: 'Backend Connection Delayed',
+          message: 'Startup state could not be obtained. The connection may be slow or interrupted.',
+          detail: 'Retry requests fresh backend state. No installation or language-mode change has been requested.',
+          severity: 'warning',
+          actions: [
+            { id: 'cancel', label: 'Stop Loading', role: 'cancel' },
+            { id: 'retry', label: 'Retry', role: 'accept', primary: true },
+          ],
+          defaultAction: 'retry', cancelAction: 'cancel', width: 'medium',
+        });
+        retry = result.status === 'accepted' && result.action === 'retry';
+      } finally {
+        deps.setStartupInteraction?.(false);
+      }
+      if (!retry) throw error;
+    }
+  }
+}
+
 export async function prepareCodeServer(
   snapshot: HostBootSnapshot | null,
   uiPrefs: Record<string, unknown>,
@@ -89,9 +137,10 @@ export async function prepareCodeServer(
   // before presenting an install choice so a completed installation and its
   // already-running shells cannot be mistaken for a missing prerequisite.
   try {
-    const refreshedSnapshot = await requestHostBootSnapshot({
-      requestBackendBootSnapshot: (payload) => deps.requestBackendBootSnapshot(payload),
-    });
+    const refreshedLanguage = deps.requestBackendLanguageBootstrap
+      ? await requestStartupRead(() => deps.requestBackendLanguageBootstrap!(), deps)
+      : null;
+    const refreshedSnapshot = refreshedLanguage ?? await requestStartupBootSnapshot(deps);
     const refreshedUiPrefs = getBootSnapshotUiPrefs(refreshedSnapshot);
     if (Object.keys(refreshedUiPrefs).length) {
       Object.assign(uiPrefs, refreshedUiPrefs);
@@ -208,6 +257,15 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   deps.initResponsiveLayout();
   deps.initResizeManager();
 
+  // Begin a small plain HTTP read before any namespace registration. Handle
+  // rejection immediately while Explorer/project intent initialization runs.
+  const earlyLanguage = (deps.requestBackendLanguageBootstrap
+    ? requestStartupRead(() => deps.requestBackendLanguageBootstrap!(), deps)
+    : Promise.resolve(null)).then(
+      (snapshot) => ({ snapshot }),
+      (error: unknown) => ({ error }),
+    );
+
   await deps.initExplorerUI().catch((error) => {
     console.error('Failed to initialize explorer UI:', error);
   });
@@ -228,17 +286,26 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
       error instanceof Error ? error.message : String(error), { title: 'Project opening failed' }));
   }
 
-  let bootSnapshot: HostBootSnapshot | null = null;
-  try {
-    traceColdBoot('host.snapshot.requested', {});
-    bootSnapshot = await requestHostBootSnapshot({
-      requestBackendBootSnapshot: (payload) => deps.requestBackendBootSnapshot(payload),
+  const early = await earlyLanguage;
+  if ('error' in early) throw early.error;
+  let earlyWorkbench: boolean | null = null;
+  if (early.snapshot) {
+    // This contains only one preference; never seed it as a full UI snapshot.
+    earlyWorkbench = await prepareCodeServer(
+      early.snapshot, getBootSnapshotUiPrefs(early.snapshot),
+      { ...deps, seedUiPrefsSnapshot: () => {} },
+    );
+    if (earlyWorkbench) void deps.ensureWorkbenchAdapterReady().catch((error) => {
+      console.warn('Workbench adapter readiness failed:', error);
     });
-    traceColdBoot('host.snapshot.received', { available: bootSnapshot !== null });
-  } catch (error) {
-    traceColdBoot('host.snapshot.failed', {});
-    console.warn('Boot snapshot request failed:', error);
+    traceColdBoot('host.language_backend.early', { wba: earlyWorkbench });
   }
+
+  traceColdBoot('host.snapshot.requested', {});
+  // Do not continue with unknown preferences and silently issue another full
+  // request as a Code Server prerequisite refresh after a transport failure.
+  const bootSnapshot = await requestStartupBootSnapshot(deps);
+  traceColdBoot('host.snapshot.received', { available: true });
 
   const snapshotUiPrefs = getBootSnapshotUiPrefs(bootSnapshot);
   if (Object.keys(snapshotUiPrefs).length) {
@@ -267,9 +334,14 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
 
   deps.setBranchMenuHandle(deps.initBranchMenu());
 
-  const useWorkbenchAdapter = await prepareCodeServer(bootSnapshot, snapshotUiPrefs, deps);
+  // A later authoritative preference change must win over the early read.
+  const earlyModeMatches = typeof snapshotUiPrefs.webWorkersEnabled === 'boolean' &&
+    earlyWorkbench === (snapshotUiPrefs.webWorkersEnabled !== true) &&
+    (earlyWorkbench !== true || getBootSnapshotCodeServer(bootSnapshot)?.compatible === true);
+  const useWorkbenchAdapter = earlyWorkbench !== null && earlyModeMatches
+    ? earlyWorkbench : await prepareCodeServer(bootSnapshot, snapshotUiPrefs, deps);
   traceColdBoot('host.language_backend.prepared', { wba: useWorkbenchAdapter });
-  if (useWorkbenchAdapter) {
+  if (useWorkbenchAdapter && earlyWorkbench !== true) {
     // Document display is independent of extension-host readiness. Existing WBA
     // state/baton handlers replay the active model when intelligence connects.
     // Keep the status/error observer, but never gate mounting Monaco on it.

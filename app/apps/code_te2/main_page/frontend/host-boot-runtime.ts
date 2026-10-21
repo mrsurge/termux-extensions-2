@@ -1,5 +1,6 @@
 import { bootInlineEditorHost } from '../../monaco_editor/inline_host.ts';
 import { runBootSequence } from './boot/boot-sequence.ts';
+import { createLanguageBootstrapRequest } from './boot/language-bootstrap.ts';
 import {
   applyNoProjectState,
   applyNoRestoredPathState,
@@ -118,8 +119,10 @@ function runPostBootSidebarHydration(deps: HostBootRuntimeDeps): void {
 }
 
 export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
+  const requestBackendLanguageBootstrap = createLanguageBootstrapRequest(window.fetch.bind(window));
   async function start(): Promise<void> {
     await runBootSequence({
+      requestBackendLanguageBootstrap,
       initResponsiveLayout: () => deps.initResponsiveLayout(),
       initResizeManager: () => deps.initResizeManager(),
       initExplorerUI: () => deps.initExplorerUI({

@@ -133,6 +133,14 @@ def _web_workers_enabled() -> bool:
     return ui.get("webWorkersEnabled") is True
 
 
+def build_language_startup_snapshot() -> JsonMap:
+    """Small read-only HTTP projection; no project hydration or runtime start."""
+    return {
+        "ui_prefs": {"webWorkersEnabled": _web_workers_enabled()},
+        "code_server": inspect_code_server_prerequisite().payload(),
+    }
+
+
 def _build_host_state_payload() -> JsonMap:
     history = get_history_store()
     prefs_store = get_preferences_store()

@@ -21,6 +21,7 @@ import { DesktopAssetManager, MIME_TYPES } from "./assets";
 import { installCloseOnFocusHandoff } from "./focus-handoff-close-policy";
 import { installChromiumScrollbars } from "./chromium-scrollbars";
 import { DesktopDialogHost } from "./dialog-host";
+import { toggleDetachedDevTools } from "./devtools";
 import {
   FRAMEWORK_REQUEST_TIMEOUT_MS,
   frameworkConnectionError,
@@ -929,6 +930,9 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
 }> {
   const candidate: DesktopShellSettings = {
     ...settings,
+    showDevToolsButton: params.showDevToolsButton === undefined
+      ? settings.showDevToolsButton
+      : params.showDevToolsButton === true,
     frameworkHost: String(params.frameworkHost || "").trim(),
     frameworkPort: Number(params.frameworkPort),
     startLocalFrameworkOnLaunch: params.startLocalFrameworkOnLaunch === undefined
@@ -1021,6 +1025,9 @@ async function saveLocalFrameworkConfiguration(
 async function viewAction(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const action = String(params.action || "");
   if (action === "home") closeAppView();
+  else if (action === "devtools") {
+    toggleDetachedDevTools(settings.showDevToolsButton, appView?.webContents ?? mainWindow?.webContents);
+  }
   else if (action === "back" && appView?.webContents.navigationHistory.canGoBack()) {
     appView.webContents.navigationHistory.goBack();
   } else if (action === "forward" && appView?.webContents.navigationHistory.canGoForward()) {

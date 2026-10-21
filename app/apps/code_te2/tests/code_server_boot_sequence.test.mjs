@@ -79,7 +79,10 @@ test('managed Code Server is rechecked before a stale missing snapshot can promp
 test('unknown Code Server status never prompts, installs, or switches language mode', async () => {
   const { prepareCodeServer } = await importBootSequence();
   let dialogs = 0, mutations = 0;
-  globalThis.window = { teUI: { dialog: { open: async () => { dialogs++; } } } };
+  globalThis.window = { teUI: { dialog: { open: async (options) => {
+    if (options.title === 'Choose Language Backend') dialogs++;
+    return { status: 'cancelled', action: 'cancel' };
+  } } } };
   const stale = { ui_prefs: { webWorkersEnabled: false }, code_server: {
     state: 'missing', compatible: false, install_version: '4.130.0', reason: 'Old missing snapshot',
   } };
@@ -109,6 +112,64 @@ test('unknown Code Server status never prompts, installs, or switches language m
   assert.equal(mutations, 0);
 });
 
+test('slow startup snapshot stays pending and consumes the unchanged older-server reply', async () => {
+  const { requestStartupBootSnapshot } = await importBootSequence();
+  let resolve;
+  let requests = 0, dialogs = 0;
+  globalThis.window = { teUI: { dialog: { open: async () => { dialogs++; } } } };
+  const delayed = new Promise((r) => { resolve = r; });
+  const steps = [];
+  const pending = requestStartupBootSnapshot({
+    requestBackendBootSnapshot: () => { requests++; return delayed; },
+    spinnerSetStep: (step) => steps.push(step),
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(requests, 1);
+  assert.equal(dialogs, 0);
+  assert.match(steps[0], /Waiting for backend/);
+  const snapshot = { ui_prefs: { webWorkersEnabled: false }, code_server: { compatible: true } };
+  resolve({ ok: true, snapshot });
+  assert.deepEqual(await pending, snapshot);
+});
+
+test('disconnect/timeout retry is explicit and reads only startup state', async () => {
+  const { requestStartupBootSnapshot } = await importBootSequence();
+  for (const message of ['RPC socket disconnected', 'RPC request timeout: ui.host.bootSnapshot.get']) {
+    let requests = 0, dialogs = 0;
+    const interactions = [];
+    globalThis.window = { teUI: { dialog: { open: async (options) => {
+      dialogs++;
+      assert.equal(requests, 1);
+      assert.equal(options.title, 'Backend Connection Delayed');
+      return { status: 'accepted', action: 'retry' };
+    } } } };
+    const snapshot = { code_server: { compatible: true } };
+    assert.deepEqual(await requestStartupBootSnapshot({
+      requestBackendBootSnapshot: async () => {
+        requests++;
+        if (requests === 1) throw new Error(message);
+        return { ok: true, snapshot };
+      },
+      spinnerSetStep: () => {},
+      setStartupInteraction: (value) => interactions.push(value),
+    }), snapshot);
+    assert.equal(requests, 2);
+    assert.equal(dialogs, 1);
+    assert.deepEqual(interactions, [true, false]);
+  }
+});
+
+test('cancelled startup recovery does not automatically retry', async () => {
+  const { requestStartupBootSnapshot } = await importBootSequence();
+  let requests = 0;
+  globalThis.window = { teUI: { dialog: { open: async () => ({ status: 'cancelled', action: 'cancel' }) } } };
+  await assert.rejects(requestStartupBootSnapshot({
+    requestBackendBootSnapshot: async () => { requests++; throw new Error('disconnected'); },
+    spinnerSetStep: () => {},
+  }), /disconnected/);
+  assert.equal(requests, 1);
+});
+
 test('host mounts and restores a document while WBA readiness is pending', async () => {
   const win = new Window();
   globalThis.window = win;
@@ -126,7 +187,7 @@ test('host mounts and restores a document while WBA readiness is pending', async
     initResponsiveLayout: noop, loadLayoutPreferences: noop, initResizeManager: noop,
     initExplorerUI: async () => {}, requestBackendBootSnapshot: async () => ({ ok: true, snapshot }),
     seedUiPrefsSnapshot: noop, seedPersistedSessionState: noop, hydrateEditorState: noop,
-    setBranchMenuHandle: noop, initBranchMenu: noop,
+    setBranchMenuHandle: noop, initBranchMenu: noop, spinnerSetStep: noop,
     ensureWorkbenchAdapterReady: () => { calls.push('wait'); return readiness; },
     connectUIIPC: async () => { calls.push('ipc'); },
     mountInlineEditorHost: async () => { calls.push('mount'); }, connectSidebarIPC: noop,
@@ -163,7 +224,7 @@ test('startup settles missing UI preferences before mount, handles empty project
     initResponsiveLayout: noop, initResizeManager: noop, initExplorerUI: async () => {},
     requestBackendBootSnapshot: async () => ({ ok: true, snapshot }),
     seedUiPrefsSnapshot: () => { calls.push('prefs'); }, seedPersistedSessionState: noop,
-    hydrateEditorState: noop, setBranchMenuHandle: noop, initBranchMenu: noop,
+    hydrateEditorState: noop, setBranchMenuHandle: noop, initBranchMenu: noop, spinnerSetStep: noop,
     ensureWorkbenchAdapterReady: async () => {}, connectUIIPC: async () => {},
     waitForInitialUiPrefs: async () => { calls.push('prefs'); return {}; },
     mountInlineEditorHost: async () => { calls.push('mount'); }, connectSidebarIPC: noop,
@@ -202,6 +263,37 @@ test('startup installation dialog explicitly yields and restores overlay interac
   assert.equal(result, false);
   assert.deepEqual(calls, [true, false]);
   win.happyDOM.abort();
+});
+
+test('HTTP language prefetch precedes Explorer and prepares intelligence before full RPC state', async () => {
+  const win = new Window();
+  globalThis.window = win;
+  globalThis.CustomEvent = win.CustomEvent;
+  const { runBootSequence } = await importBootSequence();
+  const noop = () => {};
+  const calls = [];
+  const snapshot = { ui_prefs: { webWorkersEnabled: false, unrelated: 'preserved' }, code_server: { compatible: true }, session_state: {}, host_state: { activeProject: null } };
+  const deps = {
+    initResponsiveLayout: noop, initResizeManager: noop, spinnerSetStep: noop,
+    requestBackendLanguageBootstrap: async () => { calls.push('http'); return { ui_prefs: { webWorkersEnabled: false }, code_server: { compatible: true } }; },
+    initExplorerUI: async () => { calls.push('explorer'); },
+    requestBackendBootSnapshot: async () => { calls.push('full'); return { ok: true, snapshot }; },
+    seedUiPrefsSnapshot: (prefs) => { assert.equal(prefs.unrelated, 'preserved'); },
+    seedPersistedSessionState: noop, hydrateEditorState: noop, setBranchMenuHandle: noop, initBranchMenu: noop,
+    ensureWorkbenchAdapterReady: async () => { calls.push('intelligence'); }, connectUIIPC: async () => {},
+    mountInlineEditorHost: async () => { calls.push('mount'); }, connectSidebarIPC: noop,
+    broadcastRecentsUpdate: noop, refreshMenuState: async () => {}, initSessionStateContext: noop,
+    queueSessionStateUpdate: noop, resetSavedState: noop, markUnsaved: noop, setNoProjectState: noop,
+    getUrlSearch: () => '',
+  };
+  try {
+    await runBootSequence(deps);
+    assert.deepEqual(calls, ['http', 'explorer', 'intelligence', 'full', 'mount']);
+    calls.length = 0;
+    deps.requestBackendLanguageBootstrap = async () => { calls.push('http-404'); return null; };
+    await runBootSequence(deps);
+    assert.deepEqual(calls, ['http-404', 'explorer', 'full', 'intelligence', 'mount']);
+  } finally { win.happyDOM.abort(); }
 });
 
 async function importMonacoBoot() {

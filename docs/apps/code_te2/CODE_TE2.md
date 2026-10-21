@@ -6219,8 +6219,31 @@ backend missing/incompatible result with install metadata may open a choice;
 null/malformed/failed replies or a dropped connection cannot. A failed refresh
 does not reuse a stale negative snapshot, invent a missing reason/version, submit
 an install or switch to web workers. It fails startup with status unavailable and
-leaves mode unchanged; reconnect/reload can request fresh state. Known ready
-snapshots retain their fast path. No runtime transition is performed by helpers.
+leaves mode unchanged. Updated .356 host startup waits with a 60-second full
+snapshot RPC budget, then offers explicit Retry/Stop Loading on read failure.
+Retry reissues only the read through the existing method and MessagePack DTO;
+older servers need no new endpoint/capability. Initial snapshot failure no longer
+falls through to a second automatic prerequisite request with unknown preferences.
+Disconnect still rejects outstanding requests; no automatic replay, transport
+switch, installation or mode change follows. The small hostState-only projection
+retains its eight-second budget. Known ready snapshots retain their fast path.
+No runtime transition is performed by helpers.
+
+The additive .356 `GET /api/app/code_te2/startup/language` route returns only
+`{ui_prefs:{webWorkersEnabled:boolean},code_server:<existing prerequisite DTO>}`
+with `Cache-Control: no-store`. Rust uses its existing HTTP/PyO3 domain bridge;
+Python reuses preference and managed-disk inspection owners without full project
+hydration or Code Server start. Errors return 503, never unsupported/missing.
+The host prefetches before Explorer registration and can prepare intelligence
+before full snapshot delivery; document restoration still requires full state.
+It never treats this one-field preferences object as complete UI preferences.
+HTTP 404 alone selects the retained RPC path for an older server; that capability
+miss lives only in the current page. Transport failures, deadlines, malformed
+successes and other HTTP errors use explicit read retry without transport switch.
+The small response has a 32-KiB decoded bound and 60-second abort deadline.
+Older clients continue using the unchanged RPC. New route activation requires
+matching native worker/Python domain; frontend-only publication on an older
+worker intentionally exercises compatibility fallback.
 
 ### Early Intelligence Preparation And Backend Assembly
 

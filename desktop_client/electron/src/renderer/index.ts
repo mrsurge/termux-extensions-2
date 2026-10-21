@@ -22,6 +22,7 @@ declare global {
 }
 
 const bridge = window.te2Desktop;
+const devToolsButton = document.querySelector("#devtools") as HTMLButtonElement;
 const launcherView = document.querySelector("#launcher-view") as HTMLIFrameElement;
 const pageTitle = document.querySelector("#page-title") as HTMLElement;
 const assetVersion = document.querySelector("#asset-version") as HTMLButtonElement;
@@ -42,6 +43,7 @@ type FrameworkStatus = {
 };
 
 let settings = await bridge.request("get_settings") as DesktopShellSettings;
+devToolsButton.hidden = settings.showDevToolsButton !== true;
 let browserFrameworkOrigin = (
   await bridge.request("get_browser_framework_origin") as { origin: string }
 ).origin;
@@ -233,6 +235,7 @@ window.__te2DesktopNativeRequest = async (method, params = {}) => {
       browserFrameworkOrigin: string;
     };
     settings = saved.settings;
+    devToolsButton.hidden = settings.showDevToolsButton !== true;
     browserFrameworkOrigin = saved.browserFrameworkOrigin;
   }
   return result;
@@ -277,6 +280,7 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 document.querySelector("#home")?.addEventListener("click", showHome);
+devToolsButton.addEventListener("click", () => runUiTask(bridge.request("view_action", { action: "devtools" })));
 assetVersion.addEventListener("click", async () => {
   if (assetVersion.disabled) return;
   assetVersion.disabled = true;

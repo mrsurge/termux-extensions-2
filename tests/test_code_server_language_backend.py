@@ -26,6 +26,29 @@ def _installation() -> CodeServerInstallation:
 
 
 class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
+    async def test_language_startup_is_small_and_does_not_build_project_or_start_runtime(self) -> None:
+        with (
+            patch.object(boot_snapshot_backend, "_web_workers_enabled", return_value=False),
+            patch.object(boot_snapshot_backend, "inspect_code_server_prerequisite") as status,
+            patch.object(boot_snapshot_backend, "_build_boot_snapshot_core", side_effect=AssertionError("full snapshot")),
+            patch.object(boot_snapshot_backend, "_ensure_backend_runtime_task", side_effect=AssertionError("runtime mutation")),
+        ):
+            status.return_value.payload.return_value = {"state": "ready", "compatible": True}
+            result = boot_snapshot_backend.build_language_startup_snapshot()
+        self.assertEqual(result, {
+            "ui_prefs": {"webWorkersEnabled": False},
+            "code_server": {"state": "ready", "compatible": True},
+        })
+        status.assert_called_once_with()
+
+    async def test_language_startup_preserves_unavailable_errors(self) -> None:
+        with (
+            patch.object(boot_snapshot_backend, "_web_workers_enabled", return_value=True),
+            patch.object(boot_snapshot_backend, "inspect_code_server_prerequisite", side_effect=PermissionError("unavailable")),
+        ):
+            with self.assertRaises(PermissionError):
+                boot_snapshot_backend.build_language_startup_snapshot()
+
     async def test_host_state_snapshot_scope_avoids_full_boot_payload(self) -> None:
         host_state = {"activeProject": "/workspace"}
         with (

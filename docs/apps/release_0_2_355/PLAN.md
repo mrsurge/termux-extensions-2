@@ -115,3 +115,10 @@ not an immediate way to create build space.
 
 TRACKER.md owns current gates and artifact receipts. The .354 BUILD_STATUS.md
 retains accepted predecessor hashes and build nuances; do not overwrite them.
+
+Completion 2026-10-19: user-approved wheels/APKs are published as .355; PyPI
+hashes and all eleven public GitHub downloads verified, normal Latest enabled.
+After a separate bounded cleanup approval, 22 obsolete Debian test installs were
+removed (actual 16.6 GiB recovered). Protected paths and all build/native caches
+remain. Earlier holds/approval statements above describe the execution sequence;
+they are superseded by the completed gates and exact inventory in TRACKER.md.

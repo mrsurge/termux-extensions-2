@@ -31,6 +31,10 @@ const saveLocalFrameworkConfigButton = document.querySelector("#save-local-frame
 const addLocalFrameworkBroadcastButton = document.querySelector("#add-local-framework-broadcast");
 const addLocalFrameworkEnvironmentButton = document.querySelector("#add-local-framework-env");
 const autostartLocalFrameworkInput = document.querySelector("#autostart-local-framework");
+const showDevToolsButtonInput = document.querySelector("#show-devtools-button");
+if (desktopShellHost.supportsDevToolsButton) {
+  document.querySelector("#desktop-devtools-settings").hidden = false;
+}
 const autostartPreferredAppInput = document.querySelector("#autostart-preferred-app");
 const preferredAppSelect = document.querySelector("#preferred-app");
 const preferredAppStatus = document.querySelector("#preferred-app-status");
@@ -69,6 +73,7 @@ async function connectToFramework(frameworkHost, frameworkPort, successMessage =
     startLocalFrameworkOnLaunch: autostartLocalFrameworkInput.checked,
     autostart: autostartPreferredAppInput.checked,
     preferredAppId: preferredAppSelect.value,
+    ...(desktopShellHost.supportsDevToolsButton ? { showDevToolsButton: showDevToolsButtonInput.checked } : {}),
   });
   persistedSettings = settings;
 
@@ -97,6 +102,7 @@ function queueStartupSettingsSave() {
     startLocalFrameworkOnLaunch: autostartLocalFrameworkInput.checked,
     autostart: autostartPreferredAppInput.checked,
     preferredAppId: preferredAppSelect.value,
+    ...(desktopShellHost.supportsDevToolsButton ? { showDevToolsButton: showDevToolsButtonInput.checked } : {}),
   };
   setStatus(settingsStatus, "loading", "Saving startup settings");
   startupSettingsSaveQueue = startupSettingsSaveQueue
@@ -200,6 +206,7 @@ async function loadSettings() {
   hostInput.value = settings.frameworkHost || "127.0.0.1";
   portInput.value = String(settings.frameworkPort || 8089);
   autostartLocalFrameworkInput.checked = settings.startLocalFrameworkOnLaunch === true;
+  showDevToolsButtonInput.checked = settings.showDevToolsButton === true;
   autostartPreferredAppInput.checked = settings.autostart === true;
   preferredAppSelect.disabled = !autostartPreferredAppInput.checked;
   preferredAppSelect.dataset.selected = String(settings.preferredAppId || "");
@@ -531,6 +538,9 @@ autostartLocalFrameworkInput?.addEventListener(
   "change",
   () => void queueStartupSettingsSave(),
 );
+showDevToolsButtonInput?.addEventListener('change', () => {
+  if (desktopShellHost.supportsDevToolsButton) void queueStartupSettingsSave();
+});
 
 autostartPreferredAppInput?.addEventListener("change", () => {
   updatePreferredAppEnabled();

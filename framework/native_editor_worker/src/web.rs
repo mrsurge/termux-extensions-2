@@ -493,6 +493,23 @@ fn grammar_query(query: &str) -> Result<Value> {
 #[cfg(test)]
 mod grammar_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn language_startup_http_is_uncached_and_failure_is_not_unsupported() {
+        let reply = language_startup_response(Ok(map([(
+            "ui_prefs",
+            map([("webWorkersEnabled", true.into())]),
+        )])));
+        assert_eq!(reply.status(), StatusCode::OK);
+        assert_eq!(reply.headers()["cache-control"], "no-store");
+        assert_eq!(reply.headers()["content-type"], "application/json");
+        let body = reply.into_body().collect().await.unwrap().to_bytes();
+        let decoded: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(decoded["ui_prefs"]["webWorkersEnabled"], true);
+        let failed = language_startup_response(Err(anyhow::anyhow!("domain unavailable")));
+        assert_eq!(failed.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(failed.headers()["cache-control"], "no-store");
+    }
     #[test]
     fn installed_icon_route_is_bounded_and_image_only() {
         assert!(extension_icon_query("id=vendor.ext&version=1.2").is_ok());
@@ -545,6 +562,24 @@ mod grammar_tests {
     }
 }
 
+fn language_startup_response(result: Result<Value>) -> Response<Body> {
+    let mut reply = match result {
+        Ok(value) => response(
+            StatusCode::OK,
+            serde_json::to_vec(&value).unwrap(),
+            "application/json",
+        ),
+        Err(_) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Language startup state unavailable",
+        ),
+    };
+    reply
+        .headers_mut()
+        .insert("cache-control", "no-store".parse().unwrap());
+    reply
+}
+
 async fn http(
     request: Request<Incoming>,
     root: PathBuf,
@@ -572,6 +607,13 @@ async fn http(
         );
     }
     let app = root.join("app/apps/code_te2");
+    if path == "/startup/language" {
+        return language_startup_response(
+            backend
+                .call(map([("kind", "language_startup".into())]), false)
+                .await,
+        );
+    }
     if path == "/extensions/icon" {
         let query = match extension_icon_query(request.uri().query().unwrap_or("")) {
             Ok(query) => query,

@@ -17,6 +17,7 @@ export type DesktopShellSettings = {
   frameworkPort: number;
   frameworkBookmarks: DesktopFrameworkBookmark[];
   zoomLevel: number;
+  showDevToolsButton: boolean;
   startLocalFrameworkOnLaunch: boolean;
   autostart: boolean;
   preferredAppId: string;

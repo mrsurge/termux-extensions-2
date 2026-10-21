@@ -512,7 +512,9 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
 
   async function requestBackendBootSnapshot(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
-    return await connection.request(UI_IPC_RPC_METHODS.hostBootSnapshotGet, payload || {}, 8000);
+    // Startup snapshots include project/editor/run-profile state, not only a
+    // small installation check. Preserve the wire contract for older servers.
+    return await connection.request(UI_IPC_RPC_METHODS.hostBootSnapshotGet, payload || {}, payload.scope === 'hostState' ? 8000 : 60000);
   }
 
   async function requestBackendLanguageBackendSet(payload: JsonObject = {}): Promise<unknown> {

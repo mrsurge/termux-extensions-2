@@ -62,12 +62,47 @@ acceptance and user notes remain in ../release_0_2_354/TRACKER.md unchanged.
 - [x] All three staging APKs built/audited with latest native lifecycle/context
   correction and .355 seed. Desktop copies proceed below; no installs/publication.
 - [x] User APK acceptance group: explicit “All accepted” response.
-- [ ] Final clean-source/tag provenance and exact final artifacts revalidated.
-- [ ] Release approval, PyPI publication and digest verification.
-- [ ] Existing draft transitioned to .355 with final APK/template/installers and
+- [x] Final clean-source/tag provenance and exact final artifacts revalidated:
+  tag .355 at 499d2014, both publication-eligible wheels, all native ELF hashes
+  unchanged from accepted .355 candidates, fresh installed checks repeated.
+  1,159 APK executable/asset source files match tag. BUILD_STATUS.md owns hashes.
+- [x] Release approval, PyPI publication and digest verification: user approves
+  publication; both final wheels visible on PyPI with exact accepted hashes.
+- [x] Existing draft transitioned to .355 with final APK/template/installers and
   checksum inventory; GitHub publication only after explicit release approval.
-- [ ] Post-publication Debian cleanup inventory/dry run, protected/live exclusions
+  Now public, normal Latest release; all eleven public downloads were streamed
+  and SHA-256 checked against staging. Latest installer redirects to .355 and
+  its downloaded bytes match. Prior .354 wheels/tags remain unchanged.
+- [x] Post-publication Debian cleanup inventory/dry run, protected/live exclusions
   verified, obsolete copies removed and recovered space recorded.
+  User approves the bounded 22-directory deletion after the dry run. Rechecked
+  exact paths, symlinks, .codex*/.git trees, process cmdline/environment/maps/
+  cwd/exe/open FDs and running Docker mounts before deletion. No live references
+  or protected descendants found. Actual free space increases 17,793,998,848
+  bytes (16.6 GiB), to 117,056,737,280 bytes (109.0 GiB). All .355 final artifacts,
+  build/Cargo/SDK caches, protected home joint-stable install and geckotron stay.
+
+### Completed cleanup inventory — 2026-10-19
+
+Only these 22 approved obsolete acceptance/test installations were removed:
+
+- `/home/mrsurge/.cache/te2-release-acceptance/` children:
+  `154c9e2ca2fc745a`, `0.2.350-fa4d09c2`, `e4db20c3c2f1677d`,
+  `0.2.352-production`, `0.2.347-public`, `039879946ffac22f`,
+  `public-0.2.338-5969579fa2034d5d`, `0.2.350-public`, `695a6911fa90099f`,
+  `private-code-te2-0.2.352`, `1393f1868422bdd5`, `84e6db88357e776f`,
+  `06bf65412f09bfde`, `0.2.349-public`.
+- `/root/.cache/te2-release-acceptance/` children:
+  `joint-stable-0.2.354-als-0.2.139`, `0.2.354-1c8f0505-linux`,
+  `joint-0.2.354-als-private`. These are NOT the protected home install.
+- `/home/mrsurge/.cache/` children: `te2-public-0.2.344`,
+  `te2-public-0.2.345`, `te2-public-0.2.351-acceptance`.
+- `/home/mrsurge/.cache/te2-release-0.2.342/` children:
+  `public-curl-acceptance`, `linux-acceptance`.
+
+Summed per-directory allocated size was 19,305,426,944 bytes (~18 GiB); actual
+filesystem free-space delta is smaller, so do not report the sum as recovered
+space. No broad cache/container pruning or further build-tree cleanup performed.
 
 ## Baseline / constraints
 
@@ -169,3 +204,19 @@ mode records exact tested ALS/FWS versions, requires matching clean source/tag
 for eligibility, and omits the unused modern archive while preserving old mode.
 Regression group passes 50 tests plus four subtests, including legacy/current
 bootstrap routing and public checksums. No install/runtime code changed.
+
+Finalization completed: commit 499d2014aec6b646e4e09ae038a9502872754a79 and
+annotated tag 0.2.355 pushed. Final wheel sizes: Linux 98,413,110 bytes; Android
+49,429,574 bytes. Both clean-tag receipts publicationEligible=true. All 163 Linux
+and 146 Android ELF files equal accepted .355 candidates; both fresh joint venv
+checks and ALS native discovery/EOF pass again. No native recompilation needed.
+
+Public upload staging is local to Debian only:
+/root/.cache/te2-release-build/final-wheels-0.2.355/public/. Nine hashed assets
+(two installers, two wheels, sdist, three APKs, template ZIP), release-manifest.json
+and SHA256SUMS. All checksum lines/manifest records verify. Actual generated
+bootstrap --help smoke passes Linux and emulated Termux routing with file://
+release metadata, validating scripts/checksums without installing or apt/PyPI
+mutations. Legacy/current routing regression group passed 50 tests/four subtests.
+Public uploads/draft changes/publication remain pending permission; .354 draft
+and published .354 wheels remain untouched. Cleanup has not started.

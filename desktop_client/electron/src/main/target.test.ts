@@ -28,6 +28,7 @@ function settings(
     frameworkPort: 8089,
     frameworkBookmarks: [],
     zoomLevel: 1,
+    showDevToolsButton: false,
     startLocalFrameworkOnLaunch: false,
     autostart: false,
     preferredAppId: "",
@@ -227,7 +228,19 @@ test("desktop settings recover valid bookmarks from malformed stored data", asyn
     ]);
     assert.equal(loaded.startLocalFrameworkOnLaunch, false);
     assert.equal(loaded.autostart, false);
+    assert.equal(loaded.showDevToolsButton, false);
     assert.equal(loaded.preferredAppId, "");
+  });
+});
+
+test('desktop DevTools visibility persists without changing schema or connection', async () => {
+  await withScratch(async (environment) => {
+    assert.equal((await readDesktopSettings(environment)).showDevToolsButton, false);
+    const enabled = await writeDesktopSettings(settings({ showDevToolsButton: true }), environment);
+    assert.equal(enabled.showDevToolsButton, true);
+    assert.equal((await readDesktopSettings(environment)).showDevToolsButton, true);
+    await writeDesktopSettings({ ...enabled, showDevToolsButton: false }, environment);
+    assert.equal((await readDesktopSettings(environment)).showDevToolsButton, false);
   });
 });
 
