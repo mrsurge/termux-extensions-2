@@ -5,6 +5,7 @@ import asyncio
 import time
 from ..theme_catalog import get_theme_catalog, resolve_selected_theme
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 from .editor_host_actions_backend import handle_editor_host_action
 from ..diagnostics_latency_metrics import (
     finish_open_trace,
@@ -62,11 +63,22 @@ IsUnderProjectFn = Callable[[str, str], bool]
 RuntimeMetaFn = Callable[[], RuntimeMeta]
 ReadFilePayloadFn = Callable[[str, str], EditorOpenPayload]
 EmitToRoomFn = Callable[[str, dict[str, object]], Awaitable[None]]
-RecordSidecarOpenFileFn = Callable[
-    ...,
-    tuple[SidecarOpenStatePayload, ClientForegroundPayload],
-]
-EmitOpenStateChangedFn = Callable[..., Awaitable[None]]
+class RecordSidecarOpenFileFn(Protocol):
+    def __call__(
+        self, project: str, abs_path: str, *, client_instance_id: str,
+        reason: str = "file_open",
+    ) -> tuple[SidecarOpenStatePayload, ClientForegroundPayload]: ...
+
+
+class EmitOpenStateChangedFn(Protocol):
+    def __call__(
+        self, open_state: SidecarOpenStatePayload, *,
+        client_foreground: ClientForegroundPayload | None = None,
+        source: str | None = None, request_id: str | None = None,
+        project_generation: int | None = None,
+    ) -> Awaitable[None]: ...
+
+
 NotifyDraftStateChangedFn = Callable[[str], None]
 RecordSaveShaFn = Callable[[str, str], None]
 HandleEditorPayloadFn = Callable[[str, dict[str, object]], Awaitable[None]]

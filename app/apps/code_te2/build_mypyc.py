@@ -18,6 +18,15 @@ from app.te2_paths import resolve_te2_paths
 from framework.bootstrap.compiler_cache_preflight import ccache_health
 
 
+class BuildArguments(argparse.Namespace):
+    jobs: int
+    cache_dir: Path
+    no_activate: bool
+    no_cache: bool
+    print_commands: bool
+    status: bool
+
+
 def build_commands(
     *, repo: Path, python: str, cache_home: Path, compiler_cache: Path,
     name: str, activate: bool,
@@ -41,7 +50,7 @@ def main() -> None:
         help="Explicitly allow an uncached build (also NO_CACHE=1); retain build intermediates")
     parser.add_argument("--print-commands", action="store_true", help="Print resolved paths/commands without building or changing state")
     parser.add_argument('--status', action='store_true', help='Report current/stale/missing/incompatible selected domain without building')
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=BuildArguments())
     if args.jobs < 1:
         parser.error("--jobs must be at least 1")
     if not (REPO / "scripts" / "probe_code_te2_mypyc.py").is_file():

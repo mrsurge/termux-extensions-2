@@ -152,10 +152,7 @@ async def handle_ext_marketplace_install(
     )
 
     get_extension_list = extension_registry.get_extension_list
-    install_extension = cast(
-        Callable[..., JsonObject],
-        extension_registry.install_extension,
-    )
+    install_extension = extension_registry.install_extension
 
     installed_extensions = await asyncio.to_thread(get_extension_list)
     detail_result = await get_openvsx_detail(

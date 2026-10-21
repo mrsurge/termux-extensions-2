@@ -33,16 +33,27 @@ class _CompiledFinder:
 def install(source_root: str, output_root: str) -> int:
     root = Path(source_root).resolve()
     output = Path(output_root).resolve()
-    manifest = json.loads((output / "manifest.json").read_text())
+    raw_manifest: object = json.loads((output / "manifest.json").read_text())
+    manifest = _manifest_object(raw_manifest, "manifest")
     if manifest.get("schemaVersion") == 2:
         from app.release_runtime.code_te2 import compiled_module_names
         names = compiled_module_names(manifest)
     else:
-        sources = set(manifest["compiled_sources"])
-        names = {
-            name for name, source in manifest["modules"].items()
-            if Path(source).resolve().relative_to(root).as_posix() in sources
-        }
+        raw_sources = manifest["compiled_sources"]
+        if not isinstance(raw_sources, list):
+            raise ValueError("compiled_sources must be a list")
+        source_items: list[object] = raw_sources
+        sources: set[str] = set()
+        for source in source_items:
+            if not isinstance(source, str):
+                raise ValueError("compiled_sources must contain strings")
+            sources.add(source)
+        names = set()
+        for name, source in _manifest_object(manifest["modules"], "modules").items():
+            if not isinstance(source, str):
+                raise ValueError("module paths must be strings")
+            if Path(source).resolve().relative_to(root).as_posix() in sources:
+                names.add(name)
         if not names or len(names) != len(sources):
             raise RuntimeError("mypyc module manifest does not match this checkout")
     library = output / "lib"
@@ -53,3 +64,15 @@ def install(source_root: str, output_root: str) -> int:
     sys.path.append(str(library))
     sys.meta_path.insert(0, _CompiledFinder(library, names))
     return len(names)
+
+
+def _manifest_object(value: object, field: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} must be an object")
+    entries: dict[object, object] = value
+    result: dict[str, object] = {}
+    for key, item in entries.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{field} keys must be strings")
+        result[key] = item
+    return result

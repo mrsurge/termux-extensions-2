@@ -57,7 +57,7 @@ def _marker_list(value: object) -> list[Marker]:
 def _int_value(value: object, default: int = 0) -> int:
     if isinstance(value, bool):
         return int(value)
-    if isinstance(value, int | float | str):
+    if isinstance(value, (int, float, str)):
         try:
             return int(value)
         except ValueError:
@@ -220,8 +220,11 @@ def _process_diagnostics_update(
         result.append(entry)
 
     # Evict oldest if cache too large
+    def timestamp(key: DiagCacheKey) -> int:
+        return _int_value(_diag_cache[key].get("ts_ms"))
+
     while len(_diag_cache) > DIAG_CACHE_MAX:
-        oldest_key = min(_diag_cache, key=lambda k: _int_value(_diag_cache[k].get("ts_ms")))
+        oldest_key = min(_diag_cache, key=timestamp)
         del _diag_cache[oldest_key]
 
     return result, ignored

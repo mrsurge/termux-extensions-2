@@ -237,7 +237,8 @@ def _exec_text(profile: RunProfile) -> str:
 
 
 def _command_payload_b64(*, argv: list[str], env: dict[str, str]) -> str:
-    raw = json.dumps({"argv": argv, "env": env}, separators=(",", ":"))
+    payload: dict[str, object] = {"argv": argv, "env": env}
+    raw = json.dumps(payload, separators=(",", ":"))
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 

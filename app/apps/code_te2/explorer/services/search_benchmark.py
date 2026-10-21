@@ -146,7 +146,7 @@ async def run_search_benchmark(
 async def record_search_benchmark_frontend_result(payload: object) -> JsonObject:
     params = parse_search_benchmark_frontend_result_params(payload)
     output_path = Path(str(params["outputPath"])).expanduser()
-    raw = json.loads(output_path.read_text(encoding="utf-8"))
+    raw: object = json.loads(output_path.read_text(encoding="utf-8"))
     suite = _object(raw)
     frontend_results = suite.get("frontendResults")
     if not isinstance(frontend_results, list):

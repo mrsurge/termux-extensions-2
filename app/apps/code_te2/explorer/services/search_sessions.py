@@ -281,7 +281,7 @@ class ExplorerSearchSessions:
             raw_removed = delta.get("removed")
             removed = [rel for rel in cast(list[object], raw_removed) if isinstance(rel, str) and rel in session.changes_items] if isinstance(raw_removed, list) else []
             for rel in removed:
-                _ = session.changes_items.pop(rel, None)
+                session.changes_items.pop(rel, None)
             updates: list[JsonObject] = []
             raw_updates = delta.get("updates")
             if isinstance(raw_updates, list):
@@ -528,7 +528,7 @@ class ExplorerSearchSessions:
         self._job_to_search.clear()
         self._active_search_id = None
         if sessions:
-            _ = asyncio.create_task(self._cancel_sessions(sessions, reason="projectSwitch"))
+            _cancel_task: asyncio.Task[None] = asyncio.create_task(self._cancel_sessions(sessions, reason="projectSwitch"))
 
     async def _cancel_sessions(
         self,
@@ -565,7 +565,7 @@ class ExplorerSearchSessions:
             self._active_search_id = None
         for job_id, mapped_search_id in list(self._job_to_search.items()):
             if mapped_search_id == search_id or (session is not None and job_id == session.job_id):
-                _ = self._job_to_search.pop(job_id, None)
+                self._job_to_search.pop(job_id, None)
 
     def _session_for_request(
         self,

@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Callable
 import logging
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Protocol, TypedDict, cast
 
 from .code_server_bootstrap import (
     CodeServerPrerequisitePayload,
@@ -36,7 +36,13 @@ from app.libs.runtime_startup_trace import StartupTrace
 log = logging.getLogger(__name__)
 _boot_prepare_tasks: dict[str, asyncio.Task[None]] = {}
 _boot_snapshot_task: asyncio.Task[JsonMap] | None = None
-EditorSnapshotBuilder = Callable[..., JsonMap]
+class EditorSnapshotBuilder(Protocol):
+    def __call__(
+        self, *, client_instance_id: str | None,
+        client_role: str | None = None,
+    ) -> JsonMap: ...
+
+
 WatcherAvailabilityFn = Callable[[], bool]
 _editor_snapshot_builder: EditorSnapshotBuilder | None = None
 _watcher_availability: WatcherAvailabilityFn | None = None
@@ -92,7 +98,7 @@ async def _prime_backend_runtime(project_root: str) -> None:
     except Exception as exc:
         log.warning("[boot_snapshot] backend runtime prime failed: %s", exc)
     finally:
-        _ = _boot_prepare_tasks.pop(project_root, None)
+        _boot_prepare_tasks.pop(project_root, None)
 
 
 def _ensure_backend_runtime_task(project_root: str | None) -> None:
@@ -227,7 +233,7 @@ def _build_explorer_bootstrap_payload(
     watchexec_available = watcher_availability()
 
     watcher_config = build_watcher_config_payload(
-        getattr(sidecar, "_data", {}).get("watcher"),
+        sidecar._data.get("watcher"),
         watchexec_available=watchexec_available,
     )
 

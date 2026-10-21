@@ -544,7 +544,7 @@ def forget_sidebar_window_runtime_state(host_ids: list[str]) -> None:
     if not removed:
         return
     for key in [key for key in _client_presentations if key[1] in removed]:
-        _ = _client_presentations.pop(key, None)
+        _client_presentations.pop(key, None)
     for client_id, host_id in list(_client_active_windows.items()):
         if _norm(host_id) in removed:
             _client_active_windows[client_id] = ""

@@ -86,7 +86,7 @@ class ExplorerRpcSocketShim:
         return future
 
     def finish_request(self, request_id: str) -> None:
-        _ = self._pending_requests.pop(request_id, None)
+        self._pending_requests.pop(request_id, None)
 
     def complete_rpc_request(self, request_id: str, result: dict[str, object]) -> bool:
         pending = self._pending_requests.pop(request_id, None)

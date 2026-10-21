@@ -118,7 +118,7 @@ class SecondaryContentState:
         return slot.snapshot
 
     def close(self, client_id: str) -> None:
-        _ = self._slots.pop(client_id, None)
+        self._slots.pop(client_id, None)
 
     def clear_project(self, project_path: str) -> None:
         for client_id, slot in tuple(self._slots.items()):

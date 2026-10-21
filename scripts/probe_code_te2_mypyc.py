@@ -32,7 +32,7 @@ from profile_code_te2_import import check_event
 from mypyc_build_workflow import (
     activate, build_lock, cache_key, compiler_cache, publish_snapshot,
     prune, source_digest, toolchain, build_fingerprint, reusable_snapshot, snapshot_status,
-    mypy_build_args,
+    mypy_build_args, progress_build_ext,
 )
 from framework.bootstrap.compiler_cache_preflight import ccache_health
 
@@ -79,6 +79,7 @@ INTERPRETED = frozenset({
     "app.apps.code_te2.draft_index_sidecar",  # dataclass ClassVar cache
     "app.apps.code_te2.project_sidecar",  # dataclass ClassVar cache
     "app.apps.code_te2.explorer_runtime",  # runtime_checkable Protocol identity
+    "app.apps.code_te2.native_runtime_contracts",  # runtime_checkable Protocol identity
     "app.apps.code_te2.socketio_jsonrpc",
     "app.apps.code_te2.ui_ipc.sidebar_rpc_contract",
     "app.apps.code_te2.ui_ipc.rpc_contract",
@@ -202,6 +203,7 @@ def build(output: Path, cache_root: Path, *, fingerprinted: bool = False) -> Pat
                     "explicitly disabled; full changed-extension rebuilds" if os.environ.get('NO_CACHE') == '1'
                     else "unavailable; full changed-extension rebuilds")
                 print(f'Build cache: {cache}; ccache: {cache_status}', flush=True)
+                progress_command = progress_build_ext(sys.stdout, cache_enabled=cached)
                 with log_path.open("w") as log, redirect_stdout(log), redirect_stderr(log):
                     extensions = mypycify(
                         mypy_build_args(REPO, sources),
@@ -209,6 +211,7 @@ def build(output: Path, cache_root: Path, *, fingerprinted: bool = False) -> Pat
                     )
                     setup(
                         name="te2-mypyc-domain-probe", ext_modules=extensions,
+                        cmdclass={"build_ext": progress_command},
                         script_args=["build_ext", "--build-lib", str(cache / "lib"), "--build-temp", str(cache / "temp")],
                     )
             publish_snapshot(REPO, cache, output, manifest, [ext.name for ext in extensions],

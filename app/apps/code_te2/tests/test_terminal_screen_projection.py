@@ -106,10 +106,9 @@ class TerminalScreenProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(growth)
         assert growth is not None
         self.assertFalse(growth.reset)
-        self.assertEqual(
-            [(item.start_offset, item.end_offset) for item in growth.deltas],
-            [(2, 7)],
-        )
+        offsets: list[tuple[int, int]] = [(item.start_offset, item.end_offset) for item in growth.deltas]
+        expected_offsets: list[tuple[int, int]] = [(2, 7)]
+        self.assertEqual(offsets, expected_offsets)
 
         incomplete = await self.checkpoint(registry, log)
         self.assertEqual(incomplete.pending_bytes, b"\x1b[31")
@@ -118,10 +117,9 @@ class TerminalScreenProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(final_growth)
         assert final_growth is not None
         self.assertFalse(final_growth.reset)
-        self.assertEqual(
-            [(item.start_offset, item.end_offset) for item in final_growth.deltas],
-            [(7, 11)],
-        )
+        final_offsets: list[tuple[int, int]] = [(item.start_offset, item.end_offset) for item in final_growth.deltas]
+        expected_final_offsets: list[tuple[int, int]] = [(7, 11)]
+        self.assertEqual(final_offsets, expected_final_offsets)
 
         replayed, replay_stream = _replay(incomplete)
         for delta in final_growth.deltas:
@@ -145,10 +143,9 @@ class TerminalScreenProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(repeated)
         assert growth is not None and repeated is not None
         self.assertFalse(growth.reset)
-        self.assertEqual(
-            [(item.data, item.start_offset, item.end_offset) for item in growth.deltas],
-            [(b"def", 3, 6)],
-        )
+        chunks: list[tuple[bytes, int, int]] = [(item.data, item.start_offset, item.end_offset) for item in growth.deltas]
+        expected_chunks: list[tuple[bytes, int, int]] = [(b"def", 3, 6)]
+        self.assertEqual(chunks, expected_chunks)
         self.assertEqual(repeated.deltas, ())
         self.assertFalse(repeated.reset)
 
@@ -203,7 +200,9 @@ class TerminalScreenProjectionTests(unittest.IsolatedAsyncioTestCase):
         growth = await registry.consume_growth("shell")
         self.assertIsNotNone(growth)
         assert growth is not None
-        self.assertEqual([delta.data for delta in growth.deltas], [b"hello"])
+        chunks: list[bytes] = [delta.data for delta in growth.deltas]
+        expected_chunks: list[bytes] = [b"hello"]
+        self.assertEqual(chunks, expected_chunks)
 
         checkpoint = await registry.checkpoint("shell", log, columns=60, lines=15)
         replayed, _stream = _replay(checkpoint)

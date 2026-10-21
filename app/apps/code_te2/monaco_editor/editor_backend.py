@@ -62,7 +62,12 @@ class ComputeDraftDiffFn(Protocol):
 
 
 def _json_object(value: object) -> dict[str, object]:
-    return cast(dict[str, object], value if isinstance(value, dict) else {})
+    if not isinstance(value, dict):
+        return {}
+    raw: dict[object, object] = value
+    if any(not isinstance(key, str) for key in raw):
+        raise TypeError("editor object must have string keys")
+    return {str(key): item for key, item in raw.items()}
 
 
 def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
@@ -164,7 +169,7 @@ def _current_diff_base(project_path: Optional[str]) -> str:
 
 def _resolve_theme_preference(theme_key: Optional[str]) -> str:
     """Map stored preference theme id to the CodeMirror theme name or raise."""
-    pref_path = getattr(_preferences_store, 'path', None)
+    pref_path = _preferences_store.path
     location_hint = f" ({pref_path})" if pref_path else ''
 
     if not theme_key:
@@ -181,7 +186,7 @@ def _resolve_theme_preference(theme_key: Optional[str]) -> str:
 
 def _resolve_font_scale(scale_value: object | None) -> float:
     """Validate and return the stored font scale, raising if it's missing/invalid."""
-    pref_path = getattr(_preferences_store, 'path', None)
+    pref_path = _preferences_store.path
     location_hint = f" ({pref_path})" if pref_path else ''
 
     if scale_value is None:
@@ -266,15 +271,17 @@ def _get_runtime_metadata() -> RuntimeMeta:
 
 def _get_editor_preferences() -> dict[str, object]:
     prefs = _preferences_store.get_preferences()
-    editor_obj = prefs.get("editor", {})
-    return cast(dict[str, object], editor_obj if isinstance(editor_obj, dict) else {})
+    return _json_object(prefs.get("editor"))
 
 
 # --- Cache Persistence ---
 def _get_cached_editor_content(editor: EditorLike | None) -> str:
     if editor is None:
         return ""
-    return getattr(editor, "_cached_content", editor.value or "")
+    try:
+        return editor._cached_content
+    except AttributeError:
+        return editor.value or ""
 
 
 def _build_cache_state_payload(

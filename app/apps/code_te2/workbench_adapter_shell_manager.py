@@ -397,7 +397,8 @@ async def _stdout_reader_loop(shell_id: str, queue: OutputReader) -> None:
         log.error("[adapter_stdio] reader crashed shell=%s: %s", shell_id, exc)
         _fail_pending_rpcs("adapter stdout reader crashed")
     finally:
-        if _stdout_reader_task is asyncio.current_task():
+        current_task: asyncio.Task[object] | None = asyncio.current_task()
+        if _stdout_reader_task is current_task:
             _stdout_reader_task = None
 
 
@@ -494,7 +495,8 @@ async def _drain_pushes() -> None:
     except asyncio.CancelledError:
         pass
     finally:
-        if _push_drain_task is asyncio.current_task():
+        current_task: asyncio.Task[object] | None = asyncio.current_task()
+        if _push_drain_task is current_task:
             _push_drain_task = None
 
 
@@ -612,7 +614,7 @@ async def adapter_rpc(
             frame = encode_message(msg)
             await mgr.write_bytes(shell_id, frame)
         except BaseException:
-            _ = _rpc_pending.pop(rid, None)
+            _rpc_pending.pop(rid, None)
             _ = fut.cancel()
             raise
 
@@ -622,7 +624,7 @@ async def adapter_rpc(
     except asyncio.TimeoutError:
         raise RuntimeError(f"adapter_rpc timeout: method={method} id={rid} after {timeout}s")
     finally:
-        _ = _rpc_pending.pop(rid, None)
+        _rpc_pending.pop(rid, None)
 
 
 async def terminate_adapter_shell() -> bool:

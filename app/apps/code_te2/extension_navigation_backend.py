@@ -133,7 +133,7 @@ async def _run_extension_open(event: JsonObject) -> None:
     finally:
         current = _pending_open_completions.get(request_id)
         if current is not None and current[1] is completion:
-            _ = _pending_open_completions.pop(request_id, None)
+            _pending_open_completions.pop(request_id, None)
 
 
 def schedule_extension_open(event: JsonObject) -> None:

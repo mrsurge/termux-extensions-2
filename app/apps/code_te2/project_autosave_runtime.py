@@ -41,7 +41,7 @@ def record_commit(project: str, path: str, base: str, digest: str, revision: int
     key = (str(Path(project).resolve()), str(Path(path).resolve()))
     generation = current_project_generation(project)
     previous = _commits.get(key)
-    ancestors = previous[2] if previous and previous[:2] == (revision, generation) and previous[3] == base else ()
+    ancestors = previous[2] if previous and previous[0] == revision and previous[1] == generation and previous[3] == base else ()
     _commits[key] = (revision, generation, (*ancestors, base)[-8:], digest)
     if len(_commits) > 256:
         _commits.pop(next(iter(_commits)))
@@ -54,7 +54,7 @@ def rebase_mirror(project: str, path: str, base: str, disk_sha: object, revision
     unrelated external writes never enter this lineage.
     """
     previous = _commits.get((str(Path(project).resolve()), str(Path(path).resolve())))
-    if previous and previous[:2] == (revision, current_project_generation(project)) and base in previous[2] and disk_sha == previous[3]:
+    if previous and previous[0] == revision and previous[1] == current_project_generation(project) and base in previous[2] and disk_sha == previous[3]:
         return previous[3]
     return base
 
@@ -73,7 +73,10 @@ def schedule(project: str, path: str, revision: int) -> None:
 async def _run(project: str) -> None:
     try:
         while _pending.get(project):
-            path, pending = min(_pending[project].items(), key=lambda item: item[1].due)
+            def due(item: tuple[str, Pending]) -> float:
+                return item[1].due
+
+            path, pending = min(_pending[project].items(), key=due)
             delay = pending.due - time.monotonic()
             if delay > 0:
                 await asyncio.sleep(delay)

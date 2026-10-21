@@ -462,8 +462,8 @@ async def get_openvsx_detail(
                         raise OpenVsxMarketplaceError("Untrusted README location")
                     async with active.stream("GET", current, follow_redirects=False) as response:
                         if response.is_redirect:
-                            location = response.headers.get("location")
-                            if not location or hop == 3:
+                            location: object = response.headers.get("location")
+                            if not isinstance(location, str) or not location or hop == 3:
                                 raise OpenVsxMarketplaceError("Invalid README redirect")
                             current = current.join(location)
                             continue

@@ -28,7 +28,8 @@ def _json_object(value: object) -> JsonDict:
 
 
 def _json_list(value: object) -> list[object]:
-    return cast(list[object], value if isinstance(value, list) else [])
+    result: list[object] = value if isinstance(value, list) else []
+    return result
 
 
 def _file_meta_json(meta: FileMeta) -> JsonDict:
@@ -133,7 +134,7 @@ async def save_reviews(
                 except OSError:
                     pass
             
-            _ = await to_thread.run_sync(
+            await to_thread.run_sync(
                 lambda: write_full(root_path, rel_path, content, 
                                  base_sha256=base_sha, mode=orig_mode)
             )

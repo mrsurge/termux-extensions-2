@@ -77,9 +77,9 @@ def _schedule_debounce_task(
         except asyncio.CancelledError:
             pass
         finally:
-            current = asyncio.current_task()
+            current: asyncio.Task[object] | None = asyncio.current_task()
             if current is not None and tasks.get(key) is current:
-                _ = tasks.pop(key, None)
+                tasks.pop(key, None)
 
     tasks[key] = asyncio.create_task(_run(), name=name)
 
@@ -147,12 +147,14 @@ async def broadcast_git_status_update(
             except Exception as exc:
                 comparison = git_comparison.Comparison(base_ref, {})
                 comparison_error = str(exc)
-        nodes, actual_nodes = await asyncio.to_thread(
-            lambda: (
+        def tree_decorations() -> tuple[dict[str, object], dict[str, object]]:
+            return (
                 _git_tree_decorations(comparison.statuses),
                 _git_tree_decorations(git_comparison.actual_statuses(snapshot)),
-            ),
-        )
+            )
+
+        decorations = await asyncio.to_thread(tree_decorations)
+        nodes, actual_nodes = decorations
         if not is_current() or revision != _git_refresh_revision:
             return False
         if get_history_store().get_diff_base(normalized_project) != base_ref:

@@ -556,9 +556,12 @@ class ProjectSidecar:
             "revision": revision,
             "updated_at": _utc_timestamp(),
         }
+        def revision_order(item: tuple[str, JsonDict]) -> int:
+            return _as_int(item[1].get("revision"), 0)
+
         ordered = sorted(
             entries.items(),
-            key=lambda item: _as_int(item[1].get("revision"), 0),
+            key=revision_order,
             reverse=True,
         )[:MAX_DOCUMENT_REVISION_ENTRIES]
         self._data["document_state_revision"] = revision
@@ -935,9 +938,12 @@ class ProjectSidecar:
             "seeded_from_legacy": seeded_from_legacy,
             "client_role": resolved_role,
         }
+        def revision_order(item: tuple[str, JsonDict]) -> int:
+            return _as_int(item[1].get("revision"), 0)
+
         ordered = sorted(
             entries.items(),
-            key=lambda item: _as_int(item[1].get("revision"), 0),
+            key=revision_order,
             reverse=True,
         )[:max_clients]
         self._data["client_foregrounds"] = dict(ordered)
@@ -1192,7 +1198,7 @@ class ProjectSidecar:
     def _ensure_lsp_schema(self) -> JsonDict:
         lsp: JsonDict = _as_dict(self._data.get("lsp"))
         if not lsp:
-            lsp = cast(JsonDict, {"enabled": False, "servers": {}, "roots": {}, "android": {}})
+            lsp = {"enabled": False, "servers": {}, "roots": {}, "android": {}}
         if "enabled" not in lsp:
             lsp["enabled"] = False
         if "project_id" not in lsp:

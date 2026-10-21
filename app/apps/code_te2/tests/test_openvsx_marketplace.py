@@ -109,9 +109,10 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, content=content)
             target = 'linux-x64' if '/linux-x64/' in path else 'alpine-arm64'
             base = f'https://open-vsx.org/api/astral-sh/ty/{target}/1.0.0/file/'
-            return httpx.Response(200, json={'namespace':'astral-sh', 'name':'ty', 'version':'1.0.0',
+            payload: dict[str, object] = {'namespace':'astral-sh', 'name':'ty', 'version':'1.0.0',
                 'targetPlatform':target, 'downloads':{'linux-x64':'available', 'alpine-arm64':'available'},
-                'files':{'download':base+'ty.vsix', 'sha256':base+'ty.sha256', 'icon':base+'logo.jpg'}})
+                'files':{'download':base+'ty.vsix', 'sha256':base+'ty.sha256', 'icon':base+'logo.jpg'}}
+            return httpx.Response(200, json=payload)
         with patch.object(openvsx_marketplace, '_backend_targets', return_value=('linux-x64','universal')):
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                 detail = await openvsx_marketplace.get_openvsx_detail(ext_id='astral-sh.ty', installed_extensions=[], client=client)
@@ -150,13 +151,15 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
             root = base / 'extensions' / 'vendor.example'
             root.mkdir(parents=True)
             ext = {'source': 'user', 'path': str(root), 'version': '1.0.0'}
-            with patch.object(registry, '_EXTENSIONS_DIR', root.parent), patch.object(registry, 'load_registry', return_value={'extensions': {'vendor.example': ext}}):
+            registry_data: dict[str, object] = {'extensions': {'vendor.example': ext}}
+            with patch.object(registry, '_EXTENSIONS_DIR', root.parent), patch.object(registry, 'load_registry', return_value=registry_data):
                 for suffix, mime in registry._ICON_MIME.items():
                     target = root / ('ICON' + suffix.upper())
                     target.write_bytes(b'icon bytes')
                     ext['icon'] = target.name
                     result = registry.get_installed_extension_icon('vendor.example', '1.0.0')
-                    self.assertEqual(result, {'content': b'icon bytes', 'mime': mime})
+                    expected: dict[str, object] = {'content': b'icon bytes', 'mime': mime}
+                    self.assertEqual(result, expected)
                     icon_url = registry.get_extension_list()[0]['iconUrl']
                     assert isinstance(icon_url, str)
                     self.assertIn('id=vendor.example&version=1.0.0', icon_url)
@@ -243,7 +246,7 @@ class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
             emitted.append(payload)
         context = ExplorerExtensionHandlerContext(project_root=Path('/workspace'), emit_personal=emit)
         local = {'id': _EXT_ID, 'version': _VERSION, 'readme': '# Local'}
-        with patch('app.apps.code_te2.extension_registry.get_extension_list', return_value=[]), \
+        with patch('app.apps.code_te2.extension_registry.get_extension_list', return_value=list[dict[str, object]]()), \
              patch('app.apps.code_te2.extension_registry.get_local_marketplace_detail', return_value=local), \
              patch.object(openvsx_marketplace, 'get_openvsx_detail', AsyncMock(side_effect=openvsx_marketplace.OpenVsxMarketplaceError('offline'))):
             await handle_ext_marketplace_detail(context, {'ext_id': _EXT_ID, 'readme': True, 'version': _VERSION}, 'one')
@@ -300,7 +303,7 @@ class OpenVsxMarketplaceDownloadTests(unittest.IsolatedAsyncioTestCase):
                             version=_VERSION,
                             client=client,
                         )
-            self.assertEqual(list(Path(temp_dir).iterdir()), [])
+            self.assertEqual(list[Path](Path(temp_dir).iterdir()), list[Path]())
 
     async def test_size_limit_removes_partial_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -318,7 +321,7 @@ class OpenVsxMarketplaceDownloadTests(unittest.IsolatedAsyncioTestCase):
                             version=_VERSION,
                             client=client,
                         )
-            self.assertEqual(list(Path(temp_dir).iterdir()), [])
+            self.assertEqual(list[Path](Path(temp_dir).iterdir()), list[Path]())
 
 
 class OpenVsxMarketplaceHandlerTests(unittest.IsolatedAsyncioTestCase):
@@ -344,23 +347,22 @@ class OpenVsxMarketplaceHandlerTests(unittest.IsolatedAsyncioTestCase):
             "registry_summary": {"total_extensions": 1, "total_slots": 1},
         }
         install_mock = Mock(return_value=install_result)
-        detail_mock = AsyncMock(
-            return_value={
-                "extension": {
-                    "id": _EXT_ID,
-                    "version": _VERSION,
-                    "installSupported": True,
-                    "extensionKind": ["ui"],
-                }
+        detail_result: dict[str, object] = {
+            "extension": {
+                "id": _EXT_ID,
+                "version": _VERSION,
+                "installSupported": True,
+                "extensionKind": ["ui"],
             }
-        )
+        }
+        detail_mock = AsyncMock(return_value=detail_result)
         download_mock = AsyncMock(return_value=vsix_path)
         restart_mock = AsyncMock()
 
         with (
             patch(
                 "app.apps.code_te2.extension_registry.get_extension_list",
-                return_value=[],
+                return_value=list[dict[str, object]](),
             ),
             patch(
                 "app.apps.code_te2.extension_registry.install_extension",
@@ -382,7 +384,7 @@ class OpenVsxMarketplaceHandlerTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch(
                 "app.apps.code_te2.extension_registry.get_extension_config_schema",
-                return_value={"properties": {"sample.setting": {"type": "boolean"}}},
+                return_value=dict[str, object](properties={"sample.setting": {"type": "boolean"}}),
             ),
         ):
             await handle_ext_marketplace_install(

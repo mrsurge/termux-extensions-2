@@ -390,6 +390,33 @@ On Termux, `pkg install ccache` supplies this **development** tool; it is
 not a runtime/user-install dependency. Shared generated-header changes can invalidate
 many objects. We retain a single shared compilation unit and `multi_file=True`.
 
+During C compilation, stdout prints flushed `[mypyc completed/total]` lines
+after each successful target, using the generated extension source inventory
+(not the Python module count). Up-to-date extensions count as `Up-to-date`;
+ccache-backed compiler calls count after successful return. Failed targets do
+not advance the counter. Detailed compiler output remains in `build.log`.
+Targets now report `Cache hit`, `Compiled (cache miss)`, `Compiled (uncached)`
+or `Compiled (cache status unknown)`. Cache labels come from ccache's official
+machine-readable statistics for an isolated per-invocation stats log, not timing
+or shared-counter deltas. Per-command logging configuration and context-local
+correlation preserve parallel builds without changing the process environment.
+Missing/unrecognized/failed statistics stay unknown rather than failing a
+successful compilation or claiming a miss. Up-to-date extension skips remain
+distinct from ccache hits. Temporary target logs are removed after observation;
+no global statistics are reset and no existing objects/cache entries are removed.
+This counter covers C targets, not typechecking/code generation, linking or
+snapshot validation; a full counter is not a published snapshot. Verified
+finished-snapshot reuse still reports reuse without inventing compilation work.
+Progress reporting does not change compiler concurrency or cache policy.
+
+`native_runtime_contracts.py` is an explicit interpreted island for
+`@runtime_checkable` Protocol definitions. Compiling those definitions loses
+the Protocol identity required by Python's decorator at import time. The native
+Socket.IO and diagnostics-metrics implementations remain compiled and import
+those contracts; do not infer code-generation compatibility from mypy success.
+`tests/test_mypyc_runtime_protocols.py` compiles/imports both implementations
+and exercises their runtime protocol checks without building the whole domain.
+
 Snapshot publication copies only this build's extension libraries (no hard links
 to mutable compiler outputs), validates all compiled imports in a separate isolated
 process, checks startup-source consistency and atomically publishes only on success.

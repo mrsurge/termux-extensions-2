@@ -4,11 +4,37 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal, TypedDict, cast
 
+import msgspec
+
 from ..socketio_jsonrpc import (
     JsonRpcEnvelopeError,
     coerce_jsonrpc_envelope,
     normalize_jsonrpc_params,
 )
+
+
+# This contract module stays interpreted: msgspec inspects the exact runtime
+# annotations, including nullable integers/strings that mypyc otherwise erases.
+class SidebarCallerTarget(msgspec.Struct, forbid_unknown_fields=True):
+    clientId: str
+    hostId: str
+    presentationId: str
+    mainPageId: str | None = None
+    sidebarWindowId: str | None = None
+
+
+class SidebarProjectRequest(msgspec.Struct, forbid_unknown_fields=True):
+    path: str
+    target: SidebarCallerTarget
+    adoptExisting: bool = True
+    open: bool = True
+
+
+class SidebarFileOpen(msgspec.Struct, forbid_unknown_fields=True):
+    path: str
+    target: SidebarCallerTarget
+    line: int | None = None
+    column: int | None = None
 
 SIDEBAR_IPC_RPC_NAMESPACE: Final = "/sidebar_ipc"
 SIDEBAR_IPC_RPC_REQUEST_EVENT: Final = "rpc"

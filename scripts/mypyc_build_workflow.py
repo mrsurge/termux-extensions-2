@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 import errno
 import fcntl
 import hashlib
@@ -17,11 +18,187 @@ import sys
 import sysconfig
 import tempfile
 import tomllib
-from typing import Callable, Generator, cast
+from threading import Lock
+from typing import Callable, Generator, Literal, Protocol, TextIO, cast, runtime_checkable
 
 from framework.bootstrap.compiler_cache_preflight import ccache_health
 
 SCHEMA = 1
+CacheStatus = Literal['cache hit', 'cache miss', 'uncached', 'cache status unknown']
+
+
+def ccache_target_status(executable: str | None, log_path: Path) -> CacheStatus:
+    """Read one invocation's official statistics, never global counter deltas."""
+    if executable is None:
+        return 'uncached'
+    try:
+        if not log_path.is_file():
+            return 'cache status unknown'
+        result = subprocess.run(
+            [executable, '--print-log-stats', '--format=json'],
+            env=dict(os.environ, CCACHE_STATSLOG=str(log_path)),
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if result.returncode != 0:
+            return 'cache status unknown'
+        counters: object = json.loads(result.stdout)
+        if not isinstance(counters, dict):
+            return 'cache status unknown'
+        hits = [counters.get(key) for key in ('direct_cache_hit', 'preprocessed_cache_hit')]
+        if any(isinstance(value, int) and not isinstance(value, bool) and value > 0
+               for value in hits):
+            return 'cache hit'
+        misses: object = counters.get('cache_miss')
+        if isinstance(misses, int) and not isinstance(misses, bool) and misses > 0:
+            return 'cache miss'
+        # Successful compiler calls that ccache could not cache are not misses.
+        uncacheable = ('disabled', 'bad_compiler_arguments', 'bad_input_file',
+            'bad_output_file', 'compiler_check_failed', 'compiler_produced_empty_output',
+            'compiler_produced_no_output', 'compiler_produced_stdout',
+            'could_not_use_modules', 'could_not_use_precompiled_header',
+            'error_hashing_extra_file', 'internal_error', 'modified_input_file',
+            'multiple_source_files', 'no_input_file', 'output_to_stdout',
+            'preprocessor_error', 'unsupported_code_directive',
+            'unsupported_compiler_option', 'unsupported_environment_variable',
+            'unsupported_source_encoding', 'unsupported_source_language')
+        if any(isinstance(value, int) and not isinstance(value, bool) and value > 0
+               for value in (counters.get(key) for key in uncacheable)):
+            return 'uncached'
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        pass
+    return 'cache status unknown'
+
+
+@runtime_checkable
+class CompilerCaller(Protocol):
+    def call(self, cmd: list[str], **kwargs: object) -> None: ...
+
+
+@runtime_checkable
+class CompilerSpawner(Protocol):
+    def spawn(self, cmd: list[str], **kwargs: object) -> None: ...
+
+
+class CacheInvocation:
+    def __init__(self, log_path: Path) -> None:
+        self.log_path = log_path
+        self.executable: str | None = None
+
+    def command(self, cmd: list[str]) -> list[str]:
+        if cmd and Path(cmd[0]).name == 'ccache' and '-c' in cmd:
+            self.executable = cmd[0]
+            # Per-command configuration avoids process-wide environment races.
+            return [cmd[0], f'stats_log={self.log_path}', *cmd[1:]]
+        return cmd
+
+
+@contextmanager
+def observe_compiler_cache(compiler: object,
+                           current: ContextVar[CacheInvocation | None]) -> Generator[bool]:
+    """Wrap the subprocess boundary once; both old and new setuptools are used."""
+    if isinstance(compiler, CompilerCaller):
+        method = 'call'
+        original = compiler.call
+    elif isinstance(compiler, CompilerSpawner):
+        method = 'spawn'
+        original = compiler.spawn
+    else:
+        yield False
+        return
+
+    def invoke(cmd: list[str], **kwargs: object) -> None:
+        invocation = current.get()
+        original(invocation.command(cmd) if invocation is not None else cmd, **kwargs)
+
+    setattr(compiler, method, invoke)
+    try:
+        yield True
+    finally:
+        setattr(compiler, method, original)
+
+
+class CompileProgress:
+    """Count successful C targets; failures never advance the counter."""
+
+    def __init__(self, targets: set[tuple[str, str]], stream: TextIO) -> None:
+        self.targets = targets
+        self.completed: set[tuple[str, str]] = set()
+        self.stream = stream
+        self.lock = Lock()
+        print(f'[mypyc 0/{len(targets)}] C compilation targets', file=stream, flush=True)
+
+    def complete(self, extension: str, source: str, *, reused: bool = False,
+                 cache_status: CacheStatus | None = None) -> None:
+        target = (extension, source)
+        with self.lock:
+            if target not in self.targets or target in self.completed:
+                return
+            self.completed.add(target)
+            action = 'Up-to-date' if reused else 'Compiled'
+            if not reused and cache_status is not None:
+                action = 'Cache hit' if cache_status == 'cache hit' else f'Compiled ({cache_status})'
+            print(f'[mypyc {len(self.completed)}/{len(self.targets)}] '
+                  f'{action} {Path(source).name} [{extension}]', file=self.stream, flush=True)
+
+
+@runtime_checkable
+class ProgressCompiler(Protocol):
+    def _compile(self, obj: str, src: str, ext: str, cc_args: list[str],
+                 extra_postargs: list[str], pp_opts: list[str]) -> None: ...
+
+
+def progress_build_ext(stream: TextIO, *, cache_enabled: bool = False) -> type:
+    """Create setuptools' ordinary build command with observation-only hooks."""
+    from setuptools.command.build_ext import build_ext
+    from setuptools import Extension
+
+    class ProgressBuildExt(build_ext):
+        def build_extensions(self) -> None:
+            compiler = self.compiler
+            if not isinstance(compiler, ProgressCompiler):
+                raise RuntimeError('C compiler does not expose per-target compilation')
+            self.progress = CompileProgress({(ext.name, src)
+                for ext in self.extensions for src in ext.sources}, stream)
+            self.progress_extension: ContextVar[str] = ContextVar('mypyc_extension')
+            invocation: ContextVar[CacheInvocation | None] = ContextVar('ccache_invocation', default=None)
+            original = compiler._compile
+
+            def compile_target(obj: str, src: str, ext: str, cc_args: list[str],
+                               extra_postargs: list[str], pp_opts: list[str]) -> None:
+                status: CacheStatus = 'uncached'
+                if cache_enabled and observation_available:
+                    with tempfile.TemporaryDirectory(prefix='.ccache-target-', dir=Path(obj).parent) as temporary:
+                        target = CacheInvocation(Path(temporary) / 'stats.log')
+                        token = invocation.set(target)
+                        try:
+                            original(obj, src, ext, cc_args, extra_postargs, pp_opts)
+                        finally:
+                            invocation.reset(token)
+                        status = ccache_target_status(target.executable, target.log_path)
+                else:
+                    original(obj, src, ext, cc_args, extra_postargs, pp_opts)
+                    if cache_enabled:
+                        status = 'cache status unknown'
+                self.progress.complete(self.progress_extension.get(), src, cache_status=status)
+
+            compiler._compile = compile_target
+            try:
+                with observe_compiler_cache(compiler, invocation) as observation_available:
+                    super().build_extensions()
+            finally:
+                compiler._compile = original
+
+        def build_extension(self, ext: Extension) -> None:
+            token = self.progress_extension.set(ext.name)
+            try:
+                super().build_extension(ext)
+                # A successful up-to-date extension may skip its compiler entirely.
+                for source in ext.sources:
+                    self.progress.complete(ext.name, source, reused=True)
+            finally:
+                self.progress_extension.reset(token)
+
+    return ProgressBuildExt
 
 
 def mypy_build_args(repo: Path, sources: list[str]) -> list[str]:

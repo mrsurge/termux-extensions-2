@@ -23,7 +23,11 @@ from .explorer.services import file_ops as _file_ops
 logger = logging.getLogger(__name__)
 
 JsonObject = dict[str, object]
-ExplorerMessageHandler = Callable[[JsonObject, str | None], Awaitable[None]]
+@runtime_checkable
+class ExplorerMessageHandler(Protocol):
+    def __call__(self, payload: JsonObject, msg_id: str | None) -> Awaitable[None]: ...
+
+
 MarkGitCacheDirtyFn = Callable[[Path], None]
 
 if TYPE_CHECKING:
@@ -387,10 +391,12 @@ class ExplorerDispatcher:
 
     def _resolve_handler(self, message_type: str) -> ExplorerMessageHandler | None:
         handler_name = f"handle_{message_type.replace(':', '_')}"
-        handler = getattr(self, handler_name, None)
+        handler: object = getattr(self, handler_name, None)
         if handler is None:
             return None
-        return cast(ExplorerMessageHandler, handler)
+        if not isinstance(handler, ExplorerMessageHandler):
+            raise TypeError(f"Explorer handler is not callable: {handler_name}")
+        return handler
 
     async def dispatch_message(
         self,

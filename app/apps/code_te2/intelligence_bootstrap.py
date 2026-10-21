@@ -114,7 +114,7 @@ async def stop_early_intelligence() -> None:
     if task is not None:
         if not task.done():
             _ = task.cancel()
-        _ = await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(task, return_exceptions=True)
         from .workbench_adapter_shell_manager import stop_adapter_io
         from .workbench_runtime_discovery import workbench_runtime_discovery
         try:

@@ -82,7 +82,10 @@ def validate_font_scale(scale: float) -> float:
     """Validate and clamp font scale to allowed presets."""
     if scale not in ALLOWED_FONT_SCALES:
         # Find nearest preset
-        return min(ALLOWED_FONT_SCALES, key=lambda x: abs(x - scale))
+        def distance(value: float) -> float:
+            return abs(value - scale)
+
+        return min(ALLOWED_FONT_SCALES, key=distance)
     return scale
 
 

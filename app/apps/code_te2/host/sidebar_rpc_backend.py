@@ -4,32 +4,14 @@ from __future__ import annotations
 import msgspec
 
 from ..sidebar_window_events import publish_sidebar_window_state_changed
+from ..ui_ipc.sidebar_rpc_contract import (
+    SidebarFileOpen as _FileOpen,
+    SidebarProjectRequest as _ProjectRequest,
+)
 from ..ui_ipc.sidebar_window_state import get_sidebar_window_state, open_sidebar_window_url
 
 JsonObject = dict[str, object]
 CALLERS = {"terminal", "file_explorer", "file_editor", "als-rs"}
-
-
-class _CallerTarget(msgspec.Struct, forbid_unknown_fields=True):
-    clientId: str
-    hostId: str
-    presentationId: str
-    mainPageId: str | None = None
-    sidebarWindowId: str | None = None
-
-
-class _ProjectRequest(msgspec.Struct, forbid_unknown_fields=True):
-    path: str
-    target: _CallerTarget
-    adoptExisting: bool = True
-    open: bool = True
-
-
-class _FileOpen(msgspec.Struct, forbid_unknown_fields=True):
-    path: str
-    target: _CallerTarget
-    line: int | None = None
-    column: int | None = None
 
 
 def _object(value: object) -> JsonObject:
@@ -103,7 +85,9 @@ async def dispatch_sidebar_service(value: object) -> JsonObject:
 
 
 async def _dispatch_als_service(method: str, params: JsonObject) -> JsonObject:
-    from ..ui_ipc import sidebar_ws
+    # Import the module itself: mypyc's package-from-import can leave its
+    # separate module reference unset until the unrelated cwd.get branch runs.
+    import app.apps.code_te2.ui_ipc.sidebar_ws as sidebar_ws
     from . import agent_edit_review_backend as review
     from . import draft_state_backend as drafts
     from . import project_backend as projects

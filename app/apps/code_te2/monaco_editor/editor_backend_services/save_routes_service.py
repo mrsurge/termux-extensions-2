@@ -200,8 +200,8 @@ async def handle_save_current_file(
         file_meta = await write_editor_buffer_to_disk_fn(client_id, op_id, nicegui_client_id)
 
         try:
-            editor_prefs_obj = get_preferences().get("editor", {})
-            editor_prefs = cast(dict[str, object], editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {})
+            editor_prefs_obj = get_preferences().get("editor")
+            editor_prefs: dict[str, object] = editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {}
             if bool(editor_prefs.get("autoSave", False)):
                 project_path = history_store.get_active_project()
                 if project_path and current_file:
@@ -240,7 +240,7 @@ async def handle_save_current_file(
         return {"ok": False, "error": exc.message}
     except base_mismatch_error_type as exc_obj:
         mismatch = cast(BaseMismatchMetaLike, cast(object, exc_obj))
-        actual = mismatch.current_meta.get("sha256") if getattr(mismatch, "current_meta", None) else "unknown"
+        actual = mismatch.current_meta.get("sha256") if mismatch.current_meta else "unknown"
         print(
             f"[SAVE] BASE_MISMATCH path={current_file!r} expected={base_snapshot} actual={actual}",
             file=sys.stderr,

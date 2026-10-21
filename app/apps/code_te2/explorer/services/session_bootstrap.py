@@ -151,7 +151,7 @@ def _schedule_bootstrap_git_status(
         except Exception as exc:
             logger.warning("Failed to load bootstrap git status for %s: %s", project_root, exc)
 
-    _ = asyncio.create_task(_run(), name="explorer_bootstrap_git_status")
+    _bootstrap_task: asyncio.Task[None] = asyncio.create_task(_run(), name="explorer_bootstrap_git_status")
 
 
 def _active_file_parent_directories(rel: str | None) -> list[str]:

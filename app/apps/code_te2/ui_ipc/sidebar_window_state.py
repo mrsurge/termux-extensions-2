@@ -137,7 +137,11 @@ def _iter_app_manifests() -> list[JsonObject]:
             roots = [(kind, Path(host_root) / "app/apps" if kind == "builtin" else root)
                      for kind, root in roots]
         registry = AppRegistry(roots=roots)
-        return [app_def.to_payload() for app_def in registry.reload()]
+        manifests: list[JsonObject] = []
+        for app_def in registry.reload():
+            payload: object = app_def.to_payload()
+            manifests.append(_as_object(payload))
+        return manifests
     except Exception:
         return []
 
@@ -170,8 +174,10 @@ def _stateful_manifest(app_id: str) -> JsonObject | None:
     if manifest is None:
         return None
     sidebar_state = manifest.get("sidebar_state")
-    if isinstance(sidebar_state, dict) and sidebar_state.get("enabled") is not False:
-        return {**manifest, "sidebar_state": dict(sidebar_state)}
+    if isinstance(sidebar_state, dict):
+        state: JsonObject = sidebar_state
+        if state.get("enabled") is not False:
+            return {**manifest, "sidebar_state": dict(state)}
     return None
 
 
@@ -631,7 +637,8 @@ def _normalize_readiness(value: object) -> JsonObject:
             normalized[key] = item
     details = raw.get("details")
     if isinstance(details, dict):
-        normalized["details"] = dict(details)
+        detail_fields: dict[object, object] = details
+        normalized["details"] = dict(detail_fields)
     return normalized
 
 
@@ -805,8 +812,11 @@ def _normalize_slot(raw: JsonObject) -> JsonObject:
 def _read_raw_pref_state() -> JsonObject:
     try:
         prefs = get_preferences_store().get_preferences()
-        ui = prefs.get("ui") if isinstance(prefs, dict) else {}
-        raw_state = ui.get(SIDEBAR_WINDOW_STATE_PREF_KEY) if isinstance(ui, dict) else {}
+        ui = prefs.get("ui")
+        raw_state: object = None
+        if isinstance(ui, dict):
+            fields: dict[object, object] = ui
+            raw_state = fields.get(SIDEBAR_WINDOW_STATE_PREF_KEY)
     except Exception:
         raw_state = {}
     return _as_object(raw_state)
@@ -827,7 +837,10 @@ def _load_pref_state() -> JsonObject:
             key_migrated = canonical_key != safe_key
             entries.append((key_migrated, canonical_key, value))
         # Canonical records win when both identities are present.
-        entries.sort(key=lambda item: item[0])
+        def migration_order(item: tuple[bool, str, object]) -> bool:
+            return item[0]
+
+        entries.sort(key=migration_order)
         for key_migrated, canonical_key, value in entries:
             canonical_raw, value_migrated = _canonicalize_legacy_code_te2_slot(
                 _as_object(value)

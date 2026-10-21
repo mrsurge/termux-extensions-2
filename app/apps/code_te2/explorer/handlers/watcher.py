@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
 import subprocess
 from typing import Awaitable, Callable, cast
@@ -192,19 +191,11 @@ def _normalize_config_dict(value: object) -> dict[str, object]:
     return normalized
 
 
-def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[object, object] | None:
-    data = getattr(sidecar, "_data", None)
-    if not isinstance(data, dict):
-        return None
-    return cast(dict[object, object], data)
+def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[str, object]:
+    return sidecar._data
 
 
 async def _resubscribe_adapter_watcher() -> None:
-    adapter_module = importlib.import_module(
-        "app.apps.code_te2.workbench_adapter_shell_manager"
-    )
-    adapter_rpc_obj = getattr(adapter_module, "adapter_rpc", None)
-    if not callable(adapter_rpc_obj):
-        raise RuntimeError("adapter_rpc unavailable")
-    adapter_rpc_call = cast(AdapterRpc, adapter_rpc_obj)
-    await adapter_rpc_call("adapter.resubscribeWatcher", None, 30)
+    from ...workbench_adapter_shell_manager import adapter_rpc
+
+    await adapter_rpc("adapter.resubscribeWatcher", None, 30)

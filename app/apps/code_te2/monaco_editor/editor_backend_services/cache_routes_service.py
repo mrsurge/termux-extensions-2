@@ -342,8 +342,8 @@ async def handle_set_editor_content(
     new_token = subscribe(new_path, "nicegui_backend_set_content", on_file_change)
     set_watcher_token(new_token)
 
-    editor_prefs_obj = preferences_store.get_preferences().get("editor", {})
-    editor_prefs = cast(dict[str, object], editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {})
+    editor_prefs_obj = preferences_store.get_preferences().get("editor")
+    editor_prefs: dict[str, object] = editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {}
     font_scale_pref = resolve_font_scale(editor_prefs.get("fontScale"))
 
     editor.set_zebra_stripes(editor_prefs.get("showShading"))
@@ -395,8 +395,8 @@ async def handle_refresh_diffs(
         diff_data = await asyncio.to_thread(
             lambda: collect_diff(project_root, rel, current_diff_base(project_path))
         )
-        hunks_obj = diff_data.get("hunks", [])
-        hunks = cast(list[object], hunks_obj if isinstance(hunks_obj, list) else [])
+        hunks_obj = diff_data.get("hunks")
+        hunks: list[object] = hunks_obj if isinstance(hunks_obj, list) else []
         for editor in editors:
             try:
                 editor.set_diff_decorations(hunks)

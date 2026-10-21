@@ -1,10 +1,77 @@
 # 0.2.356 maintenance tracker
 
+## Mypyc live target progress
+
+- [x] User-approved observation-only progress on the existing build command:
+  generated C target inventory, flushed completed/total stdout lines after
+  successful compiler returns, and explicitly labeled up-to-date extensions.
+- [x] Preserve detailed build.log, existing concurrency/cache policy, failed-target
+  semantics and verified-snapshot reuse. Restore compiler callback on failure.
+- [x] Focused workflow suite: 31 passed, one opt-in compiler benchmark skipped;
+  covers serial/parallel callbacks, duplicate source names across extensions,
+  redirected compiler output, cache skips and compiler failure.
+- No full compilation, artifact activation, native build, runtime restart or
+  client publication performed for this slice.
+
+### Cache labels and reported post-compile validation failure
+
+- [x] User approves per-target ccache labels for future builds. Isolated stats
+  logs and official JSON statistics distinguish hit/miss/uncached/unknown without
+  global counter resets, cache deletion, timing guesses or environment races.
+  Setuptools call/spawn compatibility and failure-safe callback restoration stay
+  covered; up-to-date extension skips remain separate from cache hits.
+- [x] Inspect latest cache `0cb157597c9ecb8a2d5436cb/build.log`: compiler/linker
+  reached completion; original validator stderr was inherited, not retained
+  there. Re-import retained compiled outputs in disposable roots to reproduce:
+  `TypeError: @runtime_checkable can be only applied to protocol classes`,
+  at native_socketio.NativeEventHandler. No rebuild/activation for diagnosis.
+- [x] User separately approves correction: extract NativeEventHandler and
+  QueueSizeReader to interpreted native_runtime_contracts.py; keep Socket.IO
+  and diagnostics-metrics implementation modules compiled. No weakened typing.
+- [x] Focused grouped regressions: 70 passed, one opt-in compiler benchmark
+  skipped. Includes real isolated ccache miss→hit and actual build_ext labeling,
+  malformed/missing/failed observations and interleaved context isolation.
+- [x] Separate two-module real mypyc fixture passes compilation/import and
+  runtime Protocol checks (12.14 seconds). Full strict/extra/all-Any Code TE2
+  audit passes all 247 source files. Full editor snapshot rebuild/activation
+  remains unperformed; no worker/framework restart, OTA or native build.
+- Existing cache statistics show 769 hits/4,891 misses across historical builds,
+  0.4/1.0 GiB used. These cumulative counters cannot identify the last build's
+  hits; the new per-target reports provide that evidence on future builds.
+
+## Compiled cutover live probe and DTO correction — 2026-10-21
+
+- [x] User's shellspec workaround is preserved as user work. Confirm replacement
+  Code TE2 worker `frs_1792595806125_3267904_7_7` reports 146 overlay modules,
+  has nonempty CODE_TE2_MYPYC_DIR and maps the snapshot's shared mypyc/native_worker
+  libraries. Earlier force=0 alone still had an empty selector and no mappings.
+- [x] Exact ALS log at 16:15:56 shows `file.open` with line=59/column=1 and full
+  qualified presentation proof. Pipe returns `appIntent.failed: ValidationError:
+  Expected type, got int - at $.column`; delivery itself did not silently drop.
+- [x] Disposable imports of the active snapshot reproduce erased msgspec fields:
+  nullable coordinates/identity strings become runtime `type`. User approves
+  moving three DTO definitions to already-interpreted sidebar_rpc_contract.py,
+  keeping the host dispatcher compiled and strict unknown-field/type admission.
+- [x] Actual compiled first-call dispatch exposes an additional package-import
+  reference that remains None unless cwd.get initialized it. User separately
+  approves direct lazy module import, preserving the owner and load timing.
+- [x] Real three-module mypyc fixture passes (26.47 seconds): correct runtime DTO
+  identity, integer/default/null coordinates, qualified strings, rejection of
+  malformed fields and file.open→existing owner without a prior CWD request.
+- [x] Focused source/workflow suites: 97 pass, one opt-in compiler benchmark
+  skipped. Full strict/extra/all-Any check passes all 247 Code TE2 files.
+- [ ] New mypyc snapshot build/activation and Code TE2 worker refresh/live diff
+  link acceptance. No full build, snapshot activation, restart or publication
+  performed by agent. No ALS rebuild/frontend/OTA needed for this receiver fix.
+- [ ] Separate ALS frontend Markdown link parsing issue: `/absolute/path#L198`
+  was treated as a same-origin HTTP URL. User explicitly distinguishes this
+  from the intent failure; no frontend fix or ALS edits performed in this slice.
+
 ## Current work order
 
 1. Startup/HTTP initialization: user live accepted 2026-10-20, complete.
 2. Framework-pipe/Sidebar intents (O1): source checkpointed; grouped live gates remain.
-   Code TE2's user-supplied Any audit is now approved/in progress before another build.
+   Code TE2's Any source audit is complete; native/mypyc build gates remain.
 3. Pipe concurrency and bounded DTO/PyO3 buffering (O2): follows intents.
 4. Native debug/internal console-bridge retirement: deferred behind both.
 5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
@@ -33,10 +100,20 @@ Validation belongs within each work phase, never a replacement for actual work.
 - [x] User separately approves fixing the discovered single-vs-list `skipSid`
   native delivery gap, with regression source but no rebuild/restart. Python
   adapters and native filter align; native test execution/activation remain open.
-- [ ] Continue remaining DTO/event/state, build-helper and test-fixture groups;
+- [x] User approves first-slice checkpoint and continuation: local 039e38bf,
+  no push/version bump. Preserve the three unrelated untracked user files.
+- [x] Continue remaining DTO/event/state, build-helper and test-fixture groups;
   distinguish library-stub/unused-expression inference from actual dynamic DTOs.
-- [ ] Validate with the agreed stronger mypy command, owner regressions and mypyc
-  checks; document remaining external-stub seams instead of masking them.
+- [x] Full strict/extra/all-Any command: zero issues in all 246 Code TE2 source
+  files, including Python tests/build helpers. New root typed-ingress regressions
+  independently pass the same flags. No Any/cast/ignore escapes or weaker policy.
+- [x] Final combined owner regressions: 337 tests, 20 subtests pass. Validate
+  valid/invalid legacy overlay ingress without importing native code, existing
+  build command resolution, ASGI resources, state/diagnostic/History projections,
+  draft/autosave/routing guards and terminal/marketplace fixtures. See TYPING_AUDIT.md.
+- [ ] Separately approved native test compilation and mypyc build validation,
+  activation and user live checks. The previously added Rust exclusion-list
+  test remains source-only; stronger mypy success is not mypyc build success.
 
 User reports interpreted modules running well. No compiled activation, frontend
 publication or original-report edits; typing work does not authorize build-policy
@@ -393,3 +470,17 @@ User authorizes checkpoint/push of accepted startup/DevTools work and planning/
 release receipts. Preserve research_handoff.md and ty.toml unstaged. WBA remains
 unchanged/deferred. Next: deepen the Sidebar/pipeline contract audit and propose
 bounded implementation; no migration implementation or shared restart yet.
+
+## Deferred — ALS renderer-owned Markdown file actions
+
+- [x] Read-only live investigation: raw APP_RPC.md filesystem href/#L198 is
+  correct; line-hash parser recognizes it and routing is bound. Native long-press
+  menu shows normal origin-resolved .href, not the RPC destination.
+- [x] User confirms ordinary Markdown file-link clicks now open correctly;
+  distinguish this from the corrected compiled pipe receiver schema issue.
+- [x] User explicitly chooses end-of-plan deferral; no ALS frontend/source,
+  build, vendored snapshot, OTA or runtime changes performed for this item.
+- [ ] On separate approval, classify file links during rendering and emit
+  explicit path/line/column file actions using existing own-backend RPC only on
+  activation. Preserve web URLs, streaming/final/replay parity, accessibility and
+  exact-client proof; prevent misleading localhost link-menu destinations.

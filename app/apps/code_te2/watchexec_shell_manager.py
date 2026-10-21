@@ -96,8 +96,8 @@ def _forward_watchexec_event(evt: JsonObject, project_root: str) -> None:
     # watchexec --emit-events-to json-stdio format:
     # {"tags": [{"kind": "path", "absolute": "/abs/path", "filetype": "file"},
     #           {"kind": "fs", "simple": "create"|"modify"|"remove"|"rename"|...}], ...}
-    tags_obj = evt.get("tags", [])
-    tags = cast(list[object], tags_obj if isinstance(tags_obj, list) else [])
+    tags_obj = evt.get("tags")
+    tags: list[object] = tags_obj if isinstance(tags_obj, list) else []
     if not tags:
         return
 
@@ -143,7 +143,7 @@ def _forward_watchexec_event(evt: JsonObject, project_root: str) -> None:
 
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            _ = loop.create_task(
+            _change_task: asyncio.Task[None] = loop.create_task(
                 publish_file_change_event(
                     str(project_root),
                     created_abs=[path_abs] if created else [],

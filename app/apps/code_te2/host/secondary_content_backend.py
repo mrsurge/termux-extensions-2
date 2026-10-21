@@ -90,7 +90,7 @@ def commit_historical_content(
 
 def close_secondary_content(client_id: str) -> None:
     _state.close(client_id)
-    _ = _foreground_revisions.pop(client_id, None)
+    _foreground_revisions.pop(client_id, None)
 
 
 def reconcile_secondary_foreground(foreground: ClientForegroundPayload) -> None:

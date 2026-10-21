@@ -433,7 +433,7 @@ async def editor_runtime_request_save_snapshot(
         return await asyncio.wait_for(fut, timeout=timeout_s)
     finally:
         if _SAVE_SNAPSHOT_WAITING.get(request_id) is waiting:
-            _ = _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
+            _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
 
 
 def editor_runtime_resolve_save_snapshot_response(data: dict[str, object]) -> None:
@@ -466,7 +466,7 @@ async def editor_runtime_request_issues_dump(
         return await asyncio.wait_for(fut, timeout=timeout_s)
     finally:
         if _ISSUES_DUMP_WAITING.get(request_id) is waiting:
-            _ = _ISSUES_DUMP_WAITING.pop(request_id, None)
+            _ISSUES_DUMP_WAITING.pop(request_id, None)
 
 
 def editor_runtime_build_connect_snapshot(
@@ -756,7 +756,7 @@ async def editor_runtime_handle_issues_dump_response(source_client: str, data: d
     waiting = _ISSUES_DUMP_WAITING.get(request_id)
     if waiting is None or waiting[0] != source_client:
         return
-    _ = _ISSUES_DUMP_WAITING.pop(request_id, None)
+    _ISSUES_DUMP_WAITING.pop(request_id, None)
 
     response_payload: dict[str, object] = {"requestId": request_id, "dump": data.get("dump")}
     future = waiting[1]

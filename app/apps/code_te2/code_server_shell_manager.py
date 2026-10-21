@@ -346,7 +346,7 @@ async def _ensure_code_server_shell(
         try:
             from .extension_registry import ensure_registry_and_gate
 
-            _ = await asyncio.to_thread(ensure_registry_and_gate)
+            await asyncio.to_thread(ensure_registry_and_gate)
         except Exception as exc:
             print(f"[code_server] extension registry cleanup failed (non-fatal): {exc}", flush=True)
 
@@ -408,7 +408,7 @@ async def _ensure_code_server_shell(
         # files.watcherExclude values on top of the gate output.
         try:
             from .extension_registry import ensure_registry_and_gate
-            _ = await asyncio.to_thread(ensure_registry_and_gate)
+            await asyncio.to_thread(ensure_registry_and_gate)
         except Exception as exc:
             print(f"[code_server] extension registry scan failed (non-fatal): {exc}", flush=True)
 

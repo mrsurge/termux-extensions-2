@@ -38,8 +38,9 @@ class BroadcastCacheStateFn(Protocol):
 
 def _as_editor_prefs(preferences_store: PreferencesStoreLike) -> dict[str, object]:
     prefs = preferences_store.get_preferences()
-    editor_obj = prefs.get("editor", {})
-    return cast(dict[str, object], editor_obj if isinstance(editor_obj, dict) else {})
+    editor_obj = prefs.get("editor")
+    editor: dict[str, object] = editor_obj if isinstance(editor_obj, dict) else {}
+    return editor
 
 
 async def handle_update_preference(
@@ -88,8 +89,8 @@ async def handle_update_preference(
                         try:
                             rel = normalize_rel_path(Path(project_path).expanduser(), current_file)
                             diff_data = collect_diff(Path(project_path).expanduser(), rel, current_diff_base(project_path))
-                            hunks_obj = diff_data.get("hunks", [])
-                            hunks = cast(list[object], hunks_obj if isinstance(hunks_obj, list) else [])
+                            hunks_obj = diff_data.get("hunks")
+                            hunks: list[object] = hunks_obj if isinstance(hunks_obj, list) else []
                             for ed in editors:
                                 ed.set_diff_decorations(hunks)
                             print("[PREFERENCE] Refreshed diffs after word wrap enabled", file=sys.stderr)

@@ -7,13 +7,13 @@ Keep resource URLs stable for native OTA/APK interception.
 import asyncio
 import json
 from pathlib import Path
-from typing import cast
 
 from starlette.requests import Request
 from starlette.routing import Route
 from starlette.responses import FileResponse, Response
 
 from ..theme_catalog import load_extension_theme
+from ..http_contracts import path_parameter
 
 
 def build_editor_asset_routes(mount_path: str = "/ui") -> list[Route]:
@@ -54,21 +54,21 @@ export default href;
         return FileResponse(str(target))
 
     async def _serve_monaco_vscode_esm(request: Request) -> Response:
-        file_path = cast(str, request.path_params["file_path"])
+        file_path = path_parameter(request, "file_path")
         raw = request.query_params.get("raw")
         if not esm_ok:
             return Response("monaco esm not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
         return await _serve_static_with_css_shim(vscode_monaco_esm_dir, file_path, raw)
 
     async def _serve_monaco_vscode_lang(request: Request) -> Response:
-        file_path = cast(str, request.path_params["file_path"])
+        file_path = path_parameter(request, "file_path")
         raw = request.query_params.get("raw")
         if not lang_ok:
             return Response("te2-lang not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
         return await _serve_static_with_css_shim(vscode_monaco_lang_dir, file_path, raw)
 
     async def _serve_monaco_editor_theme_json(request: Request) -> Response:
-        file_path = cast(str, request.path_params["file_path"])
+        file_path = path_parameter(request, "file_path")
         base = Path(__file__).with_name("themes").resolve()
         target = (base / file_path).resolve()
         if not str(target).startswith(str(base) + "/") and target != base:
@@ -78,15 +78,15 @@ export default href;
         return FileResponse(str(target), media_type="application/json")
 
     async def _serve_cs_extension_theme(request: Request) -> Response:
-        ext_id = cast(str, request.path_params["ext_id"])
-        theme_file = cast(str, request.path_params["theme_file"])
+        ext_id = path_parameter(request, "ext_id")
+        theme_file = path_parameter(request, "theme_file")
         theme = await asyncio.to_thread(load_extension_theme, ext_id, theme_file)
         if theme is None:
             return Response("not found", status_code=404, media_type="text/plain")
         return Response(json.dumps(theme), media_type="application/json")
 
     async def _serve_monaco_editor_textmate(request: Request) -> Response:
-        file_path = cast(str, request.path_params["file_path"])
+        file_path = path_parameter(request, "file_path")
         base = Path(__file__).with_name("textmate").resolve()
         target = (base / file_path).resolve()
         if not str(target).startswith(str(base) + "/") and target != base:

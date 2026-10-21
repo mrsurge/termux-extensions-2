@@ -463,7 +463,7 @@ class LogicalDocumentReconciler:
             record_coalesced_event("logical_document_reconciler", event_type)
 
     async def _run(self, revision: int, reason: str) -> None:
-        current_task = asyncio.current_task()
+        current_task: asyncio.Task[object] | None = asyncio.current_task()
         try:
             # One bounded retry handles a descriptor/materialization race. New
             # state facts still cancel this task and schedule the authoritative run.

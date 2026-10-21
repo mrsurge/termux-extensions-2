@@ -65,12 +65,12 @@ def _retain_project(project: str) -> None:
         _projection_revisions,
     ):
         for stale_project in [key for key in cache if key != project]:
-            _ = cache.pop(stale_project, None)
+            cache.pop(stale_project, None)
     for stale_project, task in list(_projection_tasks.items()):
         if stale_project == project:
             continue
         _ = task.cancel()
-        _ = _projection_tasks.pop(stale_project, None)
+        _projection_tasks.pop(stale_project, None)
 
 
 def _marker_severity(marker: object) -> int:
@@ -246,7 +246,7 @@ async def _run_projection(project: str) -> None:
     except Exception:
         logger.exception("[file_tabs] projection failed project=%s", project)
     finally:
-        _ = _projection_tasks.pop(project, None)
+        _projection_tasks.pop(project, None)
 
 
 def _schedule_projection(project: str) -> None:

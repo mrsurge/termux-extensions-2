@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import hashlib
 import errno
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -19,6 +21,198 @@ spec = importlib.util.spec_from_file_location('mypyc_build_workflow_test', SCRIP
 assert spec is not None and spec.loader is not None
 workflow = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(workflow)
+
+
+@pytest.mark.parametrize('parallel', [None, 2])
+def test_compile_progress_counts_success_and_up_to_date_targets(monkeypatch, parallel):
+    from setuptools import Distribution, Extension
+    from setuptools.command.build_ext import build_ext
+
+    class Compiler:
+        def _compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts):
+            print('detail stays in build log')
+
+    def build_extension(command, extension):
+        if extension.name != 'cached':
+            for source in extension.sources:
+                command.compiler._compile('object.o', source, '.c', [], [], [])
+
+    monkeypatch.setattr(build_ext, 'build_extension', build_extension)
+    output = io.StringIO()
+    command_type = workflow.progress_build_ext(output)
+    extensions = [Extension('first', ['one.c', 'shared.c']),
+                  Extension('second', ['shared.c']), Extension('cached', ['cached.c'])]
+    command = command_type(Distribution({'ext_modules': extensions}))
+    command.ensure_finalized()
+    compiler = Compiler()
+    original = compiler._compile
+    command.compiler = compiler
+    command.parallel = parallel
+    with redirect_stdout(io.StringIO()) as log:
+        command.build_extensions()
+    lines = output.getvalue().splitlines()
+    assert lines[0] == '[mypyc 0/4] C compilation targets'
+    assert [line.split(']')[0] for line in lines[1:]] == [
+        f'[mypyc {index}/4' for index in range(1, 5)]
+    assert sum('Compiled' in line for line in lines) == 3
+    assert any('shared.c [first]' in line for line in lines)
+    assert any('shared.c [second]' in line for line in lines)
+    assert sum('Up-to-date cached.c' in line for line in lines) == 1
+    assert 'detail stays in build log' in log.getvalue()
+    assert 'detail stays in build log' not in output.getvalue()
+    assert compiler._compile == original
+
+
+def test_compile_progress_failure_does_not_complete_and_restores_compiler(monkeypatch):
+    from setuptools import Distribution, Extension
+    from setuptools.command.build_ext import build_ext
+
+    class Compiler:
+        def _compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts):
+            raise RuntimeError('compiler failed')
+
+    def build_extension(command, extension):
+        command.compiler._compile('object.o', extension.sources[0], '.c', [], [], [])
+
+    monkeypatch.setattr(build_ext, 'build_extension', build_extension)
+    output = io.StringIO()
+    command = workflow.progress_build_ext(output)(Distribution({
+        'ext_modules': [Extension('failed', ['failed.c'])]}))
+    command.ensure_finalized()
+    compiler = Compiler()
+    original = compiler._compile
+    command.compiler = compiler
+    with pytest.raises(RuntimeError, match='compiler failed'):
+        command.build_extensions()
+    assert output.getvalue() == '[mypyc 0/1] C compilation targets\n'
+    assert compiler._compile == original
+
+
+@pytest.mark.parametrize(('counters', 'expected'), [
+    ({'direct_cache_hit': 1, 'cache_miss': 0}, 'cache hit'),
+    ({'direct_cache_miss': 1, 'preprocessed_cache_hit': 1}, 'cache hit'),
+    ({'cache_miss': 1}, 'cache miss'),
+    ({'unsupported_compiler_option': 1}, 'uncached'),
+    ({'disabled': 1}, 'uncached'),
+    ({'stats_updated_timestamp': 123, 'local_storage_read_hit': 1}, 'cache status unknown'),
+    ({'direct_cache_hit': 'yes'}, 'cache status unknown'),
+    ({'direct_cache_hit': True}, 'cache status unknown'),
+    ([], 'cache status unknown'),
+])
+def test_per_target_cache_statistics(tmp_path, monkeypatch, counters, expected):
+    log = tmp_path / 'stats.log'
+    log.write_text('fixture')
+
+    def stats(command, **kwargs):
+        assert command == ['ccache', '--print-log-stats', '--format=json']
+        assert kwargs['env']['CCACHE_STATSLOG'] == str(log)
+        return subprocess.CompletedProcess(command, 0, json.dumps(counters), '')
+
+    monkeypatch.setattr(workflow.subprocess, 'run', stats)
+    assert workflow.ccache_target_status('ccache', log) == expected
+
+
+@pytest.mark.parametrize('failure', ['missing', 'invalid', 'exit', 'timeout'])
+def test_cache_observation_failure_is_not_a_build_failure(tmp_path, monkeypatch, failure):
+    log = tmp_path / 'stats.log'
+    if failure != 'missing':
+        log.write_text('fixture')
+
+    def stats(command, **kwargs):
+        if failure == 'timeout':
+            raise subprocess.TimeoutExpired(command, 5)
+        return subprocess.CompletedProcess(command, 1 if failure == 'exit' else 0, 'invalid', '')
+
+    monkeypatch.setattr(workflow.subprocess, 'run', stats)
+    assert workflow.ccache_target_status('ccache', log) == 'cache status unknown'
+    assert workflow.ccache_target_status(None, log) == 'uncached'
+
+
+@pytest.mark.parametrize('method', ['call', 'spawn'])
+def test_cache_observer_is_per_context_and_does_not_change_environment(tmp_path, method):
+    from contextvars import ContextVar, copy_context
+
+    class Compiler:
+        pass
+
+    commands = []
+    compiler = Compiler()
+
+    def execute(command, **kwargs):
+        commands.append((command, kwargs))
+
+    setattr(compiler, method, execute)
+    current = ContextVar('test_target', default=None)
+    first = workflow.CacheInvocation(tmp_path / 'first.log')
+    second = workflow.CacheInvocation(tmp_path / 'second.log')
+    ctx1, ctx2 = copy_context(), copy_context()
+    ctx1.run(current.set, first)
+    ctx2.run(current.set, second)
+    environment = dict(os.environ)
+    command = ['/usr/bin/ccache', 'cc', '-c', 'test.c', '-o', 'test.o']
+    with workflow.observe_compiler_cache(compiler, current) as available:
+        assert available
+        ctx1.run(getattr(compiler, method), command, env={'CUSTOM': 'preserved'})
+        ctx2.run(getattr(compiler, method), command)
+        getattr(compiler, method)(command)
+    assert commands[0] == ([command[0], f'stats_log={first.log_path}', *command[1:]],
+                           {'env': {'CUSTOM': 'preserved'}})
+    assert commands[1][0][1] == f'stats_log={second.log_path}'
+    assert commands[2][0] is command
+    assert command[1] == 'cc'
+    assert getattr(compiler, method) is execute
+    assert dict(os.environ) == environment
+
+
+def test_real_ccache_miss_then_hit_in_isolated_cache(tmp_path):
+    executable = shutil.which('ccache')
+    compiler = shutil.which('cc')
+    if executable is None or compiler is None:
+        pytest.skip('requires ccache and a C compiler')
+    source = tmp_path / 'sample.c'
+    source.write_text('int sample(void) { return 1; }\n')
+    env = {key: value for key, value in os.environ.items() if not key.startswith('CCACHE_')}
+    env['CCACHE_DIR'] = str(tmp_path / 'cache')
+    env['CCACHE_CONFIGPATH'] = str(tmp_path / 'empty.conf')
+    (tmp_path / 'empty.conf').write_text('')
+    for expected, name in [('cache miss', 'miss'), ('cache hit', 'hit')]:
+        target = workflow.CacheInvocation(tmp_path / (name + '.log'))
+        command = target.command([executable, compiler, '-c', str(source),
+                                  '-o', str(tmp_path / 'sample.o')])
+        subprocess.run(command, env=env, check=True)
+        assert workflow.ccache_target_status(target.executable, target.log_path) == expected
+
+
+def test_real_build_ext_reports_target_cache_results(tmp_path, monkeypatch):
+    from setuptools import Distribution, Extension
+
+    executable = shutil.which('ccache')
+    compiler = shutil.which('cc')
+    if executable is None or compiler is None:
+        pytest.skip('requires ccache and a C compiler')
+    for key in os.environ:
+        if key.startswith('CCACHE_'):
+            monkeypatch.delenv(key)
+    config = tmp_path / 'ccache.conf'
+    config.write_text('')
+    monkeypatch.setenv('CC', f'{executable} {compiler}')
+    monkeypatch.setenv('CCACHE_DIR', str(tmp_path / 'isolated-cache'))
+    monkeypatch.setenv('CCACHE_CONFIGPATH', str(config))
+    source = tmp_path / 'fixture.c'
+    source.write_text('int fixture(void) { return 1; }\n')
+    output = io.StringIO()
+    for expected in ['Compiled (cache miss)', 'Cache hit']:
+        output.seek(0)
+        output.truncate()
+        command = workflow.progress_build_ext(output, cache_enabled=True)(Distribution({
+            'ext_modules': [Extension('fixture', [str(source)])]}))
+        command.build_lib = str(tmp_path / 'lib')
+        command.build_temp = str(tmp_path / 'temp')
+        command.force = True
+        command.ensure_finalized()
+        command.run()
+        assert f'[mypyc 1/1] {expected} fixture.c' in output.getvalue()
+    assert not list(tmp_path.rglob('.ccache-target-*'))
 
 
 @pytest.fixture(autouse=True)

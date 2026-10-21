@@ -1,10 +1,9 @@
 # pyright: strict
 from __future__ import annotations
 
-import importlib
 import time
 from pathlib import Path
-from typing import Callable, Protocol, cast
+from typing import Protocol, cast
 
 from ..contracts.file_tree import (
     ExplorerBatchDestinationParams,
@@ -19,8 +18,7 @@ from ..contracts.file_tree import (
 from ..context import ExplorerFileTreeHandlerContext
 from ..services.state_facts import publish_explorer_directories_changed
 from ..services.file_ops import mark_git_cache_dirty
-
-ExplorerHelperCall = Callable[..., object]
+from ..services import file_ops
 
 
 class EmitEditorOpenFromBackend(Protocol):
@@ -40,8 +38,7 @@ async def handle_create_file(
 ) -> None:
     del msg_id
 
-    created = _call_explorer_helper_dict(
-        "create_file",
+    created = file_ops.create_file(
         params["parent_rel"],
         params["name"],
     )
@@ -56,8 +53,7 @@ async def handle_create_dir(
 ) -> None:
     del msg_id
 
-    created = _call_explorer_helper_dict(
-        "create_directory",
+    created = file_ops.create_directory(
         params["parent_rel"],
         params["name"],
     )
@@ -72,8 +68,7 @@ async def handle_rename_entry(
 ) -> None:
     del msg_id
 
-    renamed = _call_explorer_helper_dict(
-        "rename_entry",
+    renamed = file_ops.rename_entry(
         params["rel"],
         params["new_name"],
     )
@@ -92,7 +87,7 @@ async def handle_delete_entry(
 ) -> None:
     del msg_id
 
-    deleted = _call_explorer_helper_dict("delete_entry", params["rel"])
+    deleted = file_ops.delete_entry(params["rel"])
     del deleted
     await _publish_changed_dirs(
         context,
@@ -110,7 +105,7 @@ async def handle_batch_delete(
 ) -> None:
     del msg_id
 
-    deleted = _call_explorer_helper_dict("batch_delete", params["rels"])
+    deleted = file_ops.batch_delete(params["rels"])
     del deleted
 
     for parent_rel in {_get_parent_rel(rel) for rel in params["rels"]}:
@@ -127,8 +122,7 @@ async def handle_batch_copy(
 ) -> None:
     del msg_id
 
-    copied = _call_explorer_helper_dict(
-        "batch_copy",
+    copied = file_ops.batch_copy(
         params["rels"],
         params["dest_path"],
     )
@@ -147,8 +141,7 @@ async def handle_batch_move(
 ) -> None:
     del msg_id
 
-    moved = _call_explorer_helper_dict(
-        "batch_move",
+    moved = file_ops.batch_move(
         params["rels"],
         params["dest_path"],
     )
@@ -261,8 +254,7 @@ async def handle_move_entry(
 ) -> None:
     del msg_id
 
-    moved = _call_explorer_helper_dict(
-        "move_entry",
+    moved = file_ops.move_entry(
         params["rel"],
         params["dest_path"],
     )
@@ -280,8 +272,7 @@ async def handle_copy_entry(
 ) -> None:
     del msg_id
 
-    copied = _call_explorer_helper_dict(
-        "copy_entry",
+    copied = file_ops.copy_entry(
         params["rel"],
         params["dest_path"],
     )
@@ -300,8 +291,7 @@ async def handle_copy_from(
 ) -> None:
     del msg_id
 
-    copied = _call_explorer_helper_dict(
-        "copy_entry_inbound",
+    copied = file_ops.copy_entry_inbound(
         params["source_path"],
         params["dest_rel"],
     )
@@ -316,8 +306,7 @@ async def handle_move_from(
 ) -> None:
     del msg_id
 
-    moved = _call_explorer_helper_dict(
-        "move_entry_inbound",
+    moved = file_ops.move_entry_inbound(
         params["source_path"],
         params["dest_rel"],
     )
@@ -337,19 +326,6 @@ async def _publish_changed_dirs(
         reason=reason,
         source="explorer_file_tree",
     )
-
-
-def _call_explorer_helper_dict(name: str, *args: object) -> dict[str, object]:
-    helper = _get_explorer_helper_callable(name)
-    return _normalize_object_dict(helper(*args))
-
-
-def _get_explorer_helper_callable(name: str) -> ExplorerHelperCall:
-    helper_module = importlib.import_module("app.apps.code_te2.explorer.services.file_ops")
-    helper = getattr(helper_module, name, None)
-    if not callable(helper):
-        raise RuntimeError(f"explorer.services.file_ops.{name} unavailable")
-    return cast(ExplorerHelperCall, helper)
 
 
 def _normalize_object_dict(value: object) -> dict[str, object]:
@@ -388,10 +364,6 @@ def _make_request_id() -> str:
 
 
 def _get_emit_editor_open_from_backend() -> EmitEditorOpenFromBackend:
-    editor_ws_module = importlib.import_module(
-        "app.apps.code_te2.monaco_editor.editor_ws"
-    )
-    emit_editor_open = getattr(editor_ws_module, "emit_editor_open_from_backend", None)
-    if not callable(emit_editor_open):
-        raise RuntimeError("emit_editor_open_from_backend unavailable")
-    return cast(EmitEditorOpenFromBackend, emit_editor_open)
+    from ...monaco_editor.editor_ws import emit_editor_open_from_backend
+
+    return emit_editor_open_from_backend

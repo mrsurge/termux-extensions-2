@@ -246,7 +246,8 @@ async def _deliver(event: WorkerEvent) -> None:
 
     handlers = list(_handlers.get(event["type"], []))
     for handler in handlers:
-        handler_name = getattr(handler, "__name__", repr(handler))
+        raw_name: object = getattr(handler, "__name__", repr(handler))
+        handler_name = str(raw_name)
         started = time.perf_counter()
         try:
             await handler(event)

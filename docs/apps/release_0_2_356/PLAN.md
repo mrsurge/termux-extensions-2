@@ -60,6 +60,43 @@ restart or commit is authorized by this cleanup. A separately approved native
 worker correction aligns `skipSid` list delivery with the Python Sidebar
 contract; its tests remain unexecuted until a build/test compilation is approved.
 
+The first slice is checkpointed locally as `039e38bf`; the user approves continuing
+the remaining report. Source cleanup now passes the full stronger invocation for
+the Code TE2 tree and focused owner regressions. Remaining gates are actual
+native/mypyc compilation and live activation, not further known diagnostics in
+this report. Keep the stronger audit separate from durable build-policy changes;
+do not infer compilation-time improvements from error-count reductions.
+
+### Approved mypyc progress/cache visibility and import correction
+
+User requests live completed/total C targets, then per-target cache labels for
+future builds. Preserve normal build/cache/concurrency/activation policy; use
+ccache's isolated per-invocation machine-readable results rather than global
+counter deltas or elapsed-time guesses. Missing statistics must be unknown.
+Tests include tiny isolated compiler fixtures, not a full editor build.
+
+The user's subsequent 310/310 build fails during import validation, not C
+compilation. Isolated imports of its retained compiler outputs reproduce
+NativeEventHandler losing runtime Protocol identity under mypyc. User separately
+approves extracting that Protocol and the same-shaped QueueSizeReader into one
+small interpreted contracts module, retaining compiled implementation modules,
+with actual focused compile/import validation. Full domain rebuild/activation
+and runtime testing remain separate; do not publish or activate failed snapshots.
+
+## Compiled Sidebar DTO correction during live validation
+
+2026-10-21: user validates the new compiled runtime; the running worker log and
+loaded shared objects confirm actual mypyc adoption. ALS diff-link file opens
+then reveal a receiver-side schema failure, independently of the separately
+reported ALS Markdown-link frontend parsing bug. User approves moving the three
+runtime-inspected msgspec Struct DTOs to the existing interpreted Sidebar
+contract module, preserving compiled dispatch, strict validation and all owners.
+The actual codegen dispatch test additionally exposes request-order-dependent
+module initialization; user separately approves correcting the lazy import.
+Qualify first-call file-open and valid/invalid/null coordinates/qualified IDs in
+the compiled fixture. No full domain rebuild, activation, ALS rebuild/OTA or
+runtime restart is authorized by these fixes. Markdown parsing remains separate.
+
 ## Pre-IPC inspection affordance — Electron DevTools
 
 User approves an immediate small Electron-only affordance before the next major
@@ -444,3 +481,26 @@ moving to Sidebar/intent work; do not start O9 as the next slice.
 
 This is a provisional dependency-aware investigation order, not a promise to ship
 all eight items in .356. User can reprioritize as the optimization list develops.
+
+## Deferred — ALS renderer-owned Markdown file actions
+
+User explicitly defers implementation (2026-10-21); this is an end-of-plan
+follow-up, not a release blocker or permission to begin source changes.
+
+Classify filesystem destinations while rendering Markdown and produce explicit
+file-open action markup carrying path/line/column, rather than ordinary
+HTTP-resolvable anchors intercepted by a generic click handler. Activation must
+reuse ALS's existing own-backend file-open RPC and framework-pipe routing;
+rendering/streaming/replay must never execute an operation. Preserve normal web
+links, keyboard/accessibility behavior and exact-client/presentation admission.
+Qualify both streaming and finalized/replayed rendering, absolute/relative paths,
+encoded paths, #L198/#L198C4 and supported colon coordinates. File links should
+not expose bogus localhost URLs in native long-press/link menus; choose a
+file-aware action/context-menu affordance without relying on file:// navigation.
+
+Read-only evidence: the live APP_RPC.md anchor retained its correct raw
+filesystem href and #L198 hash, with link routing bound and the hash recognized.
+The native long-press menu displayed the browser-resolved .href on the current
+loopback origin; ordinary clicks are user-confirmed working after the pipe
+receiver correction. This is separate from the compiled DTO/intent failure.
+Obtain a concrete renderer/interaction/test approval when this item is resumed.

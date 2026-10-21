@@ -32,6 +32,10 @@ MarkGitCacheDirtyFn = Callable[[Path], None]
 mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _file_ops.mark_git_cache_dirty)
 
 
+def _directory_replay_order(rel: str) -> tuple[int, str]:
+    return rel.count("/"), rel
+
+
 async def handle_explorer_list(
     context: ExplorerSessionHandlerContext,
     params: ExplorerListParams,
@@ -65,7 +69,7 @@ async def handle_explorer_refresh(
         source="explorer_session:refresh",
         payload={
             "reason": "refresh",
-            "directories": [".", *sorted(set(open_directories), key=lambda rel: (rel.count('/'), rel))],
+            "directories": [".", *sorted(set(open_directories), key=_directory_replay_order)],
             "open_directories": open_directories,
             "open_directories_changed": True,
         },

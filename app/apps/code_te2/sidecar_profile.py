@@ -51,7 +51,7 @@ def emit_window(phase: str) -> None:
         _emitted.add(phase)
         samples = dict(_samples)
         _samples.clear()
-    operations = {
+    operations: dict[str, dict[str, int | float]] = {
         name: {
             "count": sample.count,
             "total_ms": round(sample.total_ns / 1_000_000, 3),
@@ -60,8 +60,9 @@ def emit_window(phase: str) -> None:
         }
         for name, sample in sorted(samples.items())
     }
+    payload: dict[str, object] = {"phase": phase, "operations": operations}
     print(
-        "[sidecar_profile] " + json.dumps({"phase": phase, "operations": operations}, separators=(",", ":")),
+        "[sidecar_profile] " + json.dumps(payload, separators=(",", ":")),
         file=sys.stderr,
         flush=True,
     )

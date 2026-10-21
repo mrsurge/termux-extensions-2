@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import ParamSpec, Protocol, TypeVar, cast, runtime_checkable
+from typing import ParamSpec, Protocol, TypeVar, cast
+from .native_runtime_contracts import NativeEventHandler as NativeEventHandler
 from .persistence_io import NativePersistence
 from .native_shells import NativeShellBridge
 from .terminal_log_io import NativeTerminalLog
@@ -16,17 +17,6 @@ from .wba_pipe_codec import NativeWbaCodec
 
 _Args = ParamSpec("_Args")
 _Result = TypeVar("_Result")
-
-
-@runtime_checkable
-class NativeEventHandler(Protocol):
-    """Invocation boundary for native-decoded positional event arguments.
-
-    Event owners retain their concrete signatures and payload validation. This
-    only checks callability; invocation still raises on wrong argument arity.
-    """
-
-    def __call__(self, *args: object) -> Awaitable[object]: ...
 
 
 class NativeBridge(NativePersistence, NativeShellBridge, NativeTerminalLog, NativeFwsBridge, NativeWbaCodec, Protocol):

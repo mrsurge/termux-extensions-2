@@ -87,10 +87,10 @@ async def wait_for_run_profile_url(
     import httpx
 
     surface_id = run_profile_surface_id(project_root, profile_id)
-    current_task = asyncio.current_task()
+    current_task: asyncio.Task[object] | None = asyncio.current_task()
     if current_task is None:
         raise RuntimeError("Run Profile readiness requires an asyncio task")
-    task = cast(asyncio.Task[object], current_task)
+    task = current_task
     previous = _readiness_tasks.get(surface_id)
     if previous is not None and previous is not task and not previous.done():
         _ = previous.cancel()
@@ -117,7 +117,7 @@ async def wait_for_run_profile_url(
                 delay = min(READINESS_MAX_DELAY_SECONDS, delay * 2)
     finally:
         if _readiness_tasks.get(surface_id) is task:
-            _ = _readiness_tasks.pop(surface_id, None)
+            _readiness_tasks.pop(surface_id, None)
 
 
 def cancel_run_profile_url_readiness(

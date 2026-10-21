@@ -356,10 +356,10 @@ async def history_session(root: Path, generation: int) -> AsyncIterator[HistoryS
     opening = asyncio.create_task(session.open())
     try:
         # Shield admission so cancellation cannot send close before open was sent.
-        _ = await asyncio.shield(opening)
+        await asyncio.shield(opening)
         yield session
     finally:
         try:
-            _ = await asyncio.shield(opening)
+            await asyncio.shield(opening)
         finally:
             await session.close()

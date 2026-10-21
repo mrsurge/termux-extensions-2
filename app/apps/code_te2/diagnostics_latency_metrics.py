@@ -8,7 +8,8 @@ import os
 import time
 from collections import OrderedDict
 from collections.abc import Mapping
-from typing import TypedDict, cast, final
+from typing import TypedDict, final
+from .native_runtime_contracts import QueueSizeReader as QueueSizeReader
 
 METRICS_ENV = "CODE_TE2_DIAGNOSTICS_LATENCY_METRICS"
 METRICS_SYSTEM = "code_te2.diagnostics_latency"
@@ -123,7 +124,7 @@ class DiagnosticsLatencyMetrics:
             duration_ms=duration_ms,
             fields=fields,
         )
-        _ = self._open_traces.pop(request_id, None)
+        self._open_traces.pop(request_id, None)
 
     @property
     def open_trace_count(self) -> int:
@@ -180,22 +181,21 @@ def finish_open_trace(
 
 def sample_engineio_queues(owner: object) -> EngineIoQueueSample:
     """Best-effort packet queue sample from a Socket.IO server or namespace."""
-    server = getattr(owner, "server", owner)
-    engine = getattr(server, "eio", None)
-    sockets_obj = getattr(engine, "sockets", None)
+    server: object = getattr(owner, "server", owner)
+    engine: object = getattr(server, "eio", None)
+    sockets_obj: object = getattr(engine, "sockets", None)
     if not isinstance(sockets_obj, dict):
         return {"sockets": 0, "queued_packets": 0, "max_queue_depth": 0}
 
     queued_packets = 0
     max_queue_depth = 0
-    sockets = cast(dict[object, object], sockets_obj)
+    sockets: dict[object, object] = sockets_obj
     for socket in sockets.values():
-        queue = getattr(socket, "queue", None)
-        qsize = getattr(queue, "qsize", None)
-        if not callable(qsize):
+        queue: object = getattr(socket, "queue", None)
+        if not isinstance(queue, QueueSizeReader):
             continue
         try:
-            depth_obj = qsize()
+            depth_obj = queue.qsize()
         except Exception:
             continue
         if not isinstance(depth_obj, int):

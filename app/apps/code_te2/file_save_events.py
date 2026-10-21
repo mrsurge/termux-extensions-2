@@ -40,7 +40,7 @@ def publish_file_saved(
             }
         },
     )
-    _ = asyncio.create_task(
+    _save_task: asyncio.Task[None] = asyncio.create_task(
         publish_worker_event(event),
         name=f"code_te2_file_saved:{relative}",
     )

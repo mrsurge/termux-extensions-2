@@ -63,7 +63,7 @@ def remove_run_profile_shell(*, shell_id: str = "", label: str = "") -> bool:
     removed = False
     with _lock:
         if normalized_shell_id and normalized_shell_id in _shell_labels_by_id:
-            _ = _shell_labels_by_id.pop(normalized_shell_id, None)
+            _shell_labels_by_id.pop(normalized_shell_id, None)
             removed = True
         if normalized_label:
             for candidate_id in [
@@ -71,7 +71,7 @@ def remove_run_profile_shell(*, shell_id: str = "", label: str = "") -> bool:
                 for candidate_id, candidate_label in _shell_labels_by_id.items()
                 if candidate_label == normalized_label
             ]:
-                _ = _shell_labels_by_id.pop(candidate_id, None)
+                _shell_labels_by_id.pop(candidate_id, None)
                 removed = True
         if removed:
             _revision += 1

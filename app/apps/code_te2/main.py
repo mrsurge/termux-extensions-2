@@ -50,7 +50,7 @@ def _install_crash_diagnostics() -> None:
         try:
             print(
                 f"[code_te2][crash_diag] unhandled thread exception "
-                f"thread={getattr(args.thread, 'name', None)} exc={args.exc_type.__name__}: {args.exc_value}",
+                f"thread={args.thread.name if args.thread is not None else None} exc={args.exc_type.__name__}: {args.exc_value}",
                 file=sys.stderr,
                 flush=True,
             )

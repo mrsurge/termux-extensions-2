@@ -1,12 +1,17 @@
 """Resolve the persisted comparison selection against a Git snapshot."""
 from functools import lru_cache
+from collections.abc import Callable
 from pathlib import Path
 import re
 
 from ...worker_services import git_service
 
 
-@lru_cache(maxsize=256)
+CommitLookup = Callable[[str, str], git_service.GitCommit | None]
+_cache_commit: Callable[[CommitLookup], CommitLookup] = lru_cache(maxsize=256)
+
+
+@_cache_commit
 def _immutable_commit(project: str, revision: str) -> git_service.GitCommit | None:
     return git_service.get_commit_info(Path(project), revision)
 

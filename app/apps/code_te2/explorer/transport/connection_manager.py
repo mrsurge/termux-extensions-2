@@ -90,7 +90,8 @@ class ConnectionManager:
         for existing in self.active_connections.values():
             connections.extend(existing)
         # Preserve order while avoiding duplicate entries from prior remaps.
-        deduped = list(dict.fromkeys(connections))
+        unique: dict[ExplorerConnection, None] = dict.fromkeys(connections, None)
+        deduped = list(unique)
         self.active_connections = {project_path: deduped} if deduped else {}
         self.ws_project_map = {connection: project_path for connection in deduped}
         logger.info("Explorer clients reassigned to project: %s", project_path)

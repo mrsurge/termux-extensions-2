@@ -329,7 +329,7 @@ class HistoryStore:
         projects = _as_project_map(self._data.get("projects"))
         project_entry = projects.get(path)
         if not project_entry:
-            project_entry = cast(JsonDict, {"files": [], "last_file": None})
+            project_entry = {"files": [], "last_file": None}
         else:
             if "files" not in project_entry:
                 project_entry["files"] = []

@@ -36,7 +36,7 @@ def _json_object_list(value: object) -> list[JsonObject]:
 def _int_value(value: object, default: int = 0) -> int:
     if isinstance(value, bool):
         return int(value)
-    if isinstance(value, int | float | str):
+    if isinstance(value, (int, float, str)):
         try:
             return int(value)
         except ValueError:

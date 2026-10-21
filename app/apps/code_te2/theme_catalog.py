@@ -181,9 +181,11 @@ def _resolve_theme(extension: dict[str, object], relative_path: str) -> dict[str
             _ = semantic_colors.pop(selector, None)
             semantic_colors[selector] = style
         parent_tokens = parent.get("tokenColors")
+        parent_rules: list[object] = parent_tokens if isinstance(parent_tokens, list) else []
+        own_rules: list[object] = tokens if isinstance(tokens, list) else []
         result: dict[str, object] = {**parent, **data, "colors": colors,
                                       "semanticTokenColors": semantic_colors,
-                                      "tokenColors": (parent_tokens if isinstance(parent_tokens, list) else []) + (tokens if isinstance(tokens, list) else [])}
+                                      "tokenColors": parent_rules + own_rules}
         result["semanticHighlighting"] = bool(parent.get("semanticHighlighting")) or bool(data.get("semanticHighlighting"))
         _ = result.pop("include", None)
         return result

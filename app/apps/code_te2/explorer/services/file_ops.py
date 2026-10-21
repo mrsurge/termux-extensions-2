@@ -124,7 +124,7 @@ def mark_draft_cache_dirty(project_root: Path | None = None) -> None:
     with _STATE_LOCK:
         if project_root:
             key = str(project_root.resolve())
-            _ = _DRAFT_INDEX_CACHE.pop(key, None)
+            _DRAFT_INDEX_CACHE.pop(key, None)
         else:
             _DRAFT_INDEX_CACHE.clear()
 

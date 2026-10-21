@@ -71,12 +71,12 @@ def invalidate_diff_cache(project_root: Path | None = None, rel_path: str | None
     if rel_path is None:
         for key in list(_DIFF_CACHE.keys()):
             if key[0] == root_key:
-                _ = _DIFF_CACHE.pop(key, None)
+                _DIFF_CACHE.pop(key, None)
         return
 
     for key in list(_DIFF_CACHE.keys()):
         if key[0] == root_key and key[1] == rel_path:
-            _ = _DIFF_CACHE.pop(key, None)
+            _DIFF_CACHE.pop(key, None)
 
 
 def collect_diff(project_root: Path, rel_path: str, base_ref: str | None = None) -> JsonObject:

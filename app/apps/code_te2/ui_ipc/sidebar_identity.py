@@ -68,7 +68,8 @@ class SidebarIdentities:
     def register_page(self, sid: str, client_id: str, window_id: str) -> MainPage:
         if not client_id or not window_id:
             raise ValueError("main page requires client and window identity")
-        key = json.dumps([client_id, window_id], separators=(',', ':'))
+        identity: list[str] = [client_id, window_id]
+        key = json.dumps(identity, separators=(',', ':'))
         page = MainPage(client_id, window_id, self._reference("mainPages", key))
         previous = self.pages.get(sid)
         if previous is not None and previous != page:

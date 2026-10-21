@@ -90,6 +90,17 @@ budget at least 20 seconds.
 
 ## Sidebar service version 1
 
+Runtime-inspected file/project DTOs live in the already-interpreted
+`ui_ipc/sidebar_rpc_contract.py`: SidebarCallerTarget, SidebarFileOpen and
+SidebarProjectRequest. The host dispatcher remains compiled. Mypyc can erase
+nullable runtime field annotations into `type`, which msgspec then enforces
+incorrectly; import success and static typing alone do not qualify these DTOs.
+Keep strict validation/unknown-field rejection and test actual compiled calls
+with numeric coordinates and qualified presentation identity, including nulls.
+The dispatcher's lazy Sidebar module import must initialize that exact module,
+not depend on a previous CWD request warming mypyc's module reference. The real
+codegen regression in `tests/test_mypyc_runtime_protocols.py` opens a file first.
+
 - `cwd.get`: Terminal/File Explorer/ALS, empty payload, existing backend active-project
   CWD snapshot. No client focus lookup or project activation.
 - `window.state.update`: four declared callers; updates an **existing** shared

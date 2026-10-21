@@ -526,9 +526,12 @@ def _is_existing_project_directory(project_root: Path, rel: str) -> bool:
 
 
 def _sort_open_directories_for_replay(open_directories: list[str]) -> list[str]:
+    def directory_order(rel: str) -> tuple[int, str]:
+        return rel.count("/"), rel
+
     return sorted(
         [rel for rel in open_directories if rel],
-        key=lambda rel: (rel.count("/"), rel),
+        key=directory_order,
     )
 
 

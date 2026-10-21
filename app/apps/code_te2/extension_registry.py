@@ -602,10 +602,10 @@ def _textmate_revision(extensions: ExtensionMap) -> str:
         extension = extensions[ext_id]
         if not _entry_bool(extension, "active", True):
             continue
-        grammars = sorted(
-            _grammar_entries(extension),
-            key=lambda item: (str(item.get("path", "")), str(item.get("scopeName", ""))),
-        )
+        def grammar_order(item: dict[str, object]) -> tuple[str, str]:
+            return str(item.get("path", "")), str(item.get("scopeName", ""))
+
+        grammars = sorted(_grammar_entries(extension), key=grammar_order)
         if not grammars:
             continue
         projection.append({

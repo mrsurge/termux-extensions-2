@@ -61,8 +61,8 @@ def build_cache_state_payload(
 
     auto_save_enabled: bool | None
     try:
-        editor_prefs_obj = preferences_store.get_preferences().get("editor", {})
-        editor_prefs = cast(dict[str, object], editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {})
+        editor_prefs_obj = preferences_store.get_preferences().get("editor")
+        editor_prefs: dict[str, object] = editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {}
         auto_save_enabled = bool(editor_prefs.get("autoSave", False))
     except Exception:
         auto_save_enabled = None
@@ -208,8 +208,8 @@ def get_combined_diffs(
     compute_draft_diff: Callable[[str, str, str], dict[str, object]],
 ) -> list[object]:
     hunks: list[object] = []
-    editor_prefs_obj = preferences_store.get_preferences().get("editor", {})
-    prefs = cast(dict[str, object], editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {})
+    editor_prefs_obj = preferences_store.get_preferences().get("editor")
+    prefs: dict[str, object] = editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {}
 
     show_draft_diffs = not bool(prefs.get("autoSave", False)) and bool(prefs.get("showDraftDiffs", True))
     show_commit_diffs = bool(prefs.get("showInlineDiffs", False)) and not show_draft_diffs

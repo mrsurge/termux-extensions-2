@@ -33,8 +33,7 @@ def _json_object(value: object) -> JsonObject:
 
 
 def _file_meta(path: Path) -> JsonObject:
-    getter = cast(Callable[[Path], object], core_write.__dict__["_get_file_meta"])
-    return _json_object(getter(path))
+    return dict(core_write._get_file_meta(path))
 
 
 def _current_project_root() -> Path | None:
@@ -196,4 +195,4 @@ def emit_diff_changed(path: str, sha256: str) -> None:
         "sha256": sha256
     }
     _emit_event(event)
-    
+

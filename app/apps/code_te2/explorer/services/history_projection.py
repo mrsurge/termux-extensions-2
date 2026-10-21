@@ -240,7 +240,7 @@ class ExplorerHistory:
         if ready is None or revision != self._revision:
             raise ValueError("Stale History generation")
         try:
-            _ = await asyncio.shield(ready)
+            await asyncio.shield(ready)
         except asyncio.CancelledError:
             if ready.cancelled():
                 raise ValueError("History session initialization was superseded") from None

@@ -268,7 +268,8 @@ class ReviewProjectionOwner:
                     raise ValueError('Disk changed; refresh the review before reverting')
                 return revert_hunks(disk, content, [index] if isinstance(index, int) else index), disk_sha
 
-            content, disk_sha = await asyncio.to_thread(prepare)
+            prepared = await asyncio.to_thread(prepare)
+            content, disk_sha = prepared
             if (get_project_root().resolve() != root or current_project_generation(root) != generation
                     or not path.resolve().is_relative_to(root)):
                 raise ValueError('Draft review project changed')

@@ -301,13 +301,14 @@ async def _startup(app: SidebarBackchannelApp) -> None:
     os.chmod(socket_path, 0o600)
     _uds_socket_path = socket_path
 
-    setattr(app.state, "sidebar_backchannel_uds", {
+    state: JsonObject = {
         "enabled": True,
         "transport": "unix",
         "socket": str(socket_path),
         "protocol_version": _PROTOCOL_VERSION,
         "app_id": _APP_ID,
-    })
+    }
+    setattr(app.state, "sidebar_backchannel_uds", state)
     _log("server:started", socket=str(socket_path), protocol_version=_PROTOCOL_VERSION)
 
 
@@ -323,15 +324,17 @@ async def _shutdown(app: SidebarBackchannelApp) -> None:
         except Exception as exc:
             _log("server:socket_cleanup_error", socket=str(_uds_socket_path), error=str(exc))
         _uds_socket_path = None
-    setattr(app.state, "sidebar_backchannel_uds", {
+    state: JsonObject = {
         "enabled": False,
         "transport": "unix",
-    })
+    }
+    setattr(app.state, "sidebar_backchannel_uds", state)
     _log("server:stopped")
 
 
 def register(app: SidebarBackchannelApp) -> None:
-    if bool(getattr(app.state, "_sidebar_backchannel_uds_registered", False)):
+    registered: object = getattr(app.state, "_sidebar_backchannel_uds_registered", False)
+    if bool(registered):
         return
     setattr(app.state, "_sidebar_backchannel_uds_registered", True)
 
