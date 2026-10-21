@@ -3,12 +3,27 @@
 ## Current work order
 
 1. Startup/HTTP initialization: user live accepted 2026-10-20, complete.
-2. Framework-pipe/Sidebar intents (O1): next actual work.
+2. Framework-pipe/Sidebar intents (O1): approved foundation/app-call slice in progress.
+   Follow immediately with Code TE2's user-supplied Any audit; see below.
 3. Pipe concurrency and bounded DTO/PyO3 buffering (O2): follows intents.
 4. Native debug/internal console-bridge retirement: deferred behind both.
 5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
 
 Validation belongs within each work phase, never a replacement for actual work.
+
+## After the cutover — Code TE2 Any audit
+
+- [x] Record user-provided root mypy_typecheck_errors.txt as the seed for the
+  large strict/extra/all-Any-disallow typing pass. Preserve the report unchanged;
+  it is currently untracked user work, not a generated file to remove.
+- [ ] After ALS/Code TE2 cutover, reproduce the exact command/tool version and
+  refresh the baseline against the new source; group diagnostics by root cause.
+- [ ] Investigate and obtain bounded cleanup approval; prioritize typed callback,
+  event/DTO, service and worker boundaries without Any/cast/suppression escapes.
+- [ ] Validate with the agreed stronger mypy command, owner regressions and mypyc
+  checks; document remaining external-stub seams instead of masking them.
+
+Recording only: no typing cleanup, build-policy change or report edits now.
 
 ## Startup recovery
 
@@ -79,6 +94,109 @@ test compilation is validation only and does not activate a production worker.
 
 Their testing/acceptance belongs within these phases; neither is implemented or
 approved for blanket changes merely because the order is now recorded.
+
+### O1 first slice — generic relay and backend app facts
+
+- [x] User approves framework broker foundation and CWD/restore-state migration
+  for Terminal/File Explorer/File Editor; ALS/mentions documented for next slice.
+- [x] Extend the existing owned route/correlation registry with app.rpc.call and
+  manifest service/version/caller/method policy. Framework derives source identity;
+  target semantics remain app-owned, with no replay/socket fallback.
+- [x] Code TE2 dispatches app.rpc.deliver on its existing bounded domain-loop
+  adapter. Reuse CWD snapshot and Sidebar ledger/global projection owners.
+  State publication requires an existing owned slot/token/URL and cannot activate
+  clients, create slots or manufacture Sidebar registrations.
+- [x] Replace the transient Python Sidebar socket helpers. Terminal/File Editor
+  opt into existing HTTP-plus-pipe worker mode with outbound-only dispatch hooks;
+  HTTP readiness, frontend sockets and terminal brokers remain unchanged.
+- [x] Rust broker tests: 11 pass, including version/caller/method policy, opaque
+  relay/correlation/error, pending limits, disconnect, timeout and late replies.
+  Cargo formatting passes; target cache retained. This is test compilation only.
+- [x] Final Python regression set: 195 pass across broker, app actions/ASGI,
+  tabs, lifecycle, ordinary-worker and pipe tests. Isolated HTTP-plus-stdio worker
+  proof passes: real HTTP action emits app.rpc.call, then consumes the correlated
+  pipe reply. No live framework/ordinary app workers were restarted.
+- [x] Strict mypy passes five broker/service/CWD files. Broader check additionally
+  reports two unchanged baseline issues: terminal/backend.py dict.pop(None) type
+  and File Editor's FileEditorError implicit re-export. Not new broker failures;
+  no unrelated typing cleanup was included. Existing inactive-presentation test
+  expectation now follows accepted document-open admission, with no behavior change.
+- [x] Source-backed contract/limits and following ALS/mention acceptance semantics
+  recorded in ../sidebar_app_intents/APP_RPC.md and CODE_TE2.md; repo memory synced.
+- [x] User reports interpreted Code TE2 source and updated framework are working
+  (2026-10-21), and requests checkpoint then ALS cutover. This records reported
+  acceptance, not an agent audit of artifact provenance or compiled activation.
+- [ ] New ordinary
+  app workers, followed by CWD/new-tab, navigation/restore, cross-client state and
+  closed-slot live acceptance. No host rebuild, OTA/APK, ALS cutover or shared
+  framework restart authorized/performed in this slice.
+- [ ] Next separately scoped ALS slice: readiness pipe dispatch/correlation,
+  exact presentation/conversation proof and owner acceptance receipts; retain
+  existing mention content policy and no uncertain insertion replay.
+
+### ALS cutover investigation / plan recording — 2026-10-21
+
+- [x] User chooses investigation before runtime activation, then approves recording
+  the complete plan, explicitly retaining standalone socket integration with no
+  socket fallback in framework pipe mode. No ALS implementation/restart approved.
+- [x] Read sibling ALS AGENTS.md in full; source survey covers framework_pipe,
+  lib/state/http startup, sidebar_ipc, ui_rpc, authenticated MCP IPC and UI client.
+  Preserve sibling untracked dist/ and TE2 research_handoff.md/ty.toml.
+- [x] Record full operation/event inventory, including project actions, CWD/focus,
+  state publication, agent-review and three MCP draft methods—not only file opens
+  and mentions. Existing frontend sockets and semantic owners remain in charge.
+- [x] Record source-backed seams: readiness-only pipe needs async dispatch and
+  request correlation; project open/create lack file-open's caller proof; socket
+  peer checks cannot be replaced with fake registrations; control byte/deadline
+  defaults need qualification for full draft/review and consent-bound operations.
+- [x] User requires no new any/Any types: concrete DTOs, validated unknown/object
+  ingress, no assertions/suppressions masking untyped boundaries. Existing broader
+  typing laundry list remains separate unless a touched boundary requires repair.
+- [x] Implementation stages, tests, mixed-version/standalone policy and activation
+  gates documented in ../sidebar_app_intents/APP_RPC.md. No new test/build claims
+  or acceptance inferred from this read-only investigation/planning pass.
+- [x] Concrete Stage A edit/validation approval, then ALS bounded pipe foundation.
+- [ ] Qualify bulk/control limits and consent deadlines; approve Stage B semantic
+  cutover with parity tests and any necessary caller-proof frontend changes.
+- [ ] Joint ALS activation/publication and grouped live validation when connected
+  model is ready. TE2 interpreted/new-framework acceptance is recorded above;
+  ALS semantic pipe routing is not yet implemented or live accepted.
+
+### ALS Stage A — bidirectional pipe foundation
+
+- [x] User approves typed envelopes/errors, bounded intake/dispatch/writer,
+  request correlation, AppState startup wiring and isolated tests/docs. No new
+  dependencies/any types, semantic exports, installation/restart, commit or push.
+- [x] ALS framework_pipe is split into controller, protocol DTOs and runtime.
+  Existing --stdio client is installed before build_router starts its CWD task;
+  CWD and other Sidebar operations intentionally retain their existing lane.
+- [x] Reader matches reply ID/correlation/opId while admitted async handlers may
+  await reverse calls. Typed delivery/source validation, one-time handler binding,
+  ten-second control-handler deadline and retained opId/project metadata.
+- [x] Bound 16 pending outbound / 16 queued-running inbound calls; 64 KiB control
+  params checked before queueing; incoming work reserves a 2 MiB encoded budget.
+  Writer is 32 queued frames plus one write, sharing a 2 MiB budget. Output frames
+  and serialized received control replies are capped at 1 MiB. These are not bulk
+  draft/consent-operation budgets for Stage B.
+- [x] Dedicated stdout writer acknowledges readiness after write/flush. EOF/error/
+  close releases pending calls/admission and clears handler capture cycles; late
+  replies are ignored. Required output failure closes; oversized result can emit
+  a small error without reexecuting its handler. Completed tasks are drained.
+- [x] ALS full Rust library suite: 172 pass, including 17 framework-pipe tests.
+  No any/Any/dyn Any or new suppressions in changed Rust source; generic payload
+  Value remains transport-only. Compiler warnings remain visible: existing
+  embedded-python-adapter cfg plus dormant Stage A API/metadata dead-code warnings
+  until semantic binding, not a claim of a warning-free production build.
+- [x] Existing bootstrap regressions: 14 pass. TE2 wrapper pipe-readiness contract:
+  one passes. Source packaging/fingerprinting already recurses into new .rs modules;
+  no new package/build path was introduced. Scoped rustfmt/diff checks pass.
+- [x] Final fresh debug native binary stdio regression after all source edits:
+  six tests/two subtests pass using the exact Cargo output selected through
+  ALS_TEST_SERVER_BIN. Readiness/HTTP serving, EOF, malformed input, unsupported
+  request, occupied listener, SIGTERM and standalone behavior pass. With bootstrap
+  and TE2 wrapper checks, 21 Python tests pass. No installed/active runtime changed.
+- [ ] Stage B concrete approval: bind operation owners, qualify bulk/deadline
+  policy and then migrate actual traffic, preserving separate standalone mode.
 
 ## Phase 4 — native debug / internal bridge retirement (documentation only)
 

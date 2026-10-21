@@ -445,7 +445,7 @@ async def publish_sidebar_window_url(payload: dict[str, object] | None = None) -
     """
     Reference backend bridge for stateful sidebar app windows.
     The frontend publishes the current path state here after loading a directory;
-    the backend records it over typed /sidebar_ipc RPC. The live iframe is not
+    the backend records it over the owned framework pipe. The live iframe is not
     reloaded for ordinary state changes.
     """
     body = payload if isinstance(payload, dict) else {}

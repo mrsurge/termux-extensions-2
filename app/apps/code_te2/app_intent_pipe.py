@@ -10,6 +10,7 @@ from typing import cast, final
 
 from app.libs.pipe_protocol import PipeEnvelope, PipeError, PipeIdentity, error_response, success_response
 from .host.sidebar_shortcut_backend import add_framework_shortcut
+from .host.sidebar_rpc_backend import dispatch_sidebar_service
 
 
 @final
@@ -41,7 +42,7 @@ class AppIntentPipe:
             _ = future.cancel()
 
     def submit(self, request: PipeEnvelope) -> bool:
-        if request.method not in {"app.intent.deliver", "app.mcp.sidebarShortcut.add"}:
+        if request.method not in {"app.intent.deliver", "app.rpc.deliver", "app.mcp.sidebarShortcut.add"}:
             return False
         with self._lock:
             loop = self._loop
@@ -99,6 +100,8 @@ def _object(value: object, name: str) -> dict[str, object]:
 
 
 async def dispatch_app_intent(request: PipeEnvelope) -> object:
+    if request.method == "app.rpc.deliver":
+        return await dispatch_sidebar_service(request.params)
     if request.method == "app.mcp.sidebarShortcut.add":
         return await add_framework_shortcut(request.params)
     params = _object(request.params, "params")

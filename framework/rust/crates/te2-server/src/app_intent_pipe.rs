@@ -108,6 +108,27 @@ impl Route {
         body: IntentRequest,
         wait: Duration,
     ) -> anyhow::Result<PipeEnvelope> {
+        self.deliver_message(
+            source,
+            request,
+            "app.intent.deliver",
+            json!({
+                "intent": body.intent, "context": body.context, "payload": body.payload,
+                "source": {"appId": source.app, "shellId": source.shell}
+            }),
+            wait,
+        )
+        .await
+    }
+
+    async fn deliver_message(
+        self: &Arc<Self>,
+        source: &Arc<Route>,
+        request: &PipeEnvelope,
+        method: &str,
+        params: Value,
+        wait: Duration,
+    ) -> anyhow::Result<PipeEnvelope> {
         let id = crate::new_instance_id()?;
         let (sender, receiver) = oneshot::channel();
         {
@@ -135,13 +156,10 @@ impl Route {
         forwarded.origin_name = "framework.rust".into();
         forwarded.target_nid = None;
         forwarded.target_name = None;
-        forwarded.method = Some("app.intent.deliver".into());
+        forwarded.method = Some(method.into());
         forwarded.result = None;
         forwarded.error = None;
-        forwarded.params = Some(json!({
-            "intent": body.intent, "context": body.context, "payload": body.payload,
-            "source": {"appId": source.app, "shellId": source.shell}
-        }));
+        forwarded.params = Some(params);
         self.sink.send(forwarded)?;
         tokio::select! {
             reply = tokio::time::timeout(wait, receiver) => match reply {
@@ -232,6 +250,154 @@ struct IntentRequest {
     payload: Value,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AppRpcRequest {
+    target_app: String,
+    service: String,
+    version: u32,
+    method: String,
+    #[serde(default)]
+    context: Value,
+    payload: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppRpcExport {
+    version: u32,
+    callers: Vec<String>,
+    methods: Vec<String>,
+}
+
+fn rpc_export_allowed(
+    manifest: &Map<String, Value>,
+    source: &str,
+    request: &AppRpcRequest,
+) -> anyhow::Result<()> {
+    fn name(value: &str) -> bool {
+        !value.is_empty()
+            && value.len() <= 128
+            && value
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"._:-".contains(&c))
+    }
+    anyhow::ensure!(
+        name(&request.service) && name(&request.method) && request.version > 0,
+        "appRpc.invalidAddress"
+    );
+    let exports = manifest
+        .get("ipc")
+        .and_then(|v| v.get("services"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("appRpc.serviceUnavailable"))?;
+    anyhow::ensure!(exports.len() <= 64, "appRpc.invalidExports");
+    let export: AppRpcExport = serde_json::from_value(
+        exports
+            .get(&request.service)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("appRpc.serviceUnavailable"))?,
+    )?;
+    anyhow::ensure!(
+        export.callers.len() <= 64
+            && export.methods.len() <= 64
+            && export
+                .callers
+                .iter()
+                .chain(export.methods.iter())
+                .all(|v| name(v)),
+        "appRpc.invalidExports"
+    );
+    anyhow::ensure!(
+        export.version == request.version,
+        "appRpc.unsupportedVersion"
+    );
+    anyhow::ensure!(
+        export.callers.iter().any(|v| v == source) && export.methods.contains(&request.method),
+        "appRpc.forbidden"
+    );
+    Ok(())
+}
+
+async fn dispatch_rpc(
+    state: &crate::AppState,
+    source: &Arc<Route>,
+    request: &PipeEnvelope,
+) -> PipeEnvelope {
+    let responder = PipeIdentity::framework_rust();
+    let result: anyhow::Result<PipeEnvelope> = async {
+        let _permit = source
+            .admission
+            .try_acquire()
+            .map_err(|_| anyhow::anyhow!("appRpc.busy"))?;
+        validate_current(
+            source,
+            state
+                .running_app_for_id(&source.app)
+                .as_ref()
+                .map(|app| app.shell_id.as_str()),
+        )?;
+        anyhow::ensure!(!*source.closed.borrow(), "appRpc.callerDisconnected");
+        anyhow::ensure!(
+            request.op_id.as_deref().is_some_and(|v| !v.is_empty()),
+            "appRpc.operationIdRequired"
+        );
+        let params = request.params.clone().unwrap_or(Value::Null);
+        anyhow::ensure!(
+            serde_json::to_vec(&params)?.len() <= MAX_PARAMS,
+            "appRpc.payloadTooLarge"
+        );
+        let body: AppRpcRequest = serde_json::from_value(params)?;
+        let registry = state.app_registry_snapshot();
+        let app = registry
+            .get_app(&body.target_app)
+            .ok_or_else(|| anyhow::anyhow!("appRpc.targetUnavailable"))?;
+        rpc_export_allowed(&app.raw_manifest, &source.app, &body)?;
+        let target = resolve(&source.instance, &app.app_id)?;
+        validate_current(
+            &target,
+            state
+                .running_app_for_id(&target.app)
+                .as_ref()
+                .map(|app| app.shell_id.as_str()),
+        )?;
+        let reply = target
+            .deliver_message(
+                source,
+                request,
+                "app.rpc.deliver",
+                json!({
+                    "service":body.service,"version":body.version,"method":body.method,
+                    "context":body.context,"payload":body.payload,
+                    "source":{"appId":source.app,"shellId":source.shell}
+                }),
+                WAIT,
+            )
+            .await?;
+        anyhow::ensure!(
+            serde_json::to_vec(&reply)?.len() <= 1024 * 1024,
+            "appRpc.replyTooLarge: execution outcome may be unknown"
+        );
+        Ok(reply)
+    }
+    .await;
+    match result {
+        Ok(reply) => match reply.error {
+            Some(error) => PipeEnvelope::error_response(request, &responder, error),
+            None => PipeEnvelope::success_response(
+                request,
+                &responder,
+                reply.result.unwrap_or(Value::Null),
+            ),
+        },
+        Err(error) => PipeEnvelope::error_response(
+            request,
+            &responder,
+            PipeError::new("appRpc.failed", error.to_string(), false, None),
+        ),
+    }
+}
+
 fn allowed(source: &str, target: &str, intent: &str) -> bool {
     target == "code_te2"
         && match intent {
@@ -284,6 +450,9 @@ pub(crate) async fn dispatch(
     request: &PipeEnvelope,
 ) -> Option<PipeEnvelope> {
     let method = request.method.as_deref()?;
+    if method == "app.rpc.call" {
+        return Some(dispatch_rpc(state, source, request).await);
+    }
     if !matches!(method, "app.open" | "app.intent.dispatch") {
         return None;
     }
@@ -548,6 +717,74 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn generic_service_exports_are_explicit_and_versioned() {
+        let manifest = json!({"ipc":{"services":{"sidebar":{
+            "version":1,"callers":["file_explorer"],"methods":["cwd.get"]
+        }}}});
+        let mut body: AppRpcRequest = serde_json::from_value(json!({
+            "targetApp":"code_te2","service":"sidebar","version":1,
+            "method":"cwd.get","payload":{}
+        }))
+        .unwrap();
+        let policy = manifest.as_object().unwrap();
+        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_ok());
+        assert!(rpc_export_allowed(policy, "terminal", &body).is_err());
+        body.version = 2;
+        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_err());
+        body.version = 1;
+        body.method = "window.activate".into();
+        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_err());
+        body.method = "cwd.get".into();
+        body.service = "other".into();
+        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_err());
+        assert!(rpc_export_allowed(&Map::new(), "file_explorer", &body).is_err());
+        assert!(
+            serde_json::from_value::<AppRpcRequest>(json!({
+                "targetApp":"code_te2","service":"sidebar","version":1,
+                "method":"cwd.get","payload":{},"source":{"appId":"forged"}
+            }))
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn generic_service_keeps_opaque_payload_and_correlated_errors() {
+        let (source, _) = fixture("file_explorer");
+        let (target, mut rx) = fixture("code_te2");
+        let t = target.clone();
+        let params = json!({"service":"sample","version":3,"method":"custom",
+            "context":{"clientId":"client"},"payload":{"nested":[1,"text",null]},
+            "source":{"appId":source.app,"shellId":source.shell}});
+        let original = params.clone();
+        let task = tokio::spawn(async move {
+            t.deliver_message(&source, &request(), "app.rpc.deliver", params, WAIT)
+                .await
+        });
+        let forwarded = rx.recv().await.unwrap();
+        assert_eq!(forwarded.method.as_deref(), Some("app.rpc.deliver"));
+        assert_eq!(forwarded.params, Some(original));
+        assert_eq!(forwarded.origin_name, "framework.rust");
+        assert_eq!(forwarded.op_id.as_deref(), Some("operation"));
+        assert_eq!(forwarded.id, forwarded.correlation_id);
+        assert_ne!(forwarded.id.as_deref(), Some("caller-id"));
+        let response = PipeEnvelope::error_response(
+            &forwarded,
+            &PipeIdentity::framework_rust(),
+            PipeError::new(
+                "sample.conflict",
+                "receiver rejected",
+                false,
+                Some(json!({"revision":2})),
+            ),
+        );
+        assert!(target.accept(response));
+        let reply = task.await.unwrap().unwrap();
+        assert_eq!(reply.error.unwrap().code, "sample.conflict");
+        assert!(target.pending.lock().unwrap().is_empty());
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

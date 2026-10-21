@@ -19,9 +19,9 @@ from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
 import uuid
 
-import socketio
 from starlette.exceptions import HTTPException
 from starlette.websockets import WebSocket, WebSocketDisconnect
+from app.libs.pipe_protocol import PipeEnvelope
 
 from .request_dtos import CreateShellRequest, ShellInputRequest, ShellResizeRequest, ShellActionRequest, decode_request
 
@@ -40,9 +40,6 @@ from .node_runtime import NodeRuntimeError, ensure_terminal_node_runtime
 APP_ID = str(os.environ.get("TE_APP_ID") or "terminal").strip() or "terminal"
 APP_BASE_URL = "/app/terminal"
 SIDEBAR_TOKEN_ID = "terminal"
-SIDEBAR_IPC_NAMESPACE = "/sidebar_ipc"
-SIDEBAR_IPC_SOCKET_PATH = "/ui_ipc_ws/socket.io"
-SIDEBAR_IPC_RPC_EVENT = "rpc"
 SHELLSPEC_DIR = Path(__file__).resolve().parent / "shellspec"
 SHELLSPEC_REF = "node_terminal_stream.yaml#terminal-stream"
 BROKER_ENTRY = Path(__file__).resolve().parent / "terminal_stream_broker.mjs"
@@ -56,6 +53,11 @@ DEFAULT_SCROLLBACK = 5000
 log = logging.getLogger("terminal_backend")
 
 
+def te2_pipe_dispatch(envelope: PipeEnvelope) -> None:
+    """Outbound-only app service client; no inbound methods are exported."""
+    return None
+
+
 class _ReadableHttpResponse(Protocol):
     def __enter__(self) -> Self: ...
 
@@ -67,28 +69,6 @@ class _ReadableHttpResponse(Protocol):
     ) -> None: ...
 
     def read(self, amount: int | None = None) -> bytes: ...
-
-
-class _SidebarSocketIoClient(Protocol):
-    def connect(
-        self,
-        url: str,
-        *,
-        namespaces: list[str],
-        socketio_path: str,
-        transports: list[str],
-    ) -> Awaitable[None]: ...
-
-    def call(
-        self,
-        event: str,
-        data: object,
-        *,
-        namespace: str,
-        timeout: int,
-    ) -> Awaitable[object]: ...
-
-    def disconnect(self) -> Awaitable[None]: ...
 
 
 def _framework_url() -> str:
@@ -128,72 +108,15 @@ async def te2_app_backend_serving() -> None:
         print(f"[terminal] readiness post failed: {exc}", flush=True)
 
 
-def _sidebar_backend_client_id() -> str:
-    return f"{APP_ID}:backend:{os.getpid()}"
-
-
 async def _call_sidebar_rpc(
     method: str,
     params: dict[str, object] | None = None,
     *,
     timeout: float = 5.0,
 ) -> dict[str, object]:
-    safe_method = str(method or "").strip()
-    if not safe_method:
-        raise ValueError("method is required")
-    client = cast(
-        _SidebarSocketIoClient,
-        socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False),
-    )
-    timeout_seconds = max(1, int(timeout))
-    try:
-        await client.connect(
-            _framework_url(),
-            namespaces=[SIDEBAR_IPC_NAMESPACE],
-            socketio_path=SIDEBAR_IPC_SOCKET_PATH.lstrip("/"),
-            transports=["websocket"],
-        )
-        register = {
-            "jsonrpc": "2.0",
-            "id": f"{APP_ID}:register:{int(asyncio.get_running_loop().time() * 1000)}",
-            "method": "sidebar.register",
-            "params": {
-                "role": "iframe",
-                "app": APP_ID,
-                "client_id": _sidebar_backend_client_id(),
-                "capabilities": ["sidebar.windows", "sidebar.cwd"],
-            },
-        }
-        _ = await client.call(
-            SIDEBAR_IPC_RPC_EVENT,
-            register,
-            namespace=SIDEBAR_IPC_NAMESPACE,
-            timeout=timeout_seconds,
-        )
-        request = {
-            "jsonrpc": "2.0",
-            "id": f"{APP_ID}:{int(asyncio.get_running_loop().time() * 1000)}",
-            "method": safe_method,
-            "params": params or {},
-        }
-        response = await client.call(
-            SIDEBAR_IPC_RPC_EVENT,
-            request,
-            namespace=SIDEBAR_IPC_NAMESPACE,
-            timeout=timeout_seconds,
-        )
-        response_payload = _coerce_json_object(response)
-        if response_payload is None:
-            raise RuntimeError("sidebar RPC returned a non-object response")
-        error = _coerce_json_object(response_payload.get("error"))
-        if error is not None:
-            raise RuntimeError(str(error.get("message") or error))
-        result = response_payload.get("result")
-        result_payload = _coerce_json_object(result)
-        return result_payload if result_payload is not None else {"result": result}
-    finally:
-        with suppress(Exception):
-            await client.disconnect()
+    from app.libs.sidebar_rpc import call_sidebar_rpc
+
+    return await call_sidebar_rpc(APP_ID, method, params or {}, timeout=timeout)
 
 
 JsonObject = dict[str, object]

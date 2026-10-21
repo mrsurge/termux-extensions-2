@@ -7,12 +7,18 @@ from pathlib import Path
 from typing import Protocol, Self, cast
 from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
+from app.libs.pipe_protocol import PipeEnvelope
 
 # Keep existing structured detail envelopes; Starlette's exception is string-only.
 from .http_app import FileEditorASGI, FileEditorError as HTTPException
 
 APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor").strip() or "file_editor"
 JsonObject = dict[str, object]
+
+
+def te2_pipe_dispatch(envelope: PipeEnvelope) -> None:
+    """Outbound-only app service client; no inbound methods are exported."""
+    return None
 
 
 async def publish_sidebar_file_state(payload: JsonObject) -> JsonObject:

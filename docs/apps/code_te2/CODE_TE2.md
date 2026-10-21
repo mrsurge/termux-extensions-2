@@ -4812,6 +4812,16 @@ from overwriting another renderer's local dock order or foreground choice.
 
 ### Shared membership ledger
 
+Backend CWD/restore publication for Terminal, File Explorer and File Editor now
+uses the existing owned framework pipe's generic `app.rpc.call` relay. Code TE2
+declares `ipc.services.sidebar` version 1; framework-owned app/shell identity and
+manifest admission precede the app-owned receiver. Existing-slot/app/token/URL
+guards and the normal ledger/global projection remain in charge. Publication
+cannot activate a client or create slots. Terminal/File Editor use ordinary
+HTTP-plus-pipe workers; frontend sockets and HTTP readiness are unchanged.
+ALS/mentions and exact-client file/project intents have not moved in this slice.
+Contract, bounds and matching activation: `docs/apps/sidebar_app_intents/APP_RPC.md`.
+
 Ledger v2 persists only stable slot identity, membership, lifecycle/readiness,
 and surface metadata. It does not persist dock order and it has no global-active
 Sidebar surface. A complete membership snapshot deterministically removes

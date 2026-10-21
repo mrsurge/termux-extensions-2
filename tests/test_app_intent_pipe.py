@@ -181,7 +181,9 @@ def test_shared_document_service_checks_live_ownership_before_open(monkeypatch, 
     monkeypatch.setattr(file_ops_backend, "handle_host_open_request", opened)
     from app.apps.code_te2.ui_ipc import notifications
     monkeypatch.setattr(notifications, "emit_ui_ipc_rpc_notification", AsyncMock())
-    if failure is not None:
+    # Document opens admit the exact registered presentation even if its active
+    # window projection lags; other intents still require active-window proof.
+    if failure not in (None, "inactive"):
         with pytest.raises(ValueError):
             asyncio.run(dispatch_app_intent(request()))
         opened.assert_not_awaited()

@@ -24,6 +24,15 @@
   },
   "sio_service": "sio_service.json",
   "readiness_support": "pipe",
+  "ipc": {
+    "services": {
+      "sidebar": {
+        "version": 1,
+        "callers": ["terminal", "file_explorer", "file_editor"],
+        "methods": ["cwd.get", "window.state.update"]
+      }
+    }
+  },
   "frontend_preparation": true,
   "fullscreen": true
 }

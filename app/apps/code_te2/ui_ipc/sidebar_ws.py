@@ -325,7 +325,7 @@ def _current_cwd() -> str:
     return str(cwd or "").strip()
 
 
-def _cwd_payload(reason: str = "sync") -> JsonObject:
+def get_sidebar_cwd_snapshot(reason: str = "sync") -> JsonObject:
     return {
         "cwd": _current_cwd(),
         "reason": str(reason or "sync"),
@@ -334,7 +334,7 @@ def _cwd_payload(reason: str = "sync") -> JsonObject:
 
 
 async def emit_sidebar_cwd_set(ns: SidebarNamespace, *, to_sid: str | None = None, reason: str = "sync") -> None:
-    payload = _cwd_payload(reason)
+    payload = get_sidebar_cwd_snapshot(reason)
     if to_sid:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload, to_sid=to_sid)
     else:
@@ -348,7 +348,7 @@ async def emit_sidebar_cwd_set(ns: SidebarNamespace, *, to_sid: str | None = Non
 async def emit_sidebar_cwd_set_global(*, reason: str = "sync") -> None:
     from .ui_ipc_socketio import UI_IPC_SIO
 
-    payload = _cwd_payload(reason)
+    payload = get_sidebar_cwd_snapshot(reason)
     sio = cast(SidebarNamespace, UI_IPC_SIO)
     await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
@@ -857,7 +857,7 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
     if method == SIDEBAR_IPC_RPC_METHOD_REGISTER:
         return await on_sidebar_register(ns, sid, params)
     if method == SIDEBAR_IPC_RPC_METHOD_CWD_GET:
-        payload = _cwd_payload("request")
+        payload = get_sidebar_cwd_snapshot("request")
         print(f"[sidebar_ipc_rpc] cwd_get from={sid} cwd={payload.get('cwd') or ''}", flush=True)
         return payload
     if method == SIDEBAR_IPC_RPC_METHOD_CWD_SYNC:

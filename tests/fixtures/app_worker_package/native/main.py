@@ -11,8 +11,13 @@ from typing import cast
 from urllib import request as urllib_request
 
 from starlette.types import Scope, Receive, Send
+from app.libs.pipe_protocol import PipeEnvelope
 
 _started = False
+
+
+def te2_pipe_dispatch(envelope: PipeEnvelope) -> None:
+    return None
 
 
 def record(event: str) -> None:
@@ -65,6 +70,13 @@ async def TE2_ASGI_APP(scope: Scope, receive: Receive, send: Send) -> None:
         await send({"type": "websocket.send", "text": "native websocket"})
         await send({"type": "websocket.close", "code": 1000})
     else:
+        if scope["path"] == "/app-rpc-proof":
+            from app.libs.sidebar_rpc import call_sidebar_rpc
+            result = await call_sidebar_rpc("native", "sidebar.cwd.get", {})
+            body = json.dumps(result).encode()
+            await send({"type": "http.response.start", "status": 200})
+            await send({"type": "http.response.body", "body": body})
+            return
         body = json.dumps({
             "path": cast(object, scope["path"]),
             "blocked_imports_absent": not any(

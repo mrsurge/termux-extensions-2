@@ -17,6 +17,8 @@ it or leave it as the next work item.
 2. Framework-pipe intent and Sidebar IPC consolidation (O1), especially ALS <->
    Code TE2. This is the next actual workstream: source audit/design, then bounded
    implementation approval and delivery, with its tests/acceptance in that phase.
+   Immediately after the cutover, address the Code TE2 Any audit described below,
+   before starting the next optimization slice.
 3. Pipe concurrency and bounded in-process DTO/PyO3 queuing (O2), likewise with
    its own evidence/implementation/acceptance gates.
 4. Native-client debug access and internal console-bridge retirement — deferred
@@ -26,6 +28,29 @@ it or leave it as the next work item.
 
 This corrects the agent's earlier placement of console work as Phase 2. Workstream
 ordering does not itself approve implementation of the recorded investigations.
+
+## Post-cutover follow-up — Code TE2 Any audit
+
+User supplied root `mypy_typecheck_errors.txt` (2026-10-21), captured from Code TE2
+with strict mypy, extra checks and all Any-disallowing options enabled. Treat this
+as the seed report for the large typing-debt pass after the ALS/Code TE2 pipe
+cutover, not permission to interrupt that cutover or silently broaden its scope.
+Preserve the original report unchanged, including while it remains untracked.
+
+When resumed, establish the exact reproducible command, mypy version, source root
+and configuration, then refresh diagnostics against the post-cutover source.
+Group by root cause/interface rather than assuming each diagnostic is a separate
+fix. Prioritize native FWS callbacks, event/DTO boundaries, service contracts and
+worker lifecycle typing. Use concrete DTOs, protocols and typed containers;
+validate object/unknown ingress rather than propagating Any or merely replacing
+it with casts, broad suppressions, disabled checks or opaque object everywhere.
+
+Keep behavior unchanged and validate touched owners with focused regressions,
+the agreed strict/extra/Any command and the normal mypyc validation workflow.
+Distinguish upstream-stub/library typing seams from local dynamic authority and
+surface any genuine policy tradeoff before weakening a check. Changing durable
+build/typecheck policy, activating compiled code or fixing the whole report needs
+its own concrete implementation approval; this entry records the follow-up only.
 
 ## Pre-IPC inspection affordance — Electron DevTools
 
@@ -226,6 +251,32 @@ admission, reconnect/registration lifetime and durable backend authority. Define
 capability/version compatibility and independently updated ALS/TE2 deployment
 before retiring socket clients. Do not replace app frontend sockets merely because
 backend-to-backend intents move to the pipe.
+
+Approved first implementation slice: generic manifest-declared app RPC relay and
+CWD/restore-state migration for Terminal, File Explorer and File Editor. The
+existing broker supplies owned route identity, bounded correlation and disconnect
+cleanup; receiver hooks retain semantic authority. Terminal/File Editor must opt
+into the ordinary worker's existing HTTP-plus-pipe mode as a prerequisite. No
+ALS source changes, frontend migration, runtime restart or publication in this
+slice. Contract and source-backed next ALS/mention requirements:
+`../sidebar_app_intents/APP_RPC.md`. Follow with separate ALS integration approval,
+not a claim that the entire O1 cutover has shipped.
+
+2026-10-21 ALS read-only survey and recording approval expand that companion
+contract with a complete parity inventory and two ordered implementation stages:
+bounded bidirectional ALS pipe, then semantic operations/events through existing
+owners. Preserve explicit standalone socket integration; framework pipe mode has
+no socket fallback. No new any/Any types. Project actions need caller proof and
+bulk draft/review budgets need qualification before a concrete cutover approval.
+No ALS code/runtime changes are authorized by this planning update.
+
+Subsequent Stage A approval covers ALS's bounded bidirectional pipe foundation,
+typed DTOs, client installation before router startup, isolated tests and docs;
+no semantic operation cutover/exports, runtime restart, installation or push.
+Source implementation is now in ALS's framework_pipe submodules; its existing
+Sidebar socket traffic remains unchanged. Stage B still needs its own concrete
+bulk/deadline/owner-routing approval. Track source validation separately from
+joint activation in TRACKER.md; ALS FRAMEWORK_STDIO.md owns transport limits.
 
 ### O2. Pipe concurrency and in-process Code TE2 DTO buffering
 
