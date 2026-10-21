@@ -1,19 +1,39 @@
 """Sidebar service policy; framework relay metadata is not UI focus authority."""
 from __future__ import annotations
 
-from typing import cast
+import msgspec
 
 from ..sidebar_window_events import publish_sidebar_window_state_changed
 from ..ui_ipc.sidebar_window_state import get_sidebar_window_state, open_sidebar_window_url
 
 JsonObject = dict[str, object]
-CALLERS = {"terminal", "file_explorer", "file_editor"}
+CALLERS = {"terminal", "file_explorer", "file_editor", "als-rs"}
+
+
+class _CallerTarget(msgspec.Struct, forbid_unknown_fields=True):
+    clientId: str
+    hostId: str
+    presentationId: str
+    mainPageId: str | None = None
+    sidebarWindowId: str | None = None
+
+
+class _ProjectRequest(msgspec.Struct, forbid_unknown_fields=True):
+    path: str
+    target: _CallerTarget
+    adoptExisting: bool = True
+    open: bool = True
+
+
+class _FileOpen(msgspec.Struct, forbid_unknown_fields=True):
+    path: str
+    target: _CallerTarget
+    line: int | None = None
+    column: int | None = None
 
 
 def _object(value: object) -> JsonObject:
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise ValueError("Sidebar service requires an object")
-    return cast(JsonObject, value)
+    return msgspec.convert(value, type=dict[str, object], strict=True)
 
 
 def _text(value: object) -> str:
@@ -41,10 +61,17 @@ async def dispatch_sidebar_service(value: object) -> JsonObject:
         raise ValueError("Sidebar fact publication does not accept presentation authority")
     params = dict(_object(body["payload"]))
     if body["method"] == "cwd.get":
-        if params or app_id not in {"terminal", "file_explorer"}:
+        if params or app_id not in {"terminal", "file_explorer", "als-rs"}:
             raise ValueError("Invalid Sidebar CWD request")
         from ..ui_ipc.sidebar_ws import get_sidebar_cwd_snapshot
         return get_sidebar_cwd_snapshot("request")
+    if app_id == "als-rs" and body["method"] != "window.state.update":
+        from .sidebar_pipe import originating_app
+        token = originating_app.set(app_id)
+        try:
+            return await _dispatch_als_service(_text(body["method"]), params)
+        finally:
+            originating_app.reset(token)
     if body["method"] != "window.state.update":
         raise ValueError("Unsupported Sidebar service method")
     if params.get("activate", False) is not False:
@@ -73,3 +100,54 @@ async def dispatch_sidebar_service(value: object) -> JsonObject:
         _object(result["state"]), source=f"{app_id}_pipe_state", sidebar_scope="global",
     )
     return result
+
+
+async def _dispatch_als_service(method: str, params: JsonObject) -> JsonObject:
+    from ..ui_ipc import sidebar_ws
+    from . import agent_edit_review_backend as review
+    from . import draft_state_backend as drafts
+    from . import project_backend as projects
+
+    if method == "file.open":
+        msgspec.convert(params, type=_FileOpen, strict=True)
+        return await sidebar_ws.handle_sidebar_document_open(
+            params, requester_app_id="als-rs", require_presentation=True,
+        )
+    if method == "file.edit":
+        result = await review.handle_sidebar_file_edit_review_signal(params, source_name="als_pipe")
+        if sidebar_ws._is_agent_sidebar_tracking_enabled():
+            from .file_ops_backend import handle_host_open_request
+            await handle_host_open_request({**params, "focus": False}, source_name="als_pipe", request_prefix="als_pipe")
+        return {"ok": True, "review": result}
+    if method == "project.lookup":
+        return await projects.handle_sidebar_project_lookup_request(params, source_name="als_pipe")
+    if method in {"project.open", "project.create"}:
+        msgspec.convert(params, type=_ProjectRequest, strict=True)
+        # Recheck the exact presentation after project/save-mode lock waits too.
+        def validate() -> None:
+            sidebar_ws.resolve_sidebar_request_client(params, requester_app_id="als-rs", require_presentation=True)
+        validate()
+        if method == "project.open":
+            result = await projects.handle_sidebar_project_open_request(params, source_name="als_pipe", before_switch=validate)
+        else:
+            result = await projects.handle_sidebar_project_create_request(params, source_name="als_pipe", before_switch=validate)
+        if result.get("ok") is True and "resolved_path" in result:
+            await sidebar_ws.emit_sidebar_project_opened_global(result)
+        return result
+    if method == "agentEdits.publish":
+        return await review.handle_sidebar_agent_edits_publish_request(params, source_name="als_pipe")
+    if method == "agentEdits.clear":
+        return await review.handle_sidebar_agent_edits_clear_request(params, source_name="als_pipe")
+    if method == "agentEdits.list":
+        return await review.handle_sidebar_agent_edits_list_request(params, source_name="als_pipe")
+    if method == "agentEdits.documentState.get":
+        return await review.handle_sidebar_agent_edits_document_state_get_request(params, source_name="als_pipe")
+    if method == "agentEdits.decide":
+        return await review.handle_sidebar_agent_edits_decide_request(params, source_name="als_pipe")
+    if method == "drafts.list":
+        return await drafts.handle_sidebar_drafts_list_request(params, source_name="als_pipe")
+    if method == "draftState.get":
+        return await drafts.handle_sidebar_draft_state_get_request(params, source_name="als_pipe")
+    if method == "draft.clear":
+        return await drafts.handle_sidebar_draft_clear_request(params, source_name="als_pipe")
+    raise ValueError("Unsupported ALS Sidebar operation")

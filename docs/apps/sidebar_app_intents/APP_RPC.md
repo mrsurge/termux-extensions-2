@@ -2,15 +2,18 @@
 
 ## Scope and activation
 
-The first 0.2.356 slice replaces backend CWD lookup and restore-state publication
-for Terminal, File Explorer and File Editor. It does not migrate ALS, mentions,
-file/project opens, frontend sockets, terminal streams or console registrations.
-Existing app intents and their operation owners remain available.
+The first 0.2.356 slice replaced backend CWD lookup and restore-state publication
+for Terminal, File Explorer and File Editor. Stage B now wires ALS backend
+file/project actions, CWD/state, review/draft calls and reverse mentions/facts to
+the same conduit. Frontend sockets, terminal streams and console registrations
+remain unchanged. Existing app intents and their operation owners remain available.
 
 Activate matching framework and Code TE2 domain builds (new mypyc snapshot when
 compiled), plus fresh ordinary app workers. Terminal/File Editor opt into existing
-HTTP-plus-pipe worker mode; HTTP readiness stays unchanged. No frontend assets,
-OTA or APK change is needed. Existing processes retain old imports. This is a
+HTTP-plus-pipe worker mode; HTTP readiness stays unchanged. The initial slice
+needed no frontend publication. ALS now needs its matching native binary and
+caller-proof frontend, including a checkpointed vendored snapshot and native-client
+OTA/reload; no APK mapping changes are introduced. Existing processes retain old imports. This is a
 coordinated cutover, not a mixed-version socket fallback: missing exports, routes
 or handlers reject without fallback/replay. Manifest policy is not proof that an
 older running handler implements the advertised method.
@@ -44,9 +47,41 @@ The framework remaps correlation IDs, retains opId, and returns receiver results
 and structured errors only through the originating pipe. No HTTP self-call,
 Socket.IO client, new manager, durable queue or frontend authority is introduced.
 
-Admission reuses 16 outstanding source/target slots, 64 KiB serialized request
-parameters, a 15-second receiver deadline and bounded pipe writers. Generic
-replies are limited to 1 MiB serialized. Disconnect, timeout, queue rejection or
+Admission reuses 16 outstanding source/target slots and bounded pipe writers.
+Defaults remain 64 KiB serialized request parameters, a 15-second receiver
+deadline and 1 MiB serialized replies. A receiver may declare method-specific
+`limits` inside its service export, without the broker knowing domain semantics:
+
+```json
+{"version":1,"callers":["example"],"methods":["read","commit"],
+ "limits":{"commit":{"timeoutMs":180000}}}
+```
+
+The optional per-method fields are `requestBytes`, `replyBytes` and `timeoutMs`;
+omitted fields retain defaults. Each byte limit must be 1 byte through 8 MiB, and
+the deadline 1–180000 milliseconds. Limits may name only declared methods; unknown
+fields, invalid values and caller-supplied limits reject. The 8 MiB ceiling is
+below the existing 32 MiB pipe-frame ceiling; it is not an assertion that every
+draft/review response fits. Selected ALS operation profiles are described below.
+
+Each in-flight generic RPC reserves its actual serialized request size plus the
+receiver's maximum reply size from **both** routes' shared 32 MiB allowances
+(once for a self-call). Saturation rejects before delivery; cancellation, timeout,
+disconnect and completion release reservations. These allowances bound admitted
+serialized work, not exact RSS or arbitrary receiver result construction. Ordinary
+control calls retain their defaults. ALS/Code TE2 manifests opt selected review
+publish/file-edit requests and draft/review responses into 8 MiB limits and 60
+seconds. Project open/create use 180 seconds. ALS local waits are 20/65/185 seconds
+respectively; its project UI uses 190 seconds. These caps reject whole oversized
+operations rather than claiming every arbitrary full model fits.
+
+`app.rpc.route.get` is a read-only owned-route query using the same target/service/
+version/method policy, with null context/payload. It returns available:false only
+when both a managed running app and owned route are absent. A starting/stale or
+closed managed route is an error, not standalone selection. An available route
+does not prove semantic support in an independently installed older binary.
+
+Disconnect, timeout, queue rejection or
 oversized reply fails without replay; after dispatch, the outcome may be unknown.
 Framework-task cancellation clears routing waiters, not accepted work. Cancelling
 the Python await does not add a remote cancellation protocol; its existing pipe
@@ -55,9 +90,9 @@ budget at least 20 seconds.
 
 ## Sidebar service version 1
 
-- `cwd.get`: Terminal/File Explorer, empty payload, existing backend active-project
+- `cwd.get`: Terminal/File Explorer/ALS, empty payload, existing backend active-project
   CWD snapshot. No client focus lookup or project activation.
-- `window.state.update`: three declared callers; updates an **existing** shared
+- `window.state.update`: four declared callers; updates an **existing** shared
   slot owned by the authenticated app. Supplied app/base URL/token aliases must
   agree with that slot. Closed/missing/cross-app slots reject. App backends still
   validate file/tab/shell state and construct URLs. The existing URL/ledger owner
@@ -69,7 +104,7 @@ Console names are observability, not authority. Foreground/open actions still us
 their exact-presentation hooks. `call_sidebar_rpc` retains its Python interface
 only as a migration adapter; its app_id argument cannot select source identity.
 
-## Following ALS / mention slice — not implemented
+## ALS / mention delivery
 
 Mentions enter the originating surface's own backend. Bind requested client to
 its connection, then validate exact client/slot/presentation/qualified page proof.
@@ -82,26 +117,28 @@ units and ALS content formatting remain unchanged; no invented attachment API
 or silently truncated identifiers at the broker. Pipe size limits and ALS's
 existing content policy are distinct.
 
-Today's acknowledgement confirms socket emission, not ALS acceptance/insertion.
-The replacement should return the existing ALS owner's operation/conversation
-receipt and queued outcome after its composer/draft path accepts the request.
+Standalone socket acknowledgement confirms emission, not ALS acceptance/insertion.
+The pipe path returns the existing ALS owner's operation/conversation receipt and
+queued outcome after its composer/draft path accepts the request.
 Even that is not frontend-render acknowledgement. Require explicit conversation;
 no global last-focus fallback or uncertain insertion retry.
 
 Reverse ALS document/project actions retain originating client/presentation proof
 and reuse Code TE2's hooks. Shared membership differs from per-client foreground.
-ALS's current pipe is readiness-only: add actual inbound dispatch/outbound
-correlation before migration. Code TE2's registered-Sidebar-peer mention check
-must recognize owned pipe capability without manufacturing socket registrations.
-Qualify independently updated ALS/TE2 versions before retiring that socket client.
-No ALS source changes or runtime transition is authorized by this document.
+ALS's pipe now binds the existing AppState/SocketIo owners before listener
+readiness; the initial CWD call follows readiness flush. Code TE2 recognizes an
+owned managed route without manufacturing a socket SID. Only absence selects
+explicit standalone integration; failure after selection does not choose another
+lane. Reverse review requests exclude their originating app; facts are best-effort
+projections, not reasons to retry committed project mutations. Independent
+ALS/TE2 installations must be upgraded together before live validation.
 
-## ALS cutover implementation plan — approved for recording, 2026-10-21
+## ALS cutover design and implementation — 2026-10-21
 
 The read-only survey confirms the existing ALS Sidebar socket is more than its
 file-open/mention path. Implement the following as coordinated stages; do not
 claim socket retirement after moving only the visible file-link feature. This
-section records a plan, not implementation or runtime-transition approval.
+section records the approved source design; runtime transitions remain separate.
 
 ### Type and transport invariants
 
@@ -127,16 +164,19 @@ section records a plan, not implementation or runtime-transition approval.
 ### Stage A — bounded bidirectional ALS pipe
 
 Stage A was separately approved and implemented on 2026-10-21; this does not
-authorize Stage B. The ALS client is installed before router startup, with typed
+itself authorize Stage B. Stage B was subsequently approved on 2026-10-21 for
+semantic owner wiring, caller proof, bounded bulk/deadline policies and regression
+builds; installation/restarts/pushes and new dependencies remain excluded.
+The ALS client is installed before router startup, with typed
 transport DTOs, bounded reader/async dispatcher/writer and close cleanup. Semantic
-handler binding remains dormant and no new export is advertised; existing Sidebar
-operations still use their current socket lane. Source contract and exact control
-limits: sibling ALS `FRAMEWORK_STDIO.md`. Joint activation/live acceptance remain
+handler binding was dormant at the Stage A checkpoint. Stage B now binds the
+semantic owner and advertises actual methods in both manifests. Source contract
+and exact limits: sibling ALS `FRAMEWORK_STDIO.md`. Joint activation/live acceptance remain
 pending; no running app was changed by test compilation.
 
 Relevant ALS source: `rust/crates/als-server/src/framework_pipe.rs`, `lib.rs`,
-`state.rs`, `http.rs`. Today the OS reader handles readiness/unknown-method errors;
-responses are not correlated to outbound app calls and there is no app dispatcher.
+`state.rs`, `http.rs`, and `sidebar_ipc/pipe.rs`. The original readiness-only
+implementation has been replaced by correlated outbound calls and async dispatch.
 
 1. Keep one owned reader/writer and add bounded outstanding request correlation,
    asynchronous handler admission and orderly close/timeout cleanup. The reader
@@ -156,6 +196,10 @@ responses are not correlated to outbound app calls and there is no app dispatche
    fallback to an independently connected socket.
 
 ### Stage B — semantic parity through existing owners
+
+Approved implementation scope as above; semantic migration is implemented at
+source, not an activated runtime claim. The first prerequisite was the receiver-owned
+method limits and shared byte admission described under Relay contract.
 
 Keep the same app frontend namespaces and own-backend user-intent flow. A small
 typed ALS integration facade can retain callers while choosing the explicit
@@ -180,10 +224,11 @@ broaden an authenticated MCP proxy's three-method draft allowlist.
 
 Two source-backed seams must be addressed rather than copied into the new lane:
 
-- ALS file.open already forwards exact caller proof. Project open/create UI
-  requests currently send path/options only. Add proof through the existing
-  frontend/backend boundary and validate it at Code TE2 without inventing a
-  global-active fallback. Project membership is shared; foreground is client-local.
+- ALS file.open already forwarded exact caller proof. Project open/create UI
+  requests previously sent path/options only; they now reuse the same helper and
+  forward proof through the existing frontend/own-backend boundary for validation
+  at Code TE2. This is metadata on user intent, not frontend-owned routing or a
+  new frontend transport. Project membership is shared; foreground is client-local.
 - Code TE2's mention resolver and agent-review forwarding currently rely on
   registered Sidebar socket peers. Replace pipe-mode liveness/admission with
   actual broker route/export checks; retain standalone socket policy separately.
@@ -191,13 +236,16 @@ Two source-backed seams must be addressed rather than copied into the new lane:
 
 ### Payload budgets and compatibility
 
-The first broker slice's 64 KiB request/1 MiB reply control budgets are not proof
-that all draft/agent-edit models fit. Measure representative full-model and
-multi-file draft/review traffic before selecting bounded per-service bulk limits
-or a separate existing bulk data path. Preserve the existing pipe frame ceiling,
-count/byte admission, whole-operation rejection and explicit oversized errors.
-Never silently truncate draft content or globally remove bounds. Any chosen
-budget/schema change belongs to the concrete implementation approval.
+The broker's default 64 KiB request/1 MiB reply control budgets cannot carry some
+full draft/review models: draft state includes full content plus generated diff
+and optional disk text, while review ledgers can contain several sources. Selected
+methods therefore use the explicit 8 MiB ceilings above. Regression fixtures
+exercise full UTF-8 text beyond 1 MiB and whole-request rejection before enqueue.
+This is synthetic boundary qualification, not measured coverage of every user's
+project. The existing 32 MiB physical pipe ceiling is unchanged; count/byte
+admission and explicit whole-operation oversized errors remain. No model content
+is truncated or limit globally removed; larger/paged model protocols are separate
+work if real workloads exceed the chosen budget.
 
 Keep normal CWD/state control defaults small. Project operations may await consent
 or longer work: qualify their deadline/ack semantics rather than assuming the

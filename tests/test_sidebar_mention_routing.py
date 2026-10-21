@@ -54,6 +54,20 @@ def _presentations() -> dict[tuple[str, str], str]:
 
 
 class SidebarMentionRoutingTests(unittest.TestCase):
+    def test_paths_are_not_ids_and_oversized_ids_are_rejected_not_truncated(self) -> None:
+        payload = _payload()
+        path = "/project/" + "long/" * 120 + "file.py"
+        payload["path"] = path
+        _, routed = resolve_targeted_sidebar_mention(payload, sidebar_state=_state(),
+            live_host_client_ids={"client-a"}, registered_peer_app_ids={"als-rs"},
+            registered_presentations=_presentations())
+        self.assertEqual(routed["path"], path)
+        payload["target"] = {"clientId": "x" * 513, "hostId": "agent-slot", "presentationId": "inc"}
+        with self.assertRaisesRegex(ValueError, "identity exceeds"):
+            resolve_targeted_sidebar_mention(payload, sidebar_state=_state(),
+                live_host_client_ids={"client-a"}, registered_peer_app_ids={"als-rs"},
+                registered_presentations=_presentations())
+
     def test_caller_binding_rejects_another_live_clients_target(self) -> None:
         payload = _payload()
         with self.assertRaisesRegex(ValueError, "requesting client"):
@@ -246,6 +260,7 @@ class SidebarMentionEmissionTests(unittest.IsolatedAsyncioTestCase):
                 "app.apps.code_te2.ui_ipc.ui_ipc_socketio.UI_IPC_SIO",
                 new=fake_server,
             ),
+            patch.object(sidebar_ws, "als_route_available", new=AsyncMock(return_value=False)),
         ):
             result = await sidebar_ws.emit_sidebar_mention_targeted(_payload())
 

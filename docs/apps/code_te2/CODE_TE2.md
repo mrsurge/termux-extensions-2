@@ -4819,7 +4819,10 @@ manifest admission precede the app-owned receiver. Existing-slot/app/token/URL
 guards and the normal ledger/global projection remain in charge. Publication
 cannot activate a client or create slots. Terminal/File Editor use ordinary
 HTTP-plus-pipe workers; frontend sockets and HTTP readiness are unchanged.
-ALS/mentions and exact-client file/project intents have not moved in this slice.
+ALS explicit framework mode uses the same relay for file/project intents,
+review/MCP drafts and CWD/state; standalone ALS retains its socket integration.
+Matching installations/domain and ALS caller-proof assets must be activated
+together; source wiring is not a deployment claim.
 Contract, bounds and matching activation: `docs/apps/sidebar_app_intents/APP_RPC.md`.
 
 Ledger v2 persists only stable slot identity, membership, lifecycle/readiness,
@@ -4918,9 +4921,13 @@ agent host id, and current `presentationId`. The host republishes that ephemeral
 tuple when its iframe is created/replaced and after Sidebar IPC registration.
 Python derives the client from its connection and validates the tuple against
 the live host, ledger membership, agent conversation, and registered app peer.
-It derives conversation identity from the ledger slot and emits only to that
-app room. A missing or stale tuple fails closed: there is no global-active or
-broadcast fallback.
+It derives conversation identity from the ledger slot. Owned managed ALS uses
+the framework-pipe service and returns composer-owner acceptance/queued receipts;
+standalone ALS uses its registered app room only when no managed route exists.
+Starting/stale routes and uncertain delivery errors never select a second lane.
+A missing or stale tuple fails closed: there is no global-active or broadcast
+fallback. Mention paths are preserved intact; oversized identities reject rather
+than being silently truncated. Review routing excludes the originating app.
 
 ### Lane boundary
 

@@ -12,6 +12,21 @@
     "frontend_script": "main.js"
   },
   "readiness_support": "pipe",
+  "ipc": {
+    "services": {
+      "sidebar": {
+        "version": 1,
+        "callers": ["code_te2"],
+        "methods": ["mention", "cwd.set", "project.opened", "window.focused",
+          "agentEdits.documentState.get", "agentEdits.decide"],
+        "limits": {
+          "mention": {"timeoutMs": 60000},
+          "agentEdits.documentState.get": {"replyBytes": 8388608, "timeoutMs": 60000},
+          "agentEdits.decide": {"replyBytes": 8388608, "timeoutMs": 60000}
+        }
+      }
+    }
+  },
   "sidebar_state": {
     "presentation_prefix": "als",
     "enabled": true,

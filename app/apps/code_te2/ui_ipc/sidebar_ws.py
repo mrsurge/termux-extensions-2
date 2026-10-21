@@ -11,6 +11,7 @@ from typing import Protocol, cast
 from ..explorer.services.file_ops import get_project_root
 from ..sidebar_window_events import publish_sidebar_window_state_changed
 from ..stores import get_history_store, get_preferences_store
+from ..host.sidebar_pipe import als_route_available, call_als, originating_app, publish_als_fact
 from .sidebar_identity import sidebar_identities
 from .sidebar_projection_service import (
     SidebarProjection,
@@ -90,7 +91,7 @@ class SidebarNamespace(Protocol):
         *,
         to: str | None = None,
         room: str | None = None,
-        skip_sid: str | None = None,
+        skip_sid: str | list[str] | None = None,
         namespace: str | None = None,
     ) -> Awaitable[None]: ...
 
@@ -139,6 +140,13 @@ def _client_room(client_id: str) -> str:
 
 def _app_room(app_id: str) -> str:
     return f"sidebar:app:{_norm(app_id) or 'unknown'}"
+
+
+def _skip_als_peers(skip_sid: str | None = None) -> list[str]:
+    sids = {sid for sid, app in _app_ids_by_sid.items() if app in {"als", "als-rs", "als_rs"}}
+    if skip_sid:
+        sids.add(skip_sid)
+    return sorted(sids)
 
 
 def _app_id_aliases(app_id: object) -> set[str]:
@@ -280,12 +288,13 @@ async def _emit_sidebar_window_focused_global(
     from .ui_ipc_socketio import UI_IPC_SIO
 
     sio = cast(SidebarNamespace, UI_IPC_SIO)
+    pipe_selected = app_id in {"als", "als-rs", "als_rs"} and await publish_als_fact("window.focused", payload)
     await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
         build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_FOCUSED, payload),
         namespace="/sidebar_ipc",
         room=_app_room(app_id),
-        skip_sid=skip_sid,
+        skip_sid=_skip_als_peers(skip_sid) if pipe_selected else skip_sid,
     )
     return payload
 
@@ -338,7 +347,10 @@ async def emit_sidebar_cwd_set(ns: SidebarNamespace, *, to_sid: str | None = Non
     if to_sid:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload, to_sid=to_sid)
     else:
-        await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload, room="sidebar_ipc")
+        pipe_selected = await publish_als_fact("cwd.set", payload)
+        await ns.emit(SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
+                      build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload),
+                      room="sidebar_ipc", skip_sid=_skip_als_peers() if pipe_selected else None)
     print(
         f"[sidebar_ipc] cwd_set reason={payload.get('reason')} cwd={payload.get('cwd') or ''} to={to_sid or 'room'}",
         flush=True,
@@ -350,11 +362,13 @@ async def emit_sidebar_cwd_set_global(*, reason: str = "sync") -> None:
 
     payload = get_sidebar_cwd_snapshot(reason)
     sio = cast(SidebarNamespace, UI_IPC_SIO)
+    pipe_selected = await publish_als_fact("cwd.set", payload)
     await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
         build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload),
         namespace="/sidebar_ipc",
         room="sidebar_ipc",
+        skip_sid=_skip_als_peers() if pipe_selected else None,
     )
     print(
         f"[sidebar_ipc] cwd_set(global) reason={payload.get('reason')} cwd={payload.get('cwd') or ''}",
@@ -381,6 +395,9 @@ async def emit_sidebar_mention_targeted(
         for sid, app_id in _app_ids_by_sid.items()
         if sid in _registered_iframes and sid != skip_sid and app_id
     }
+    pipe_selected = await als_route_available("mention")
+    if pipe_selected:
+        registered_peer_app_ids.add("als-rs")
     proof = sidebar_identities.validate(_json_object(payload.get("target")))
     registered_presentations = dict(_client_presentations)
     if proof is not None:
@@ -394,6 +411,11 @@ async def emit_sidebar_mention_targeted(
     )
     if proof is not None:
         routed["target"] = {**_json_object(routed.get("target")), **proof.payload(), "windowId": proof.page.window_id}
+    if pipe_selected and app_id in {"als", "als-rs", "als_rs"}:
+        receipt = await call_als("mention", routed)
+        if receipt.get("conversation_id") != routed["conversation_id"]:
+            raise ValueError("ALS mention receipt does not match its target conversation")
+        return {**receipt, "app_id": app_id, "target": routed["target"]}
     sio = cast(SidebarNamespace, UI_IPC_SIO)
     await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
@@ -607,10 +629,15 @@ async def request_agent_edit_document_state_from_peers(
 ) -> JsonObject:
     from .ui_ipc_socketio import UI_IPC_SIO
 
+    if originating_app.get() != "als-rs" and await als_route_available("agentEdits.documentState.get"):
+        return await call_als("agentEdits.documentState.get", payload)
+
     peers = 0
     envelope = build_jsonrpc_notification(SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET, payload)
     for sid in list(_agent_edit_peer_sids):
         if exclude_sid and sid == exclude_sid:
+            continue
+        if originating_app.get() == "als-rs" and _app_ids_by_sid.get(sid) in {"als", "als-rs", "als_rs"}:
             continue
         sio = cast(SidebarNamespace, UI_IPC_SIO)
         await sio.emit(
@@ -632,10 +659,15 @@ async def forward_agent_edit_decision_to_peers(
 ) -> JsonObject:
     from .ui_ipc_socketio import UI_IPC_SIO
 
+    if originating_app.get() != "als-rs" and await als_route_available("agentEdits.decide"):
+        return await call_als("agentEdits.decide", payload)
+
     peers = 0
     envelope = build_jsonrpc_notification(SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE, payload)
     for sid in list(_agent_edit_peer_sids):
         if exclude_sid and sid == exclude_sid:
+            continue
+        if originating_app.get() == "als-rs" and _app_ids_by_sid.get(sid) in {"als", "als-rs", "als_rs"}:
             continue
         sio = cast(SidebarNamespace, UI_IPC_SIO)
         await sio.emit(
@@ -740,6 +772,14 @@ async def _emit_sidebar_control_notification(ns: SidebarNamespace, notification_
 async def _emit_project_opened(ns: SidebarNamespace, payload: JsonObject, *, skip_sid: str | None = None) -> None:
     params = dict(payload)
     params.setdefault("ts", int(time.time() * 1000))
+    pipe_selected = await publish_als_fact("project.opened", {
+        key: params[key] for key in ("path", "resolved_path", "source", "ts") if key in params
+    })
+    if pipe_selected:
+        await ns.emit(SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
+                      build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED, params),
+                      room="sidebar_ipc", skip_sid=_skip_als_peers(skip_sid))
+        return
     await _emit_rpc_notification(
         ns,
         SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
@@ -747,6 +787,11 @@ async def _emit_project_opened(ns: SidebarNamespace, payload: JsonObject, *, ski
         room="sidebar_ipc",
         skip_sid=skip_sid,
     )
+
+
+async def emit_sidebar_project_opened_global(payload: JsonObject) -> None:
+    from .ui_ipc_socketio import UI_IPC_SIO
+    await _emit_project_opened(cast(SidebarNamespace, UI_IPC_SIO), payload)
 
 
 async def route_backend_open_request(
@@ -842,6 +887,8 @@ async def handle_sidebar_document_open(
                                    request_prefix="sidebar_rpc",
                                    external_source_context=_json_object(routed_params.get("target")),
                                    external_requester_app_id=requester_app_id)
+    if opened.get("ok") is not True:
+        return dict(opened)
     if opened.get("ok") is True and opened.get("surface") != "sidebar":
         from .notifications import emit_ui_ipc_rpc_notification
         from .rpc_contract import UI_IPC_RPC_NOTIFICATION_SIDEBAR_DRAWER_CLOSE

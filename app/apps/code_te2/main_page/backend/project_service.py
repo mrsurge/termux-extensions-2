@@ -223,7 +223,10 @@ async def create_project_from_parent_name(
     parent_path: str,
     name: str,
     open_after: bool = True,
+    before_switch: Callable[[], None] | None = None,
 ) -> JsonObject:
+    if before_switch is not None:
+        before_switch()
     result = deps.create_project(parent_path, name)
     new_project_path_raw = result.get("path")
     if not isinstance(new_project_path_raw, str) or not new_project_path_raw:
@@ -234,6 +237,7 @@ async def create_project_from_parent_name(
             new_project_path_raw,
             require_known_sidecar=False,
             reason="project_create",
+            before_switch=before_switch,
         )
         open_result["created"] = True
         return open_result
@@ -256,7 +260,10 @@ async def create_project_from_path(
     path: str,
     adopt_existing: bool,
     open_after: bool = True,
+    before_switch: Callable[[], None] | None = None,
 ) -> JsonObject:
+    if before_switch is not None:
+        before_switch()
     if not str(path or "").strip():
         return {"ok": False, "reason": "invalid_path"}
     target = Path(normalize_history_project_path(path))
@@ -271,6 +278,7 @@ async def create_project_from_path(
                 str(target),
                 require_known_sidecar=False,
                 reason="project_create_adopt",
+                before_switch=before_switch,
             )
             open_result["created"] = False
             open_result["adopted"] = True
@@ -294,6 +302,7 @@ async def create_project_from_path(
         parent_path=str(parent),
         name=name,
         open_after=open_after,
+        before_switch=before_switch,
     )
     created["created"] = True
     return created

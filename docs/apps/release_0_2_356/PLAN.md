@@ -274,9 +274,21 @@ Subsequent Stage A approval covers ALS's bounded bidirectional pipe foundation,
 typed DTOs, client installation before router startup, isolated tests and docs;
 no semantic operation cutover/exports, runtime restart, installation or push.
 Source implementation is now in ALS's framework_pipe submodules; its existing
-Sidebar socket traffic remains unchanged. Stage B still needs its own concrete
-bulk/deadline/owner-routing approval. Track source validation separately from
-joint activation in TRACKER.md; ALS FRAMEWORK_STDIO.md owns transport limits.
+Sidebar socket traffic remained unchanged at that checkpoint. Stage B was then
+approved and implemented at source: explicit ALS --stdio uses the owned pipe for
+the inventoried operations, while standalone integration retains Socket.IO.
+Exact client/presentation proof now also accompanies project actions. Generic
+receiver-owned per-method budgets and shared byte admission keep control calls
+small while selected full-model review/draft paths opt into bounded larger
+responses; project UI/broker/client deadlines are aligned. Oversize/timeout or
+unknown acceptance cannot authorize replay or a second transport.
+
+The matching framework, Code TE2 Python/mypyc, ALS binary and caller-proof frontend
+must be activated together. ALS frontend snapshot publication requires a clean
+source checkpoint first; installed clients still need separate OTA/reload.
+No version bump, install, runtime restart or client publication is authorized by
+source validation. TRACKER.md owns those pending gates; ALS FRAMEWORK_STDIO.md and
+the APP_RPC companion own the implementation contract.
 
 ### O2. Pipe concurrency and in-process Code TE2 DTO buffering
 

@@ -16,7 +16,10 @@ def _object(value: object) -> JsonObject:
 
 
 def _id(value: object) -> str:
-    return str(value or "").strip()[:MAX_ID_LENGTH]
+    text = str(value or "").strip()
+    if len(text) > MAX_ID_LENGTH:
+        raise ValueError("Sidebar identity exceeds its limit")
+    return text
 
 
 def _app_alias(value: object) -> str:
@@ -28,7 +31,8 @@ def _conversation_id(slot: JsonObject) -> str:
     value = _id(query_state.get("conversation_id") or query_state.get("conversationId"))
     if value:
         return value
-    raw_url = _id(slot.get("restore_url") or slot.get("restoreUrl") or slot.get("url"))
+    raw_url_value = slot.get("restore_url") or slot.get("restoreUrl") or slot.get("url")
+    raw_url = raw_url_value.strip() if isinstance(raw_url_value, str) else ""
     if not raw_url:
         return ""
     query = dict(parse_qsl(urlsplit(raw_url).query, keep_blank_values=True))
@@ -53,7 +57,8 @@ def resolve_targeted_sidebar_mention(
     registered_peer_app_ids: set[str],
     registered_presentations: dict[tuple[str, str], str],
 ) -> tuple[str, JsonObject]:
-    path = _id(payload.get("path"))
+    raw_path = payload.get("path")
+    path = raw_path.strip() if isinstance(raw_path, str) else ""
     if not path:
         raise ValueError("missing mention path")
 

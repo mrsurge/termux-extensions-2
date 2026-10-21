@@ -131,6 +131,7 @@ async def handle_sidebar_project_open_request(
     data: dict[str, object],
     *,
     source_name: str,
+    before_switch: Callable[[], None] | None = None,
 ) -> JsonMap:
     file_target_obj = data.get("file") or data.get("file_path") or data.get("fileTarget") or data.get("targetFile")
     file_target = file_target_obj.strip() if isinstance(file_target_obj, str) and file_target_obj.strip() else None
@@ -140,6 +141,7 @@ async def handle_sidebar_project_open_request(
         require_known_sidecar=True,
         reason="sidebar_project_open",
         file_target=file_target,
+        before_switch=before_switch,
     )
     if result.get("ok") is True:
         result["source"] = source_name
@@ -150,12 +152,14 @@ async def handle_sidebar_project_create_request(
     data: dict[str, object],
     *,
     source_name: str,
+    before_switch: Callable[[], None] | None = None,
 ) -> JsonMap:
     result = await create_project_from_path(
         _project_service_deps(),
         path=_path_param(data),
         adopt_existing=_bool_param(data, "adoptExisting", default=False),
         open_after=_bool_param(data, "open", default=True),
+        before_switch=before_switch,
     )
     if result.get("ok") is True:
         result["source"] = source_name

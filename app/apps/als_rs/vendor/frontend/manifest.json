@@ -32,8 +32,8 @@
       "sha256": "c2e2f0a663f1db4ebecc728f55651fa8d55617769d0624809647761d0a14aa1c"
     },
     "dist/codex_agent.js": {
-      "bytes": 910804,
-      "sha256": "96cade142ddbb0796fba45109cc0b74a36f20b4ff46ef249a2f438833ca793cd"
+      "bytes": 910898,
+      "sha256": "b31ee73095f8c7513e22a6bc06baf032d96b2f5447f790cc669dfcd2119bdd34"
     },
     "images/green-right-arrow.png": {
       "bytes": 122699,
@@ -192,8 +192,8 @@
       "sha256": "17521ad57f3e8f0c372c04e662c6d7d746e3cb0e5afa49f44babe4227545bded"
     },
     "js/codex_agent/rpc/ui/client.ts": {
-      "bytes": 22902,
-      "sha256": "02b30e946e752e2a2b34b0fb78dc0a147df5b55401671655a8b200157485c2bf"
+      "bytes": 23086,
+      "sha256": "1cc94ab0ce30764be8c0123c04ab72b3cbf6bf2b76146f48d35aef9e811f138e"
     },
     "js/codex_agent/rpc/ui/contract.ts": {
       "bytes": 1683,
@@ -628,7 +628,7 @@
     ]
   },
   "schema": 1,
-  "source_commit": "570deb583a115d91a1ee491e57992685b0eb0f89",
+  "source_commit": "3cc5e9f5ec2039a109626f3292f64f2892d95c30",
   "source_files": {
     "app.js": {
       "bytes": 4021,
@@ -655,8 +655,8 @@
       "sha256": "c2e2f0a663f1db4ebecc728f55651fa8d55617769d0624809647761d0a14aa1c"
     },
     "dist/codex_agent.js": {
-      "bytes": 910720,
-      "sha256": "f8fe4ef6a5d7c04ae8de6b03a726eff19f5b6a8a6348299f658ece5353d78d58"
+      "bytes": 910814,
+      "sha256": "b75c1090453b61f4766277abf14e65edb9a2ec773d360ede0ff9d56671873b1f"
     },
     "images/green-right-arrow.png": {
       "bytes": 122699,
@@ -815,8 +815,8 @@
       "sha256": "17521ad57f3e8f0c372c04e662c6d7d746e3cb0e5afa49f44babe4227545bded"
     },
     "js/codex_agent/rpc/ui/client.ts": {
-      "bytes": 22902,
-      "sha256": "02b30e946e752e2a2b34b0fb78dc0a147df5b55401671655a8b200157485c2bf"
+      "bytes": 23086,
+      "sha256": "1cc94ab0ce30764be8c0123c04ab72b3cbf6bf2b76146f48d35aef9e811f138e"
     },
     "js/codex_agent/rpc/ui/contract.ts": {
       "bytes": 1683,
@@ -1229,7 +1229,7 @@
   },
   "source_repository": "https://github.com/mrsurge/agent_log_server",
   "source_static_path": "rust/crates/als-server/src/static",
-  "source_tree_sha256": "ab1c0c9f34782fd71343f290a55e18044765152d3ccf3ea5b4926230eb13c986",
-  "tree_sha256": "64d209e13a131f0193c8f513558f15e9e0d8caece4cef4215a1669c035704d7f",
-  "version": "0.2.138"
+  "source_tree_sha256": "425d691a70d9fb424a03bf415e84e37e1a42d03d6b7c3c1e77a5776ef03eea41",
+  "tree_sha256": "ad618758d8449e929a105489184eabd9b9aa2b17b252c514697a5d599d06dde2",
+  "version": "0.2.139"
 }

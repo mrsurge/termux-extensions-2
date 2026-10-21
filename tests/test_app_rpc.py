@@ -115,9 +115,12 @@ def test_cwd_uses_existing_read_owner(monkeypatch, owners):
 def test_manifest_and_worker_transport_declarations():
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "app/apps/code_te2/manifest.json").read_text())
-    assert manifest["ipc"]["services"]["sidebar"] == {
-        "version": 1, "callers": ["terminal", "file_explorer", "file_editor"],
-        "methods": ["cwd.get", "window.state.update"]}
+    service = manifest["ipc"]["services"]["sidebar"]
+    assert service["version"] == 1
+    assert service["callers"] == ["terminal", "file_explorer", "file_editor", "als-rs"]
+    assert {"cwd.get", "window.state.update", "file.open", "draftState.get"} <= set(service["methods"])
+    assert "cwd.get" not in service["limits"]
+    assert service["limits"]["project.open"]["timeoutMs"] == 180000
     import yaml
     for app in ("terminal", "file_editor", "file_explorer"):
         spec = yaml.safe_load((root / f"app/apps/{app}/shellspec/app_worker.yaml").read_text())["shells"]["app-worker"]

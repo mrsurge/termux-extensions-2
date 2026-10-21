@@ -10,11 +10,13 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
-use tokio::sync::{Semaphore, oneshot, watch};
+use tokio::sync::{Semaphore, SemaphorePermit, oneshot, watch};
 
 const MAX_PENDING: usize = 16;
 const MAX_PARAMS: usize = 64 * 1024;
 const WAIT: Duration = Duration::from_secs(15);
+const MAX_RPC_BYTES: usize = 8 * 1024 * 1024;
+const RPC_ROUTE_BYTES: usize = 32 * 1024 * 1024;
 type Registry = Mutex<HashMap<(String, String), Arc<Route>>>;
 static ROUTES: OnceLock<Registry> = OnceLock::new();
 
@@ -26,6 +28,7 @@ pub(crate) struct Route {
     pending: Mutex<HashMap<String, oneshot::Sender<PipeEnvelope>>>,
     closed: watch::Sender<bool>,
     admission: Semaphore,
+    rpc_bytes: Semaphore,
 }
 
 impl Route {
@@ -221,6 +224,7 @@ pub(crate) fn register(
         pending: Mutex::default(),
         closed,
         admission: Semaphore::new(MAX_PENDING),
+        rpc_bytes: Semaphore::new(RPC_ROUTE_BYTES),
     });
     let mut routes = ROUTES
         .get_or_init(Default::default)
@@ -268,13 +272,88 @@ struct AppRpcExport {
     version: u32,
     callers: Vec<String>,
     methods: Vec<String>,
+    #[serde(default)]
+    limits: HashMap<String, RpcLimits>,
+}
+
+/// Receiver-owned policy, never an untrusted caller-selected timeout/size.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+struct RpcLimits {
+    request_bytes: usize,
+    reply_bytes: usize,
+    timeout_ms: u64,
+}
+
+impl Default for RpcLimits {
+    fn default() -> Self {
+        Self {
+            request_bytes: MAX_PARAMS,
+            reply_bytes: 1024 * 1024,
+            timeout_ms: WAIT.as_millis() as u64,
+        }
+    }
+}
+
+impl RpcLimits {
+    fn validate(self) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            (1..=MAX_RPC_BYTES).contains(&self.request_bytes)
+                && (1..=MAX_RPC_BYTES).contains(&self.reply_bytes)
+                && (1..=180_000).contains(&self.timeout_ms),
+            "appRpc.invalidLimits"
+        );
+        Ok(self)
+    }
+
+    fn reservation(self, request_bytes: usize) -> anyhow::Result<u32> {
+        anyhow::ensure!(
+            request_bytes <= self.request_bytes,
+            "appRpc.payloadTooLarge"
+        );
+        // This is an in-flight serialized-byte allowance, not an RSS estimate.
+        Ok(u32::try_from(request_bytes + self.reply_bytes)?)
+    }
+}
+
+struct RpcReservation<'a> {
+    _source: SemaphorePermit<'a>,
+    _target: Option<SemaphorePermit<'a>>,
+}
+
+fn reserve_rpc_bytes<'a>(
+    source: &'a Arc<Route>,
+    target: &'a Arc<Route>,
+    limits: RpcLimits,
+    request_bytes: usize,
+) -> anyhow::Result<RpcReservation<'a>> {
+    let bytes = limits.reservation(request_bytes)?;
+    let source_permit = source
+        .rpc_bytes
+        .try_acquire_many(bytes)
+        .map_err(|_| anyhow::anyhow!("appRpc.busyBytes"))?;
+    // Self-calls must not reserve the same route twice.
+    let target_permit = if Arc::ptr_eq(source, target) {
+        None
+    } else {
+        Some(
+            target
+                .rpc_bytes
+                .try_acquire_many(bytes)
+                .map_err(|_| anyhow::anyhow!("appRpc.busyBytes"))?,
+        )
+    };
+    Ok(RpcReservation {
+        _source: source_permit,
+        _target: target_permit,
+    })
 }
 
 fn rpc_export_allowed(
     manifest: &Map<String, Value>,
     source: &str,
     request: &AppRpcRequest,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RpcLimits> {
     fn name(value: &str) -> bool {
         !value.is_empty()
             && value.len() <= 128
@@ -316,7 +395,29 @@ fn rpc_export_allowed(
         export.callers.iter().any(|v| v == source) && export.methods.contains(&request.method),
         "appRpc.forbidden"
     );
-    Ok(())
+    anyhow::ensure!(export.limits.len() <= 64, "appRpc.invalidLimits");
+    for (method, limits) in &export.limits {
+        anyhow::ensure!(export.methods.contains(method), "appRpc.invalidLimits");
+        limits.validate()?;
+    }
+    export
+        .limits
+        .get(&request.method)
+        .copied()
+        .unwrap_or_default()
+        .validate()
+}
+
+fn rpc_route_available(route: Option<&Route>, running_shell: Option<&str>) -> anyhow::Result<bool> {
+    match (route, running_shell) {
+        (None, None) => Ok(false),
+        (Some(route), Some(shell)) => {
+            anyhow::ensure!(!*route.closed.borrow(), "appRpc.routeNotReady");
+            validate_current(route, Some(shell))?;
+            Ok(true)
+        }
+        _ => anyhow::bail!("appRpc.routeNotReady"),
+    }
 }
 
 async fn dispatch_rpc(
@@ -343,16 +444,33 @@ async fn dispatch_rpc(
             "appRpc.operationIdRequired"
         );
         let params = request.params.clone().unwrap_or(Value::Null);
-        anyhow::ensure!(
-            serde_json::to_vec(&params)?.len() <= MAX_PARAMS,
-            "appRpc.payloadTooLarge"
-        );
+        let request_bytes = serde_json::to_vec(&params)?.len();
+        anyhow::ensure!(request_bytes <= MAX_RPC_BYTES, "appRpc.payloadTooLarge");
         let body: AppRpcRequest = serde_json::from_value(params)?;
         let registry = state.app_registry_snapshot();
         let app = registry
             .get_app(&body.target_app)
             .ok_or_else(|| anyhow::anyhow!("appRpc.targetUnavailable"))?;
-        rpc_export_allowed(&app.raw_manifest, &source.app, &body)?;
+        let limits = rpc_export_allowed(&app.raw_manifest, &source.app, &body)?;
+        if request.method.as_deref() == Some("app.rpc.route.get") {
+            anyhow::ensure!(
+                body.context.is_null() && body.payload.is_null(),
+                "appRpc.invalidRouteQuery"
+            );
+            let running = state.running_app_for_id(&app.app_id);
+            let route = resolve(&source.instance, &app.app_id);
+            // Only complete absence selects explicit standalone integration.
+            // Starting/stale managed workers are errors, not socket fallback.
+            let available = rpc_route_available(
+                route.as_ref().ok().map(Arc::as_ref),
+                running.as_ref().map(|app| app.shell_id.as_str()),
+            )?;
+            return Ok(PipeEnvelope::success_response(
+                request,
+                &responder,
+                json!({"appId":app.app_id,"available":available}),
+            ));
+        }
         let target = resolve(&source.instance, &app.app_id)?;
         validate_current(
             &target,
@@ -361,6 +479,7 @@ async fn dispatch_rpc(
                 .as_ref()
                 .map(|app| app.shell_id.as_str()),
         )?;
+        let _bytes = reserve_rpc_bytes(source, &target, limits, request_bytes)?;
         let reply = target
             .deliver_message(
                 source,
@@ -371,11 +490,11 @@ async fn dispatch_rpc(
                     "context":body.context,"payload":body.payload,
                     "source":{"appId":source.app,"shellId":source.shell}
                 }),
-                WAIT,
+                Duration::from_millis(limits.timeout_ms),
             )
             .await?;
         anyhow::ensure!(
-            serde_json::to_vec(&reply)?.len() <= 1024 * 1024,
+            serde_json::to_vec(&reply)?.len() <= limits.reply_bytes,
             "appRpc.replyTooLarge: execution outcome may be unknown"
         );
         Ok(reply)
@@ -450,7 +569,7 @@ pub(crate) async fn dispatch(
     request: &PipeEnvelope,
 ) -> Option<PipeEnvelope> {
     let method = request.method.as_deref()?;
-    if method == "app.rpc.call" {
+    if method == "app.rpc.call" || method == "app.rpc.route.get" {
         return Some(dispatch_rpc(state, source, request).await);
     }
     if !matches!(method, "app.open" | "app.intent.dispatch") {
@@ -535,6 +654,7 @@ mod tests {
                 pending: Mutex::default(),
                 closed,
                 admission: Semaphore::new(MAX_PENDING),
+                rpc_bytes: Semaphore::new(RPC_ROUTE_BYTES),
             }),
             rx,
         )
@@ -788,12 +908,121 @@ mod tests {
     }
 
     #[test]
+    fn receiver_limits_are_method_scoped_and_cannot_be_selected_by_callers() {
+        let mut manifest = json!({"ipc":{"services":{"sample":{
+            "version":1,"callers":["source"],"methods":["control", "bulk"],
+            "limits":{"bulk":{"requestBytes":MAX_RPC_BYTES,"replyBytes":MAX_RPC_BYTES,"timeoutMs":180000}}
+        }}}});
+        let mut body: AppRpcRequest = serde_json::from_value(json!({
+            "targetApp":"target","service":"sample","version":1,
+            "method":"control","payload":{}
+        }))
+        .unwrap();
+        assert_eq!(
+            rpc_export_allowed(manifest.as_object().unwrap(), "source", &body).unwrap(),
+            RpcLimits::default()
+        );
+        body.method = "bulk".into();
+        let limits = rpc_export_allowed(manifest.as_object().unwrap(), "source", &body).unwrap();
+        assert_eq!(limits.request_bytes, MAX_RPC_BYTES);
+        assert_eq!(limits.timeout_ms, 180000);
+        assert!(limits.reservation(MAX_RPC_BYTES).is_ok());
+        assert!(limits.reservation(MAX_RPC_BYTES + 1).is_err());
+        assert!(rpc_export_allowed(manifest.as_object().unwrap(), "other", &body).is_err());
+        for invalid in [
+            json!({"requestBytes":0}),
+            json!({"replyBytes":MAX_RPC_BYTES + 1}),
+            json!({"timeoutMs":0}),
+            json!({"timeoutMs":180001}),
+            json!({"timeoutMs":true}),
+            json!({"timeoutMs":-1}),
+            json!({"unknown":1}),
+        ] {
+            manifest["ipc"]["services"]["sample"]["limits"]["bulk"] = invalid;
+            assert!(rpc_export_allowed(manifest.as_object().unwrap(), "source", &body).is_err());
+        }
+        manifest["ipc"]["services"]["sample"]["limits"] = json!({"undeclared":{}});
+        assert!(rpc_export_allowed(manifest.as_object().unwrap(), "source", &body).is_err());
+        assert!(
+            serde_json::from_value::<AppRpcRequest>(json!({
+                "targetApp":"target","service":"sample","version":1,"method":"bulk",
+                "payload":{},"limits":{"requestBytes":MAX_RPC_BYTES}
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rpc_byte_reservations_are_shared_released_and_do_not_double_count_self_calls() {
+        let (source, _) = fixture("source");
+        let (target, _) = fixture("target");
+        let limits = RpcLimits {
+            request_bytes: MAX_RPC_BYTES,
+            reply_bytes: MAX_RPC_BYTES,
+            timeout_ms: 15000,
+        };
+        let first = reserve_rpc_bytes(&source, &target, limits, MAX_RPC_BYTES).unwrap();
+        let second = reserve_rpc_bytes(&source, &target, limits, MAX_RPC_BYTES).unwrap();
+        assert_eq!(source.rpc_bytes.available_permits(), 0);
+        assert_eq!(target.rpc_bytes.available_permits(), 0);
+        assert!(reserve_rpc_bytes(&source, &target, RpcLimits::default(), 1).is_err());
+        drop(first);
+        drop(second);
+        assert_eq!(source.rpc_bytes.available_permits(), RPC_ROUTE_BYTES);
+        // Target rejection must release the already acquired source permit.
+        let held = target
+            .rpc_bytes
+            .try_acquire_many(RPC_ROUTE_BYTES as u32)
+            .unwrap();
+        assert!(reserve_rpc_bytes(&source, &target, limits, 1).is_err());
+        assert_eq!(source.rpc_bytes.available_permits(), RPC_ROUTE_BYTES);
+        drop(held);
+        let self_call = reserve_rpc_bytes(&source, &source, limits, MAX_RPC_BYTES).unwrap();
+        assert_eq!(
+            source.rpc_bytes.available_permits(),
+            RPC_ROUTE_BYTES - 2 * MAX_RPC_BYTES
+        );
+        drop(self_call);
+        assert!(reserve_rpc_bytes(&source, &target, RpcLimits::default(), MAX_PARAMS + 1).is_err());
+        assert_eq!(source.rpc_bytes.available_permits(), RPC_ROUTE_BYTES);
+    }
+
+    #[test]
+    fn bulk_budget_counts_full_utf8_envelope_without_truncating_models() {
+        let content = "😀".repeat(MAX_PARAMS / 4);
+        let params = json!({"targetApp":"code_te2", "service":"sample", "version":1,
+            "method":"publish", "context":null, "payload":{"content":content}});
+        let encoded = serde_json::to_vec(&params).unwrap();
+        assert!(encoded.len() > MAX_PARAMS);
+        assert!(RpcLimits::default().reservation(encoded.len()).is_err());
+        let bulk = RpcLimits {
+            request_bytes: 2 * MAX_PARAMS,
+            ..RpcLimits::default()
+        };
+        assert!(bulk.validate().unwrap().reservation(encoded.len()).is_ok());
+        let decoded: AppRpcRequest = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.payload["content"], content);
+    }
+
+    #[test]
     fn unavailable_and_noncurrent_workers_are_rejected() {
         let (route, _) = fixture("file_explorer");
         assert!(resolve(&crate::new_instance_id().unwrap(), "code_te2").is_err());
         assert!(validate_current(&route, None).is_err());
         assert!(validate_current(&route, Some("different-shell")).is_err());
         assert!(validate_current(&route, Some(&route.shell)).is_ok());
+    }
+
+    #[test]
+    fn route_query_only_selects_standalone_for_complete_managed_absence() {
+        let (route, _) = fixture("als-rs");
+        assert!(!rpc_route_available(None, None).unwrap());
+        assert!(rpc_route_available(Some(&route), Some(&route.shell)).unwrap());
+        assert!(rpc_route_available(Some(&route), None).is_err());
+        assert!(rpc_route_available(None, Some(&route.shell)).is_err());
+        assert!(rpc_route_available(Some(&route), Some("old-shell")).is_err());
+        route.close();
+        assert!(rpc_route_available(Some(&route), Some(&route.shell)).is_err());
     }
 
     #[tokio::test]

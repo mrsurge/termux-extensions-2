@@ -468,7 +468,8 @@ export function createUiRpcClient(deps: UiRpcClientDeps) {
     const result = await callRpcNamespace<JsonObject>({
       namespace: UI_RPC_NAMESPACE,
       method: UI_RPC_METHODS.projectTe2Open,
-      params: payload,
+      params: { ...payload, target: fileOpenCallerTarget(getWindowRef(deps.windowRef)) },
+      timeoutMs: 190000,
       windowRef: getWindowRef(deps.windowRef),
     });
     return normalizeTransport(asObject(result) ?? {}, 'rpc');
@@ -489,7 +490,8 @@ export function createUiRpcClient(deps: UiRpcClientDeps) {
     const result = await callRpcNamespace<JsonObject>({
       namespace: UI_RPC_NAMESPACE,
       method: UI_RPC_METHODS.projectTe2Create,
-      params: payload,
+      params: { ...payload, target: fileOpenCallerTarget(getWindowRef(deps.windowRef)) },
+      timeoutMs: 190000,
       windowRef: getWindowRef(deps.windowRef),
     });
     return normalizeTransport(asObject(result) ?? {}, 'rpc');

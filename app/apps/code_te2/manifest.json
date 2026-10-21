@@ -28,8 +28,23 @@
     "services": {
       "sidebar": {
         "version": 1,
-        "callers": ["terminal", "file_explorer", "file_editor"],
-        "methods": ["cwd.get", "window.state.update"]
+        "callers": ["terminal", "file_explorer", "file_editor", "als-rs"],
+        "methods": ["cwd.get", "window.state.update", "file.open", "file.edit",
+          "project.lookup", "project.open", "project.create", "agentEdits.publish",
+          "agentEdits.clear", "agentEdits.list", "agentEdits.documentState.get",
+          "agentEdits.decide", "drafts.list", "draftState.get", "draft.clear"],
+        "limits": {
+          "file.edit": {"requestBytes": 8388608, "replyBytes": 8388608, "timeoutMs": 60000},
+          "agentEdits.publish": {"requestBytes": 8388608, "replyBytes": 8388608, "timeoutMs": 60000},
+          "agentEdits.list": {"replyBytes": 8388608, "timeoutMs": 60000},
+          "agentEdits.documentState.get": {"replyBytes": 8388608, "timeoutMs": 60000},
+          "agentEdits.decide": {"replyBytes": 8388608, "timeoutMs": 60000},
+          "drafts.list": {"replyBytes": 8388608, "timeoutMs": 60000},
+          "draftState.get": {"replyBytes": 8388608, "timeoutMs": 60000},
+          "draft.clear": {"replyBytes": 8388608, "timeoutMs": 60000},
+          "project.open": {"timeoutMs": 180000},
+          "project.create": {"timeoutMs": 180000}
+        }
       }
     }
   },

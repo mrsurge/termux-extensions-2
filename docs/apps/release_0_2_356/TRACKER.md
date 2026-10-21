@@ -156,11 +156,11 @@ approved for blanket changes merely because the order is now recorded.
   gates documented in ../sidebar_app_intents/APP_RPC.md. No new test/build claims
   or acceptance inferred from this read-only investigation/planning pass.
 - [x] Concrete Stage A edit/validation approval, then ALS bounded pipe foundation.
-- [ ] Qualify bulk/control limits and consent deadlines; approve Stage B semantic
+- [x] Qualify bulk/control limits and consent deadlines; approve Stage B semantic
   cutover with parity tests and any necessary caller-proof frontend changes.
 - [ ] Joint ALS activation/publication and grouped live validation when connected
   model is ready. TE2 interpreted/new-framework acceptance is recorded above;
-  ALS semantic pipe routing is not yet implemented or live accepted.
+  ALS semantic pipe routing is implemented at source, not installed/live accepted.
 
 ### ALS Stage A — bidirectional pipe foundation
 
@@ -195,8 +195,83 @@ approved for blanket changes merely because the order is now recorded.
   ALS_TEST_SERVER_BIN. Readiness/HTTP serving, EOF, malformed input, unsupported
   request, occupied listener, SIGTERM and standalone behavior pass. With bootstrap
   and TE2 wrapper checks, 21 Python tests pass. No installed/active runtime changed.
-- [ ] Stage B concrete approval: bind operation owners, qualify bulk/deadline
-  policy and then migrate actual traffic, preserving separate standalone mode.
+- [x] User approves Stage B across TE2/ALS: existing operation owners, exact
+  client/conversation routing, project caller proof, bounded bulk/deadline policies
+  and regression builds. Installation, runtime restarts, pushes and new dependencies
+  are excluded. Checkpoint: TE2 99ca2547; ALS 976a7a4, local only.
+- [x] Stage B semantic owner wiring implemented at source; joint activation and
+  live acceptance remain separate. Approved source work is not live traffic proof.
+
+### ALS Stage B — receiver-policy prerequisite
+
+- [x] Add generic receiver-declared, per-method request/reply/deadline limits;
+  defaults stay 64 KiB/1 MiB/15 seconds. Validated ceilings are 8 MiB and 180
+  seconds; unknown/undeclared policy keys and caller overrides reject.
+- [x] Bound aggregate admitted serialized request/reply allowances to 32 MiB
+  on each source and target route, retaining 16 outstanding calls and existing
+  writer/frame limits. No waiting byte queue or mutation retry is introduced.
+- [x] Final Rust broker suite: 15 tests pass, including unchanged defaults,
+  method-scoped policy/caller-override denial, invalid bounds, shared byte
+  saturation/release, self-calls, target-rejection rollback and complete UTF-8
+  envelope sizing without content truncation. Scoped rustfmt/diff checks pass.
+- [x] Qualify default versus full-model shapes: draft state carries content,
+  diff and optional disk text; review can contain several source models. Selected
+  8 MiB request/reply profiles and 60-second broker waits replace inadequate
+  control budgets. UTF-8 fixtures above 1 MiB remain intact; oversized whole
+  operations reject before delivery where known. This is synthetic qualification,
+  not proof every possible project fits. Physical 32 MiB pipe framing is unchanged.
+- [x] Bind actual TE2/ALS semantic owners and replace framework-mode socket
+  traffic. Preserve standalone Socket.IO and no fallback/replay in pipe mode.
+
+### ALS Stage B — semantic cutover source and validation
+
+- [x] ALS chooses its backend transport from explicit --stdio, including CWD,
+  state, file/edit/project, review and the existing three MCP draft operations.
+  Closed pipes never construct a Sidebar socket. Startup CWD hydration follows
+  the actual readiness write/flush, and failed listener binds emit no app calls.
+- [x] Bind inbound mention/CWD/project/focus/review to existing AppState and UI
+  owners. Require framework-derived Code TE2 source and explicit conversation
+  for mentions; receipts expose owner operation/queued state, not render ACKs.
+  Shutdown closes admission/reverse waiters before adapter/domain shutdown.
+- [x] TE2 dispatches actual owners without fabricated SIDs; project caller proof
+  is rechecked after switch-lock waits. ALS UI/backend preserve that same proof.
+  Project UI/native/broker waits align at 190/185/180 seconds. Unknown outcomes
+  never trigger retries. Minimal project facts omit unrelated boot snapshots.
+- [x] Managed route inspection distinguishes absent apps from starting/stale
+  routes. Reverse review excludes its originating app. Pipe mentions use exact
+  client/slot/incarnation/conversation and never fall through to socket emission
+  on timeout. Projection failures remain best-effort, not mutation retries.
+- [x] Preserve full mention paths and reject excessive identity lengths instead
+  of truncating IDs. Frontend sockets, terminal streams and native mappings remain.
+- [x] Final focused Python suite: 157 pass, including the minimal-project-notice
+  regression. Strict mypy passes seven
+  production modules without new Any/cast/suppression escapes.
+- [x] ALS full Rust library suite: 178 pass, including explicit-pipe CWD/status,
+  closed-pipe no-socket behavior, actual bound composer/draft ownership, source
+  denial, UTF-8 bulk receipts and pre-enqueue request/limit rejection.
+- [x] ALS npm typecheck (including lint) and frontend build pass; 21 frontend
+  file/project routing and project-control tests pass. No native-client reload.
+- [x] Fresh isolated ALS debug binary: 20 native-stdio/bootstrap Python tests
+  and two subtests pass, including readiness-first CWD, no framework HTTP/socket
+  calls in stdio mode, EOF/corruption, listener failure, SIGTERM and standalone.
+  Final post-shutdown-fence rebuild/recheck also passes the same 20 tests/two
+  subtests. No installed runtime was used or replaced.
+- [x] User approves local checkpoints and provenance-pinned ALS frontend snapshot
+  refresh, without push/install/restart/OTA/version bump.
+- [x] ALS checkpoint 3cc5e9f, then refresh the provenance-pinned frontend snapshot:
+  149 resources verified with source/served hashes and --check. No dirty-source
+  bypass, source maps in the snapshot, runtime publication or asset URL change.
+  Ten ALS/native asset-mapping tests pass after updating their stale expected
+  snapshot metadata from the previously vendored .138 to current ALS .139;
+  no package version was bumped by this work.
+- [ ] Approve matching framework/domain/ALS installation and exact worker refresh,
+  plus native-client asset publication/reload. No active runtime changed so far.
+- [ ] Grouped user live acceptance: multiple clients/conversations, in/out-of-root
+  file opens, project switches/consent, mentions, review/MCP drafts and standalone.
+
+Current changes are source-only. No version bump, installation, shared restart,
+OTA/APK publication or push was performed. Existing compiler cfg/dead-code
+warnings remain visible, without suppression. Preserve unrelated reports/dist.
 
 ## Phase 4 — native debug / internal bridge retirement (documentation only)
 
