@@ -104,6 +104,55 @@ Pyte remains lazy Python domain code; checkpoint/delta, offsets, reset and resiz
 semantics remain unchanged. Reads stop at the opened snapshot's size so a growing
 producer cannot make a single projection chase EOF indefinitely.
 
+WBA push intake only re-encodes decoded payloads for telemetry size when
+`CODE_TE2_DIAGNOSTICS_LATENCY_METRICS` is enabled. With the existing metrics
+owner disabled, payload_bytes is zero and no counting encode crosses PyO3.
+This field is diagnostics accounting, not a queue-admission byte budget; actual
+wire decode limits and push ordering/coalescing remain unchanged. Enabled mode
+retains exact serialized payload lengths. This Python-domain change requires
+matching interpreted imports or a new activated mypyc snapshot/worker refresh,
+not a rebuilt native executable or frontend publication. Broader object-graph/
+buffer changes remain separately qualified under release_0_2_356 O2.
+
+The isolated Cargo example `boundary_probe` compares current graph conversion
+with guarded serialized buffers without production activation. Run recipes,
+compiled/interpreted measurements and acceptance differences are recorded in
+`docs/apps/release_0_2_356/BOUNDARY_PROBE.md`. Optional
+`BOUNDARY_PROBE_MYPYC_DIR` affects only that probe's import overlay. Successful
+probe exit includes an explicitly asserted/reported set-acceptance mismatch;
+it is not proof that the candidate can replace production conversion.
+
+Framework-pipe ingress now retains one original bounded frame while applying the
+unchanged native decoder, then calls `native_worker.control_bytes` with one
+PyBytes instead of recursively constructing Python values through PyO3. Cached
+typed msgspec decoding feeds the existing synchronous inbound router. Native
+corruption closes the stream; schema-invalid envelopes retain the old precise
+error reply through validation-only conversion and processing continues. That
+error-only conversion never dispatches/retries a request. Outbound, WBA codecs,
+socket paths and admission/ordering remain unchanged. The validation graph still
+exists transiently and original bytes are copied; this is not zero-copy.
+
+New native workers check the callable bytes entrypoint before domain startup;
+stale compiled snapshots fail with rebuild/reactivation guidance, not a fallback.
+Prepare matching native/domain artifacts before an approved worker refresh.
+Retained `control(object)` supports older native callers, not automatic new-worker
+fallback. External framework wire compatibility is unchanged. Real isolated
+dispatch and capture-inclusive trade-offs are in the follow-on section of
+`docs/apps/release_0_2_356/BOUNDARY_PROBE.md`: search/Git fixtures improve locally,
+binary-heavy fixtures regress. Live adoption remains separately gated.
+
+WBA control ingress now has the analogous original-frame handoff: the existing
+subscription-local framer validates/retains bytes and `wba_stream.rs` exposes
+`feed_frames`; Python's typed adapter msgspec-decodes before the unchanged stdout
+consumer. Native graph `feed` remains for older callers/probe comparison, not a
+fallback for a missing new entrypoint. Configured native streams lacking
+feed_frames fail with rebuild guidance. Partial/EOF/batch-error/owner semantics,
+outbound encoding and direct WBA browser sockets are unchanged. This is not a
+new transport, zero-copy path or incremental-parser rewrite. Matching worker and
+Python/mypyc adoption is required, not frontend OTA/Node rebuilding. Surface audit,
+actual-PyO3 probe, binary-heavy regression caveat and separately planned network
+RPC seam are in `docs/apps/release_0_2_356/INGRESS_AUDIT.md`.
+
 `fws_observer.rs` now owns the outbound FWS observer connection, distinct from
 Ferrous's publishing peer. The existing `/fws` JSON/ack protocol stays intact.
 `native_fws.py` delivers its structural events to Python domain handlers without
@@ -473,10 +522,13 @@ native-worker tests.
 
 Normal source/editable `te2` startup and `te2 --build-only` use one native Cargo
 build pipeline. The framework declares its configuration in
-`framework/bootstrap/native_build.json`; built-in native workers are discovered
-from `app/apps/*/native_build.json`, initially Code TE2. The former central
+`framework/bootstrap/native_build.json`; native workers are discovered from
+`<configured-app-root>/*/native_build.json` beside their owning manifest.json.
+TE2_SERVER_APP_ROOTS controls discovery in registry order (default built-in and
+user-data app roots), with first-app ownership and validated app IDs. The former central
 `app/native_worker_builds.json` registry is retired. Discovery does not scan
-arbitrary projects, external apps or runtime data for executable build commands.
+arbitrary projects or undeclared trees for executable build commands. Discovery
+does not execute app-owned provider code.
 
 Each schema-1 manifest declares `appId`, `manifestBase` (`framework` or the owning
 `app` directory), relative `manifest` (the Cargo.toml), optional Cargo `package`,
@@ -489,6 +541,18 @@ override. `fingerprint.policy` is `framework-source-v2`: source patterns are in
 paths and owner IDs are validated. Code TE2 keeps its independent Cargo source
 under `framework/native_editor_worker`; another built-in native worker can declare
 `manifestBase: app` and own its Cargo tree directly inside its app directory.
+
+Optional `runtimeProvider` declares a Python file directly inside the owning app,
+exporting `prepare_runtime(NativeRuntimeContext) -> NativeRuntimeResult` from
+`app.cli.native_runtime`. Code TE2's `native_runtime.py` owns its editable mypyc
+and packaged Python environment policy. Providers run only during explicit
+bootstrap preparation, never manifest discovery/read-only Cargo selection.
+`select_native_build` exposes the existing fingerprint/receipt result without
+building. The private sidecar's versioned native selection endpoint reuses it,
+returning readiness/build/preparation status against bootstrap-issued context
+without importing app providers. Its typed Rust client is not yet wired into
+live refresh or launch. Full contract:
+`docs/apps/release_0_2_356/FRAMEWORK_AGNOSTIC_AUDIT.md` (Stage A1).
 
 The Code TE2 executable publishes atomically under
 `$TE2_CACHE_HOME/code_te2/build/bin/<fingerprint>/<release|debug>/code-te2-worker`.

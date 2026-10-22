@@ -10,7 +10,7 @@ import time
 
 from .native_shells import get_manager, Orchestrator, ShellRecord, OutputReader
 from app.libs.runtime_startup_trace import StartupTrace
-from .wba_pipe_codec import new_stream, encode_message
+from .wba_pipe_codec import new_stream, encode_message, OutputSource
 
 from .code_te2_paths import code_te2_paths
 from .node_compile_cache import node_compile_cache
@@ -358,7 +358,7 @@ async def _ensure_live_adapter_io(shell_id: str) -> bool:
     return True
 
 
-async def _stdout_reader_loop(shell_id: str, queue: OutputReader) -> None:
+async def _stdout_reader_loop(shell_id: str, queue: OutputSource) -> None:
     """Decode structured pipe records without treating log text as protocol data."""
     global _stdout_reader_task
 
@@ -386,7 +386,10 @@ async def _stdout_reader_loop(shell_id: str, queue: OutputReader) -> None:
                     else:
                         log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
                 elif kind == "push":
-                    _queue_push(obj, payload_bytes=len(encode_message(obj)))
+                    # This size is telemetry only, not queue admission. Avoid
+                    # a Python→Rust traversal/encode just to discard its bytes.
+                    payload_bytes = len(encode_message(obj)) if diagnostics_latency_metrics_enabled() else 0
+                    _queue_push(obj, payload_bytes=payload_bytes)
                 elif kind == "startup":
                     log.debug("[adapter_stdio] startup shell=%s", shell_id)
                 else:

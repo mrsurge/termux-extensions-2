@@ -3,6 +3,7 @@
 mod asset_gzip;
 mod decode;
 mod fws_observer;
+mod inbound;
 mod persistence;
 #[allow(dead_code)] // Shared helpers also compile into the isolated pipe harness.
 mod protocol;
@@ -11,7 +12,10 @@ mod shells;
 mod terminal_log;
 mod values;
 mod wba_codec;
+mod wba_stream;
 mod web;
+
+use wba_stream::WbaStream;
 
 use anyhow::{Context, Result, bail};
 use pyo3::exceptions::PyRuntimeError;
@@ -103,28 +107,6 @@ struct Bridge {
     fws: Arc<fws_observer::Observer>,
 }
 
-#[pyclass]
-struct WbaStream {
-    decoder: Mutex<wba_codec::Stream>,
-}
-
-#[pymethods]
-impl WbaStream {
-    fn feed(&self, py: Python<'_>, chunk: Vec<u8>) -> PyResult<Vec<Py<PyAny>>> {
-        let records = py
-            .detach(|| self.decoder.lock().unwrap().feed(&chunk))
-            .map_err(shell_error)?;
-        records
-            .iter()
-            .map(|record| values::to_python(py, record))
-            .collect()
-    }
-
-    fn finish(&self) -> PyResult<()> {
-        self.decoder.lock().unwrap().finish().map_err(shell_error)
-    }
-}
-
 #[cfg(test)]
 mod wba_python_tests {
     use super::*;
@@ -152,13 +134,7 @@ mod wba_python_tests {
     #[test]
     fn native_stream_returns_python_records_across_partial_reads() {
         Python::attach(|py| {
-            let stream = Py::new(
-                py,
-                WbaStream {
-                    decoder: Mutex::new(wba_codec::Stream::default()),
-                },
-            )
-            .unwrap();
+            let stream = Py::new(py, WbaStream::new()).unwrap();
             let frame =
                 wba_codec::encode(&Value::Map(vec![(Value::from("id"), Value::from(7))])).unwrap();
             let first = stream
@@ -188,14 +164,35 @@ mod wba_python_tests {
             stream.call_method0(py, "finish").unwrap();
         });
     }
+
+    #[test]
+    fn native_stream_exposes_original_validated_bytes() {
+        Python::attach(|py| {
+            let stream = Py::new(py, WbaStream::new()).unwrap();
+            let frame = b"\x81\xa1x\xcd\x00\x01";
+            let first = stream
+                .call_method1(py, "feed_frames", (frame[..2].to_vec(),))
+                .unwrap();
+            assert_eq!(first.bind(py).len().unwrap(), 0);
+            let second = stream
+                .call_method1(py, "feed_frames", (frame[2..].to_vec(),))
+                .unwrap();
+            let records = second.bind(py).cast::<pyo3::types::PyList>().unwrap();
+            assert_eq!(records.len(), 1);
+            let record = records.get_item(0).unwrap();
+            assert_eq!(
+                record.cast::<pyo3::types::PyBytes>().unwrap().as_bytes(),
+                frame
+            );
+            stream.call_method0(py, "finish").unwrap();
+        });
+    }
 }
 
 #[pymethods]
 impl Bridge {
     fn wba_stream(&self) -> WbaStream {
-        WbaStream {
-            decoder: Mutex::new(wba_codec::Stream::default()),
-        }
+        WbaStream::new()
     }
 
     fn wba_encode(
@@ -613,11 +610,9 @@ fn initialize(root: &std::path::Path) -> Result<Arc<Py<PyAny>>> {
                 eprintln!("[code-te2-worker] mypyc overlay enabled: {count} modules from {output}");
             }
         }
-        Ok(Arc::new(
-            py.import("app.apps.code_te2.native_worker")?
-                .into_any()
-                .unbind(),
-        ))
+        let module = py.import("app.apps.code_te2.native_worker")?;
+        inbound::check_domain(module.as_any())?;
+        Ok(Arc::new(module.into_any().unbind()))
     })
     .map_err(|e| anyhow::anyhow!("native Python import: {e}"))
 }
@@ -629,12 +624,7 @@ fn pipe_reader(module: Arc<Py<PyAny>>, state: Arc<State>) {
             if reader.fill_buf()?.is_empty() {
                 return Ok(());
             }
-            let (value, _) = decode::read_frame(&mut reader)?;
-            Python::attach(|py| -> PyResult<()> {
-                module.call_method1(py, "control", (values::to_python(py, &value)?,))?;
-                Ok(())
-            })
-            .map_err(|e| anyhow::anyhow!("framework control: {e}"))?;
+            inbound::read_and_deliver(&mut reader, &module)?;
         }
     })();
     if let Err(error) = result {

@@ -6,20 +6,32 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from framework_shells.record import ShellRecord
+from app.apps.code_te2.native_shells import ShellRecord
 from app.apps.code_te2 import wba_pipe_codec
 from app.apps.code_te2 import workbench_adapter_shell_manager as manager
 from app.libs.messagepack_stream import MessagePackStream, encode_message
 
 
+class ReferenceNativeFrames:
+    """Test seam only: native guard/framing parity is covered by Rust tests."""
+    def __init__(self) -> None:
+        self.stream = MessagePackStream()
+
+    def feed_frames(self, data: bytes) -> list[bytes]:
+        return [encode_message(record) for record in self.stream.feed(data)]
+
+    def finish(self) -> None:
+        self.stream.finish()
+
+
 class AdapterPipeTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_codec_seam_preserves_domain_reader_and_writer(self) -> None:
-        streams: list[MessagePackStream] = []
+        streams: list[ReferenceNativeFrames] = []
         encoded: list[object] = []
 
         class Bridge:
-            def wba_stream(self) -> MessagePackStream:
-                stream = MessagePackStream()
+            def wba_stream(self) -> ReferenceNativeFrames:
+                stream = ReferenceNativeFrames()
                 streams.append(stream)
                 return stream
 
@@ -45,27 +57,47 @@ class AdapterPipeTests(unittest.IsolatedAsyncioTestCase):
                 await task
 
     async def test_fragmented_replies_and_pushes_preserve_order(self) -> None:
+        for metrics_enabled in (False, True):
+            with self.subTest(metrics_enabled=metrics_enabled):
+                await self._check_fragmented_replies_and_pushes(metrics_enabled)
+
+    async def _check_fragmented_replies_and_pushes(self, metrics_enabled: bool) -> None:
         queue: asyncio.Queue[bytes] = asyncio.Queue()
         pending: asyncio.Future[dict[str, object]] = asyncio.get_running_loop().create_future()
         pushes: list[dict[str, object]] = []
+        encoded: list[object] = []
+
+        class Bridge:
+            def wba_stream(self) -> ReferenceNativeFrames:
+                return ReferenceNativeFrames()
+
+            def wba_encode(self, value: object) -> bytes:
+                encoded.append(value)
+                return encode_message(value)
 
         def receive(obj: dict[str, object], *, payload_bytes: int) -> None:
-            self.assertGreater(payload_bytes, 0)
+            self.assertEqual(payload_bytes, len(encode_message(obj)) if metrics_enabled else 0)
             pushes.append(obj)
 
         records = [
             {"kind": "startup", "payload": {"type": "adapter/start"}},
-            {"kind": "push", "payload": {"event": "first"}},
-            {"kind": "reply", "payload": {"id": 7, "result": "a\nb"}},
+            {"kind": "push", "payload": {"event": "first", "text": "λ\n🙂", "binary": b"\x00\xff"}},
             {"kind": "push", "payload": {"event": "second"}},
+            {"kind": "reply", "payload": {"id": 7, "result": "a\nb"}},
         ]
-        with patch.dict(manager._rpc_pending, {7: pending}, clear=True), patch.object(manager, "_queue_push", receive):
+        with (
+            patch.dict(manager._rpc_pending, {7: pending}, clear=True),
+            patch.object(manager, "_queue_push", receive),
+            patch.object(manager, "diagnostics_latency_metrics_enabled", return_value=metrics_enabled),
+            patch.object(wba_pipe_codec, "_native", Bridge()),
+        ):
             task = asyncio.create_task(manager._stdout_reader_loop("test", queue))
             try:
                 for byte in b"".join(encode_message(record) for record in records):
                     queue.put_nowait(bytes([byte]))
                 self.assertEqual(await asyncio.wait_for(pending, 1), {"id": 7, "result": "a\nb"})
-                self.assertEqual(pushes, [{"event": "first"}, {"event": "second"}])
+                self.assertEqual(pushes, [record["payload"] for record in records if record["kind"] == "push"])
+                self.assertEqual(encoded, pushes if metrics_enabled else [])
             finally:
                 _ = task.cancel()
                 await task
@@ -81,15 +113,16 @@ class AdapterPipeTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(manager._rpc_pending)
 
     def test_old_json_adapter_is_not_adopted(self) -> None:
+        environment: dict[str, object] = {
+            "TE2_ADAPTER_PORT": str(manager.WORKBENCH_ADAPTER_FIXED_PORT),
+            "TE2_CODE_SERVER_SOCKET": "/test.sock",
+        }
         record = ShellRecord(
-            id="test", command=[], label=None, cwd="/", env_overrides={
-                "TE2_ADAPTER_PORT": str(manager.WORKBENCH_ADAPTER_FIXED_PORT),
-                "TE2_CODE_SERVER_SOCKET": "/test.sock",
-            }, pid=1, status="running", created_at=0, updated_at=0,
-            autostart=False, stdout_log="", stderr_log="",
+            id="test", command=[], label="test", env_overrides=environment,
+            pid=1, status="running", stdout_log="",
         )
         self.assertFalse(manager._matches_expected_target(record, "/test.sock"))
-        record.env_overrides["TE2_ADAPTER_PIPE_CODEC"] = "messagepack-v1"
+        environment["TE2_ADAPTER_PIPE_CODEC"] = "messagepack-v1"
         self.assertTrue(manager._matches_expected_target(record, "/test.sock"))
 
     async def test_writer_uses_binary_stdin_and_cleans_up_on_cancellation(self) -> None:

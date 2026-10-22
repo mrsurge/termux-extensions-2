@@ -1,5 +1,92 @@
 # 0.2.356 maintenance tracker
 
+## App-agnostic framework / manifest refresh — Stage A1
+
+- [x] User clarifies Refresh means reread manifests and remap app entrypoints/
+  routes, especially second-root apps—not indiscriminate worker restarts.
+- [x] Read-only audit confirms existing framework/Electron/Android/Termux buttons
+  reach POST /api/apps/reload; registry reload is live, but SioRouteIndex and
+  physical Engine.IO mounts remain startup-owned. No refresh was invoked.
+- [x] Explain worker selection: common native manifest/fingerprint/cache selector
+  is reusable; bootstrap discovery is built-in-only and Code TE2 domain/package
+  policy is bespoke. Frozen bootstrap environment is not live binary resolution.
+- [x] User requires app-agnostic production framework behavior and approves a
+  broader audit/staged plan. Inventory real production identity/import/path
+  coupling separately from inline test fixtures in FRAMEWORK_AGNOSTIC_AUDIT.md.
+- [x] Record Stage A generic native declaration/no-build selection, Stage B atomic
+  catalog/routes/launch-context refresh, Stage C app-owned policy migration and
+  Stage D source guardrails/isolated acceptance. No runtime source edits/builds,
+  worker/framework restart, APK publication, version bump or commit in this audit.
+- [x] Resolve/approve the concrete cross-language generic selection contract;
+  reuse existing fingerprint/receipt logic rather than duplicate it in Rust.
+- [ ] Implement individually approved slices with neutral second-root/native
+  fixtures, failure rollback, active-owner survival and permission parity.
+- [ ] Obtain separate shared-runtime/client activation approval after isolated
+  acceptance. Previous Refresh approval does not cover the broader migration.
+
+This design gate precedes the deferred network RPC slice. Existing uncommitted
+PyO3 work and user's shellspec/report/untracked files remain preserved.
+
+### Approved bootstrap slice — 2026-10-22
+
+- [x] User separately approves configured-root discovery, generic typed no-build
+  selection and app-owned runtime preparation. No Rust refresh wiring, native/
+  full mypyc build, restart, Android change, version bump or commit.
+- [x] Discovery follows configured TE2_SERVER_APP_ROOTS in registry order,
+  including second roots and manifest ID/directory-name differences. First app
+  wins, including when it has no native declaration; shadowed providers are not
+  loaded. Distinct apps cannot overwrite one environment export key.
+- [x] select_native_build exposes executable/receipt/fingerprint/compatibility/
+  usability through the existing shared selection policy, without publication.
+- [x] Code TE2 declares runtimeProvider in its own native manifest. App-owned
+  native_runtime.py retains editable selector/force overrides, packaged private
+  Python/ABI validation and no Cargo fallback. Bootstrap contains no Code TE2
+  identity/import/environment literals. Failed preparation leaves caller env
+  unchanged (already completed explicit builds are not rolled back).
+- [x] Focused bootstrap/private-runtime/identity/discovery suites: 92 tests pass,
+  including two independent packaged providers and no-build receipt/force parity.
+  Strongest strict/extra/all-Any Code TE2 audit passes 248 source files; the new
+  provider and shared contract independently pass the same policy. A supplemental
+  bootstrap-only strict check reports six pre-existing issues in CLI shutdown/
+  subprocess handling and a redundant manifest cast, not a clean-bootstrap claim.
+- [x] Select and implement the Rust-facing read-only owner/receipt exchange (A2).
+- [ ] Implement separately approved B atomic registry/routes/future-launch-context
+  refresh. A1/A2 do not
+  refresh running frameworks, workers, routes or inherited worker selections.
+
+Existing setuptools wheel deprecation warning remains visible. Native builds,
+activation, live refresh and client publication were not performed.
+
+### Stage A2 — private selector contract
+
+- [x] User approves private read-only selection owner plus typed Rust client and
+  tests; subsequently approves focused Cargo unit-test compilation, not a
+  production binary build/publication or runtime restart.
+- [x] Bootstrap issues bounded 64 KiB source/profile/runtime preparation context;
+  app-owned provider setup remains explicit preparation only. Read-only selector
+  rechecks current declarations/fingerprint/ABI receipts and packaged executable
+  digest, returning ready/build_required/preparation_required without building.
+- [x] Existing runtime sidecar mounts capability-protected, no-store private
+  endpoint with typed 4 KiB request/1 MiB response bounds. No caller-supplied
+  roots/env/profile, no arbitrary provider execution, no full environment echo.
+  Single-flight admission survives requester cancellation; manifest SystemExit
+  cannot terminate its event loop. Missing old-peer context fails explicitly.
+- [x] Rust client requires supplied key/numeric-loopback HTTP and disables
+  environment proxies, redirects and retries. Strict response schema/IDs/keys,
+  profile/status and bounded streaming reads; no lifecycle or reload caller yet.
+- [x] Python grouped owner/discovery/bootstrap/private-runtime/identity/sidecar
+  tests: 102 pass. Includes declaration mutation during preparation refusing
+  a misleading fresh receipt; caller environment remains untouched. New shared
+  contract/owner pass strongest strict/extra/all-Any.
+- [x] Focused Rust tests: 3 pass under --no-default-features, including isolated
+  HTTP capability/request shape and redirect refusal (one request, no follow).
+  Full Code TE2 strongest audit: 248 source files pass. Existing no-feature Rust
+  dead-code/unused warnings remain visible; no production artifact was published.
+
+Stage B still owns atomic registry/routes/launch selection publication and
+concurrent reload/start/active-owner survival tests. The A2 generation is a
+selection projection digest, not a filesystem transaction or catalog commit.
+
 ## Mypyc live target progress
 
 - [x] User-approved observation-only progress on the existing build command:
@@ -72,11 +159,96 @@
 1. Startup/HTTP initialization: user live accepted 2026-10-20, complete.
 2. Framework-pipe/Sidebar intents (O1): source checkpointed; grouped live gates remain.
    Code TE2's Any source audit is complete; native/mypyc build gates remain.
-3. Pipe concurrency and bounded DTO/PyO3 buffering (O2): follows intents.
+3. O2 next: eliminate avoidable Python/Rust graph conversions and allocations;
+   first source slice skips telemetry-only WBA push re-encoding when metrics are
+   off (activation pending), then qualify boundary alternatives before queue changes.
 4. Native debug/internal console-bridge retirement: deferred behind both.
 5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
 
 Validation belongs within each work phase, never a replacement for actual work.
+
+## O2 — conversion/allocation overhead: next active investigation
+
+- [x] User prioritizes this after the Sidebar/typing checkpoint; approves plan/
+  tracker edits and read-only source investigation before runtime changes.
+- [x] Map framework pipe, socket submit/ACK, FWS and WBA seams in native_worker.py,
+  pipe_codec.py and native worker code_te2.rs/values.rs. Current typed schemas
+  do not make the recursive Python/Rust value conversion disappear.
+- [x] Identify a bounded first candidate: every WBA push is re-encoded solely
+  for payload_bytes telemetry, even when diagnostics metrics are disabled.
+  Trace all uses: accounting is metrics-only, not a queue-size admission guard.
+- [x] Obtain concrete approval, then gate counting serialization at intake on
+  the existing metrics policy. Keep enabled-mode accounting, event ordering,
+  coalescing and wire/validation contracts unchanged. O9 stays deferred.
+- [x] Test disabled mode never invokes counting encode; enabled mode preserves
+  byte counts; replies/startup and push delivery retain existing behavior.
+  Run focused WBA/Python tests and strict typing; no native/full mypyc build or
+  activation/restart without separate approval.
+- [x] Focused WBA codec, diagnostics telemetry/coalescing, shell-adoption and
+  intelligence-startup regressions: 24 tests/two subtests pass. Full strongest
+  strict/extra/all-Any check passes all 247 Code TE2 source files. No native/full
+  mypyc build, activation, restart, publication or commit performed.
+- [ ] Matching interpreted worker refresh or new compiled mypyc build/activation
+  and worker refresh, followed by live WBA/diagnostics acceptance. No Rust worker,
+  frontend or OTA change is required by this Python-only gate.
+- [x] Separately approve/build/run isolated graph/buffer boundary probe using
+  existing native converters/guards and real Python envelope projection. Five
+  valid fixtures pass in interpreted and existing compiled modes; ten invalid
+  inputs reject. Strict helper typing and locked/offline release example build
+  pass. Exact modes/results/commands: BOUNDARY_PROBE.md.
+- [x] Record mixed result rather than cut over: inbound control/nested improves,
+  binary regresses; outbound gains largely disappear with compiled projection.
+  Plain msgspec accepts sets the current converter rejects; datetime rejection
+  stage/messages differ. No complete semantic parity or end-to-end/RSS gain.
+- [x] User approves inbound-only framework-pipe implementation/tests; generated
+  search/Git responses are the stated target. Capture original bounded bytes
+  under the existing native decoder, direct typed decode to the existing router;
+  preserve error replies and synchronous dispatch order. Outbound/WBA unchanged.
+- [x] Real Rust→Python dispatch passes interpreted and newly compiled two-module
+  modes: 181 schema/value/error-message cases, 20 matching dispatch events,
+  corruption/handler failure stops and no replay. 19 focused Python tests/two
+  subtests pass; strongest no-Any check passes all 247 Code TE2 source files.
+  Explicit strongest typing also passes pipe_codec and native_worker; strict
+  probe/test helper checks pass. Native check/decoder/full-worker tests recorded
+  in BOUNDARY_PROBE.md. No full domain mypyc build or live transition.
+- [x] Measure original-frame acquisition: compiled search/Git fixture conversion
+  ~24% lower, binary ~20% slower, wide roughly unchanged/slightly slower.
+  BOUNDARY_PROBE.md records exact table/modes and uncontrolled system-load caveat.
+- [x] User reports rebuilding matching native/domain artifacts and successful
+  runtime adoption for the framework-pipe slice. User further reports searches
+  through roughly 6,000 files without prior stutters/hangs. This is qualitative
+  live acceptance, not independently verified artifact provenance or measured
+  speedup/backpressure. No agent-initiated restart/publication performed.
+- [x] Defer search benchmark repair at user request; do not rebuild an old-tag
+  baseline solely to quantify the already accepted qualitative improvement.
+  MessagePack as the benchmark's cause remains a user hypothesis, not diagnosis.
+- [x] Audit WBA/network ingress: WBA backend control pipe and generic network
+  Backend.call convert native graphs; direct WBA browser sockets bypass Python.
+  Source paths and distinct follow-up boundaries: INGRESS_AUDIT.md.
+- [x] User approves WBA-first: shared native framer returns exact validated frames
+  to Python msgspec decoder before unchanged reply/push handling. Preserve native
+  bounds, EOF/replacement/batch-error behavior; no outbound/direct-socket changes.
+- [x] WBA focused regressions: 22 tests/two subtests pass, including small actual
+  mypyc adapter build. Strongest no-Any checking passes all 247 Code TE2 files.
+  Native full-worker tests: 44 pass. Real PyO3 stream→adapter→stdout-consumer
+  probe passes source and compiled adapter paths. Subsequent codegen coverage
+  also checks the compiled stdout consumer; full-domain rebuild stays separate.
+- [x] Real-stream local probe records ~23%/~37% lower compiled diagnostics/reply
+  conversion; binary-heavy fixture ~8% slower. Preserve all scope/copy/guard/load
+  caveats and exact reproduction in INGRESS_AUDIT.md; no live WBA speedup claimed.
+- [ ] Prepare/adopt matching native worker and full domain/mypyc for this **new**
+  WBA slice, with explicit lifecycle approval and live diagnostics/backend-RPC
+  validation. Prior framework-pipe acceptance does not accept this later change.
+  No frontend/OTA/Node/WBA source publication needed; no activation performed.
+- [ ] Develop/approve the distinct network MessagePack RPC handoff using original
+  validated payload bytes plus native socket context; retain current handlers,
+  admission, ACK/error/cancel and direct-proxy behavior. Audit only so far.
+- [x] Record user-requested mypyc-native-type pass immediately after PyO3
+  optimization: hot reusable records, numeric loops and repeated dictionary
+  accesses with clear benefits, not eliminating all PyObjects.
+- [ ] After boundary measurements, identify/approve bounded native-type candidates
+  and verify compiled/interpreted behavior plus actual cost reduction. Keep
+  runtime-inspected DTO/Protocol contracts compatible; no blanket rewrite.
 
 ## After the cutover — Code TE2 Any audit
 

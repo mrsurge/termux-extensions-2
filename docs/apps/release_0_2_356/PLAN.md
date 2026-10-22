@@ -9,6 +9,22 @@ user-provided optimization items will be integrated here, not in a competing pla
 
 ## Actual work order — corrected by user 2026-10-20
 
+2026-10-22 scope correction: before further network-RPC optimization or restoring
+Refresh, address the user's app-agnostic framework invariant. Approved audit and
+staged proposal: FRAMEWORK_AGNOSTIC_AUDIT.md. Existing Cargo selection core is
+generic, but native setup/discovery and several Rust policy/debug/asset paths
+contain app-specific production knowledge. Do not extend those branches. First
+approve a generic native runtime/selection contract, then atomic registry/routes/
+future-launch context refresh, and migrate remaining policy through app manifests
+and app-owned hooks. User separately approves Stage A1 bootstrap implementation:
+configured-root discovery, a typed read-only selector and app-owned runtime
+provider. User subsequently approves Stage A2: the read-only cross-language
+selector uses the existing capability-protected sidecar and installed bootstrap
+locator, with bounded startup receipts and strict typed Python/Rust contracts.
+No lifecycle/reload caller is enabled by A2. Rust refresh wiring and remaining policy
+migrations require their next concrete approval; earlier bounded Refresh approval
+is not permission for the whole broader cutover.
+
 Validation is a gate within implementation work, not a standalone phase. User
 confirms the startup work has passed live validation; do not ask them to repeat
 it or leave it as the next work item.
@@ -19,8 +35,10 @@ it or leave it as the next work item.
    implementation approval and delivery, with its tests/acceptance in that phase.
    Immediately after the cutover, address the Code TE2 Any audit described below,
    before starting the next optimization slice.
-3. Pipe concurrency and bounded in-process DTO/PyO3 queuing (O2), likewise with
-   its own evidence/implementation/acceptance gates.
+3. Pipe/DTO/PyO3 optimization (O2): next priority is removing avoidable graph
+   conversions/allocations, starting with the source-backed telemetry-only WBA
+   re-encode described below. Then measure boundary alternatives before changing
+   queues/concurrency. Each slice has its own implementation/acceptance gate.
 4. Native-client debug access and internal console-bridge retirement — deferred
    until after those two actual work phases, NOT immediately after validation.
 5. Remaining O3–O8 routing/codec/shared-library/local-transport experiments, ordered
@@ -336,6 +354,107 @@ source validation. TRACKER.md owns those pending gates; ALS FRAMEWORK_STDIO.md a
 the APP_RPC companion own the implementation contract.
 
 ### O2. Pipe concurrency and in-process Code TE2 DTO buffering
+
+2026-10-21 priority: user requests conversion/allocation overhead as the next
+target, not eliminating PyObject pointers from generated C. User approves plan/
+tracker updates and read-only investigation; production edits require the
+following concrete slice approval. Preserve current wire formats and owners.
+
+Source-backed first candidate: workbench_adapter_shell_manager._stdout_reader_loop
+calls len(encode_message(obj)) for every decoded push. With the native codec this
+walks the Python graph back into rmpv::Value, encodes MessagePack and copies the
+bytes back into Python solely for their length. payload_bytes is passed through
+PendingPush to diagnostics telemetry; it is not a queue-admission budget. Gate
+this accounting behind the existing diagnostics_latency_metrics_enabled() policy
+at intake. Disabled metrics should perform no counting serialization; enabled
+metrics retain the previous exact measurement, including coalesced accounting.
+No new codec/queue or WBA provider/references (O9) change is part of this slice.
+
+The user subsequently approves this minimal telemetry gate and focused Python/
+strict validation. It is source-implemented; compiled/interpreted worker adoption
+and live acceptance remain separate. No native build or live transition is part
+of that approval. The broader boundary comparison below is still investigation.
+
+Next qualification candidates: native framework-pipe decode to rmpv::Value to
+Python graph to msgspec.convert, its outbound Struct-to-dict-to-Rust path, and
+FWS typed requests projected through generic values. Native socket request/ACK
+and WBA codec paths also share values.rs. Compare narrowly typed bridge calls
+and bounded serialized buffers against actual current converters using small
+control requests and nested/Unicode/binary/bulk fixtures. Include serialization,
+copies, schema validation and interpreter attachment in measurements; report
+boundary timings separately from total request latency and Python-only memory
+measurements separately from native/RSS. Retaining an additional typed object is
+not automatically an allocation win. No speedup is established by this survey.
+
+Keep frame/depth/node limits, duplicate/non-string-key rejection, integer/binary/
+null semantics, failure ordering, exact-client authority and no replay. Existing
+native decode enforces guards that plain msgspec decoding alone does not replace.
+Do not introduce packed codecs/shared libraries/opaque native pointers or a new
+production buffer path without a separate bounded proof and approval. Preserve
+ordinary Python and compiled runtime parity; source tests do not activate mypyc.
+
+Approved isolated qualification is complete; commands, runtime identities and
+measurements are in BOUNDARY_PROBE.md. Keeping full native validation, inbound
+control/nested buffers improve conversion time, but binary regresses and outbound
+gains largely vanish against compiled projection. Plain msgspec accepts sets the
+current converter rejects. No blanket buffer cutover: next proposal is a bounded
+inbound-only seam with exact guards/schema/error semantics and actual-dispatch
+validation; outbound remains unchanged. No queue/GIL/runtime policy change is
+authorized by the probe. Attachment costs/end-to-end latency and allocation/RSS
+remain unmeasured; the probe times conversions within one attached interpreter.
+
+2026-10-22: user approves inbound-only framework-pipe source/tests, explicitly
+identifying search/Git result data as the target. Source now captures a bounded
+original frame through the same native decoder and calls typed control_bytes →
+the existing router. Schema-error formatting uses the prior converter on rejected
+frames only; native corruption still closes before dispatch. Outbound/WBA/queues
+are untouched. Matching-domain entrypoint is checked before native startup.
+Capture-inclusive compiled search/Git fixtures show ~24% lower conversion time,
+but binary-heavy data regresses ~20%; do not promise a universal improvement.
+Actual-dispatch/interpreted/two-module-mypyc evidence and reproduction are in
+BOUNDARY_PROBE.md. Source integration is not activation: prepare matching Rust
+worker/full selected domain and obtain explicit lifecycle approval before live
+testing. No shared restart or full mypyc build belongs to this slice.
+
+#### WBA control pipe and network ingress follow-up
+
+User reports rebuilding/adopting the prior framework-pipe slice successfully and
+searching roughly 6,000 files without prior stutters/hangs. Record qualitative
+live improvement without a historical benchmark or measured causal speedup.
+Search benchmark repair is user-deferred; suspected MessagePack incompatibility
+is not a diagnosed cause and old-tag reconstruction is not requested.
+
+User approves WBA-first inbound source/parity/isolated measurement, with network
+RPC next as a separate proposal. INGRESS_AUDIT.md maps actual
+surfaces and records the WBA source: retain exact frames from existing pending
+bytes under unchanged native validation, hand over PyBytes and decode with
+msgspec in Python before existing domain routing. No outbound/direct WBA socket,
+provider, frontend, queue or lifecycle change. Matching worker/domain adoption
+requires a separate build/activation decision; no full mypyc build or restart is
+part of this implementation slice. Preserve the binary-heavy regression caveat.
+
+Network RPC audit finds generic Value→Python conversion in Backend.call after
+native RPC validation and native socket-context wrapping. Next propose retained
+validated original payload bytes plus native-owned context, not re-encoding the
+wrapper; preserve handler/admission/ACK/error/cancellation semantics and leave
+direct forwarding alone. Native HTTP helpers and FWS conversion remain separate.
+Full design/evidence/reproduction: INGRESS_AUDIT.md. No network implementation
+is approved by this entry. Targeted mypyc-native-type review remains after the
+selected PyO3 conversion work, without broadening into a zero-PyObject goal.
+
+#### Follow-up after PyO3 optimization — targeted mypyc native types
+
+User explicitly schedules this after the boundary-conversion work (2026-10-21).
+Audit hot, frequently reused domain records, numeric loops and repeated dictionary
+lookups for obvious native-class/primitive-field wins. Preserve Python strings,
+containers and PyObject references when they are the appropriate representation;
+zero PyObject pointers is not an objective. Evaluate lookup/allocation reduction
+and compiled behavior before replacing a representation, including the cost of
+building a second object merely to unpack it again. Runtime-inspected msgspec
+and Protocol contracts retain their established interpreted boundary. Validate
+ordinary Python and actual mypyc codegen/runtime parity; avoid fixed-width integer
+overflow or altered null/identity semantics. Concrete edits require a bounded
+proposal/approval after the PyO3 measurements, not blanket type rewrites now.
 
 Investigate multiprocessing/multithreading and in-process queues around pipe I/O
 and the Code TE2 PyO3 boundary: reduce pipe backpressure, keep intake moving and

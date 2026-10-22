@@ -11,6 +11,7 @@ import sys
 import pytest
 
 from framework.bootstrap import bootstrap
+from app.apps.code_te2 import native_runtime
 
 
 @pytest.fixture
@@ -21,6 +22,8 @@ def worker_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (workspace / 'src').mkdir(parents=True)
     app = project / 'app/apps/code_te2'
     app.mkdir(parents=True)
+    (app / 'manifest.json').write_text(json.dumps({'id': 'code_te2'}))
+    (app / 'native_runtime.py').write_text(Path(native_runtime.__file__).read_text())
     (workspace / 'Cargo.toml').write_text('[package]\nname="worker"\nversion="0.1.0"\n')
     (workspace / 'Cargo.lock').write_text('version = 4\n')
     (workspace / 'src/main.rs').write_text('fn main() {}\n')
@@ -28,6 +31,7 @@ def worker_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     registry.write_text(json.dumps({'schemaVersion': 1,
         'appId': 'code_te2', 'manifest': 'native_editor_worker/Cargo.toml',
         'binary': 'code-te2-worker', 'environmentKey': 'CODE_TE2_WORKER_BIN', 'pythonAbi': True,
+        'runtimeProvider': 'native_runtime.py',
         'cache': {'root': 'code_te2/build', 'targetDirectory': 'cargo-target', 'publishedDirectory': 'bin'},
         'fingerprint': {'policy': 'framework-source-v2', 'inputs': ['Cargo.toml', 'Cargo.lock', 'src/**/*.rs', 'build.rs'],
                         'sharedInputs': ['../asset_gzip.rs']},
@@ -35,11 +39,16 @@ def worker_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(bootstrap, '_project_root', lambda: project)
     monkeypatch.setattr(bootstrap, '_source_root', lambda: framework)
     monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: None)
+    monkeypatch.setenv('TE2_SERVER_APP_ROOTS', str(project / 'app/apps'))
     monkeypatch.setattr(bootstrap.subprocess, 'check_output', lambda *args, **kwargs: 'rustc test toolchain')
     env = dict(os.environ, TE2_CACHE_HOME=str(tmp_path / 'cache'))
     for key in ('CODE_TE2_WORKER_BIN', 'CODE_TE2_MYPYC_DIR', 'CODE_TE2_FORCE_INTERPRETED'):
         env.pop(key, None)
     return workspace, registry, env
+
+
+def select_domain(env):
+    native_runtime.select_editable_domain(bootstrap._project_root(), env)
 
 
 def test_cached_worker_publication_reuses_and_invalidates_source(worker_setup, monkeypatch):
@@ -108,7 +117,7 @@ def test_alternating_build_flags_do_not_evict_each_other(worker_setup, monkeypat
 def test_missing_default_mypyc_uses_interpreted_domain(worker_setup, capsys):
     _, _, env = worker_setup
     env.pop('CODE_TE2_MYPYC_DIR', None)
-    bootstrap._select_editable_domain(env)
+    select_domain(env)
     assert env['CODE_TE2_MYPYC_DIR'] == ''
     assert 'interpreted' in capsys.readouterr().out
 
@@ -125,7 +134,7 @@ def test_existing_default_mypyc_remains_selected(worker_setup, kind):
         target = selected.parent / 'present'
         target.mkdir()
         selected.symlink_to(target)
-    bootstrap._select_editable_domain(env)
+    select_domain(env)
     assert env['CODE_TE2_MYPYC_DIR'] == str(selected)
 
 
@@ -137,7 +146,7 @@ def test_deleted_automatic_snapshot_falls_back_without_changing_selector(worker_
     target.mkdir()
     selected.symlink_to(target)
     target.rmdir()
-    bootstrap._select_editable_domain(env)
+    select_domain(env)
     assert env['CODE_TE2_MYPYC_DIR'] == ''
     assert selected.is_symlink() and selected.readlink() == target
     assert 'interpreted' in capsys.readouterr().out
@@ -148,7 +157,7 @@ def test_present_broken_automatic_snapshot_is_not_silently_bypassed(worker_setup
     selected = workspace.parents[1] / '.codex-scratch/mypyc-active'
     selected.mkdir(parents=True)
     (selected / 'manifest.json').write_text('not JSON')
-    bootstrap._select_editable_domain(env)
+    select_domain(env)
     assert env['CODE_TE2_MYPYC_DIR'] == str(selected)
     from app.apps.code_te2 import mypyc_overlay
     with pytest.raises(json.JSONDecodeError):
@@ -165,7 +174,7 @@ def test_auto_snapshot_permission_errors_do_not_become_interpreted(worker_setup,
         return original(path, *args, **kwargs)
     monkeypatch.setattr(Path, 'stat', stat)
     with pytest.raises(PermissionError, match='blocked selector'):
-        bootstrap._select_editable_domain(env)
+        select_domain(env)
     assert 'CODE_TE2_MYPYC_DIR' not in env
 
 
@@ -178,21 +187,21 @@ def test_forced_interpreted_overrides_selection_without_mutating_it(worker_setup
     if explicit is not None:
         env['CODE_TE2_MYPYC_DIR'] = explicit
     env['CODE_TE2_FORCE_INTERPRETED'] = '1'
-    bootstrap._select_editable_domain(env)
+    select_domain(env)
     assert env['CODE_TE2_MYPYC_DIR'] == ''
     assert (selected / 'manifest.json').read_text() == 'retained snapshot'
     assert 'CODE_TE2_FORCE_INTERPRETED=1' in capsys.readouterr().out
     # A new normal framework invocation picks the retained automatic snapshot.
     fresh = {key: value for key, value in env.items()
              if key not in {'CODE_TE2_FORCE_INTERPRETED', 'CODE_TE2_MYPYC_DIR'}}
-    bootstrap._select_editable_domain(fresh)
+    select_domain(fresh)
     assert fresh['CODE_TE2_MYPYC_DIR'] == str(selected)
 
 
 def test_force_interpreted_zero_does_not_override_explicit_selection(worker_setup):
     _, _, env = worker_setup
     env.update(CODE_TE2_FORCE_INTERPRETED='0', CODE_TE2_MYPYC_DIR='/explicit/snapshot')
-    bootstrap._select_editable_domain(env)
+    select_domain(env)
     assert env['CODE_TE2_MYPYC_DIR'] == '/explicit/snapshot'
 
 
@@ -212,7 +221,7 @@ def test_force_interpreted_keeps_the_native_worker_and_python_runtime(worker_set
 def test_explicit_editable_domain_selection_is_preserved(worker_setup, selection):
     _, _, env = worker_setup
     env['CODE_TE2_MYPYC_DIR'] = selection
-    bootstrap._select_editable_domain(env)
+    select_domain(env)
     assert env['CODE_TE2_MYPYC_DIR'] == selection
 
 

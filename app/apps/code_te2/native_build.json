@@ -6,6 +6,7 @@
   "binary": "code-te2-worker",
   "environmentKey": "CODE_TE2_WORKER_BIN",
   "pythonAbi": true,
+  "runtimeProvider": "native_runtime.py",
   "features": [],
   "cache": {
     "root": "code_te2/build",

@@ -2,7 +2,7 @@
 use crate::protocol::FRAME_LIMIT;
 use anyhow::{Result, bail};
 use rmpv::Value;
-use std::io::Read;
+use std::io::{BufRead, Read};
 
 pub fn read_frame(reader: &mut impl Read) -> Result<(Value, usize)> {
     let mut decoder = Decoder {
@@ -12,6 +12,51 @@ pub fn read_frame(reader: &mut impl Read) -> Result<(Value, usize)> {
     };
     let value = decoder.value(0)?;
     Ok((value, FRAME_LIMIT - decoder.remaining))
+}
+
+/// Retain exactly one original frame while applying the unchanged native guards.
+/// The decoded graph never crosses PyO3; no bytes from the next frame are copied.
+pub fn read_frame_bytes(reader: &mut impl BufRead) -> Result<Vec<u8>> {
+    struct Capture<'a, R> {
+        reader: &'a mut R,
+        bytes: Vec<u8>,
+        used: usize,
+    }
+    impl<R: BufRead> Capture<'_, R> {
+        fn commit(&mut self) -> std::io::Result<()> {
+            if self.used > FRAME_LIMIT.saturating_sub(self.bytes.len()) {
+                return Err(std::io::Error::other("frame byte limit exceeded"));
+            }
+            self.bytes
+                .extend_from_slice(&self.reader.fill_buf()?[..self.used]);
+            self.reader.consume(self.used);
+            self.used = 0;
+            Ok(())
+        }
+    }
+    impl<R: BufRead> Read for Capture<'_, R> {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            if output.is_empty() {
+                return Ok(0);
+            }
+            if self.used == self.reader.fill_buf()?.len() {
+                self.commit()?;
+            }
+            let available = self.reader.fill_buf()?;
+            let size = output.len().min(available.len() - self.used);
+            output[..size].copy_from_slice(&available[self.used..self.used + size]);
+            self.used += size;
+            Ok(size)
+        }
+    }
+    let mut capture = Capture {
+        reader,
+        bytes: Vec::new(),
+        used: 0,
+    };
+    let _ = read_frame(&mut capture)?;
+    capture.commit()?;
+    Ok(capture.bytes)
 }
 
 struct Decoder<'a, R> {
@@ -140,5 +185,50 @@ mod tests {
             Value::Map(vec![("x".into(), (-256).into())])
         );
         assert!(data.is_empty());
+    }
+
+    #[test]
+    fn captured_frames_preserve_original_encoding_and_boundaries() {
+        // Noncanonical integer width and binary marker bytes must remain exact.
+        let first = b"\x82\xa1x\xcd\x00\x01\xa1y\xc4\x02\xc1\xff";
+        let tail = b"\x91\xc0";
+        let stream = [first.as_slice(), tail.as_slice()].concat();
+        let mut reader = std::io::BufReader::new(std::io::Cursor::new(stream));
+        assert_eq!(read_frame_bytes(&mut reader).unwrap(), first);
+        assert_eq!(read_frame_bytes(&mut reader).unwrap(), tail);
+        assert!(read_frame_bytes(&mut reader).is_err());
+    }
+
+    #[test]
+    fn captured_frames_keep_guard_rejections_and_partial_read_behavior() {
+        let mut deep = vec![0x91; 66];
+        deep.push(0xc0);
+        for bytes in [
+            vec![0xc1],
+            vec![0x81],
+            vec![0xd4, 0, 0],
+            vec![0x81, 1, 0],
+            vec![0x82, 0xa1, b'x', 0, 0xa1, b'x', 1],
+            vec![0xc6, 0xff, 0xff, 0xff, 0xff],
+            vec![0xa1, 0xff],
+            deep,
+            vec![0xdd, 0, 0x10, 0, 0], // More than one million array nodes.
+        ] {
+            let graph_error = read_frame(&mut bytes.as_slice()).unwrap_err().to_string();
+            let buffer_error = read_frame_bytes(&mut bytes.as_slice())
+                .unwrap_err()
+                .to_string();
+            assert_eq!(graph_error, buffer_error);
+        }
+        struct Fragmented<'a>(&'a [u8]);
+        impl Read for Fragmented<'_> {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                let size = output.len().min(1);
+                self.0.read(&mut output[..size])
+            }
+        }
+        let bytes = b"\x81\xa1x\xc4\x02\xc1\xff";
+        let mut fragmented = std::io::BufReader::with_capacity(1, Fragmented(bytes));
+        assert_eq!(read_frame_bytes(&mut fragmented).unwrap(), bytes);
     }
 }

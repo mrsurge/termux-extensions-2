@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Protocol, cast
 
 from app.libs import pipe_runtime
+from app.libs.pipe_codec import decode_envelope_bytes
 from app.libs.app_worker_bootstrap import assemble_off_loop
 from app.libs.asyncio_runtime import new_event_loop
 from app.libs.pipe_inbound import InboundEnvelopeRouter
@@ -152,6 +153,17 @@ def control(value: object) -> None:
         raise RuntimeError("native pipe not initialized")
     try:
         envelope = decode_envelope(value)
+    except PipeProtocolError as error:
+        pipe_runtime.write_envelope(process_error_response(PipeIdentity.from_env(), PipeError("protocol.invalidFrame", str(error), False)))
+        return
+    _router.deliver(envelope)
+
+
+def control_bytes(frame: bytes) -> None:
+    if _router is None:
+        raise RuntimeError("native pipe not initialized")
+    try:
+        envelope = decode_envelope_bytes(frame)
     except PipeProtocolError as error:
         pipe_runtime.write_envelope(process_error_response(PipeIdentity.from_env(), PipeError("protocol.invalidFrame", str(error), False)))
         return

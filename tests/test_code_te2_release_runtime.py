@@ -12,6 +12,12 @@ from app.release_runtime import ReleaseRuntimeError
 from app.release_runtime import code_te2 as runtime
 from framework.bootstrap import bootstrap
 from app.apps.code_te2 import mypyc_overlay
+from app.apps.code_te2 import native_runtime
+
+
+def packaged_worker(manifest: Path) -> bootstrap.NativeWorkerBuild:
+    return bootstrap.NativeWorkerBuild('code_te2', manifest, 'code-te2-worker',
+        'CODE_TE2_WORKER_BIN', True, runtime_provider=Path(native_runtime.__file__))
 
 
 def test_setup_validator_import_with_isolated_source_path() -> None:
@@ -176,8 +182,8 @@ def test_private_runtime_rejects_invalid_boundary(payload: Path, field: str, val
 def test_packaged_bootstrap_selects_private_paths(payload: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from importlib import metadata
     private_payload(payload)
-    worker = bootstrap.NativeWorkerBuild('code_te2', Path('/unused'), 'code-te2-worker', 'CODE_TE2_WORKER_BIN', True)
-    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda: [worker])
+    worker = packaged_worker(Path('/unused'))
+    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda env=None: [worker])
     monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: Path('/server'))
     monkeypatch.setattr(metadata, 'version', lambda _: '0.2.352')
     monkeypatch.setattr(runtime, 'packaged_runtime', lambda version: runtime.validate_runtime(payload, package_version=version))
@@ -266,8 +272,8 @@ def test_portable_inventory_rejects_build_host_or_escape_paths(source: str) -> N
 
 def test_packaged_bootstrap_exports_pair_without_cargo(payload: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from importlib import metadata
-    worker = bootstrap.NativeWorkerBuild('code_te2', Path('/no/Cargo.toml'), 'code-te2-worker', 'CODE_TE2_WORKER_BIN', True)
-    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda: [worker])
+    worker = packaged_worker(Path('/no/Cargo.toml'))
+    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda env=None: [worker])
     monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: Path('/packaged-server'))
     monkeypatch.setattr(metadata, 'version', lambda name: '0.2.352')
     monkeypatch.setattr(runtime, 'packaged_runtime', lambda version: runtime.validate_runtime(payload, package_version=version))
@@ -282,8 +288,8 @@ def test_packaged_bootstrap_exports_pair_without_cargo(payload: Path, monkeypatc
 
 def test_bad_packaged_pair_does_not_fall_back_to_cargo(monkeypatch: pytest.MonkeyPatch) -> None:
     from importlib import metadata
-    worker = bootstrap.NativeWorkerBuild('code_te2', Path('/no/Cargo.toml'), 'code-te2-worker', 'CODE_TE2_WORKER_BIN', True)
-    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda: [worker])
+    worker = packaged_worker(Path('/no/Cargo.toml'))
+    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda env=None: [worker])
     monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: Path('/packaged-server'))
     monkeypatch.setattr(metadata, 'version', lambda name: '0.2.352')
     def fail(version: str) -> runtime.CodeTe2Runtime:
@@ -294,10 +300,10 @@ def test_bad_packaged_pair_does_not_fall_back_to_cargo(monkeypatch: pytest.Monke
 
 
 def test_packaged_bootstrap_rejects_forced_interpreted_without_source_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    worker = bootstrap.NativeWorkerBuild('code_te2', Path('/no/Cargo.toml'), 'code-te2-worker', 'CODE_TE2_WORKER_BIN', True)
-    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda: [worker])
+    worker = packaged_worker(Path('/no/Cargo.toml'))
+    monkeypatch.setattr(bootstrap, '_native_worker_registry', lambda env=None: [worker])
     monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: Path('/packaged-server'))
-    monkeypatch.setattr(bootstrap, '_select_editable_domain', lambda *args: pytest.fail('packaged runtime must not select editable source'))
+    monkeypatch.setattr(native_runtime, 'select_editable_domain', lambda *args: pytest.fail('packaged runtime must not select editable source'))
     env = {'CODE_TE2_FORCE_INTERPRETED': '1'}
     with pytest.raises(SystemExit, match='only supported for editable installs'):
         bootstrap._prepare_native_workers(bootstrap._parse_args([]), env, build=True)

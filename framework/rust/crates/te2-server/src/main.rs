@@ -10,6 +10,7 @@ mod frontend_assets;
 mod launcher;
 #[cfg(feature = "native-mcp")]
 mod native_mcp;
+mod native_selection;
 #[cfg(feature = "native-mcp")]
 mod native_mcp_console;
 #[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]

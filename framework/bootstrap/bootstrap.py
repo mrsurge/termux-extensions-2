@@ -5,6 +5,7 @@ import ctypes
 import fcntl
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
 import secrets
@@ -23,13 +24,16 @@ from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from pathlib import Path
 from types import FrameType
-from typing import Any, TextIO, cast
+from typing import Any, Literal, TextIO, cast
 
 from app.node_toolchain import merge_login_shell_path
 from app.release_runtime import ReleaseRuntimeError, packaged_server_path
 from app.te2_paths import ensure_runtime_home, resolve_te2_paths
 from app.cli import framework_startup_progress as startup_progress
 from app.cli.console_usage import CONSOLE_USAGE
+from app.cli.native_runtime import NativeRuntimeContext, NativeRuntimeProvider, NativeRuntimeResult
+from app.cli.native_selection import (CONTEXT_ENV, SelectionContext, RuntimeReceipt,
+    SelectionSnapshot, WorkerSelection, declaration_digest, executable_digest, encode_context)
 
 APP_ID = "te2"
 DEFAULT_HOST = "127.0.0.1"
@@ -91,6 +95,17 @@ class NativeWorkerBuild:
     published_directory: str = "bin"
     target_environment: str | None = None
     shared_inputs: tuple[str, ...] = ("../asset_gzip.rs",)
+    runtime_provider: Path | None = None
+    declaration_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class NativeBuildSelection:
+    executable: Path
+    receipt: Path
+    fingerprint: str
+    compatibility: Mapping[str, object]
+    usable: bool
 
 
 @dataclass(frozen=True)
@@ -350,7 +365,7 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env["TE2_SERVER_NETWORK_POLICY"] = exposure.policy_json()
     env["TE2_SERVER_PORT"] = str(args.port)
     env["TE2_SERVER_PROJECT_ROOT"] = str(project_root)
-    env["TE2_SERVER_APP_ROOTS"] = os.pathsep.join(str(root) for root in app_roots)
+    env.setdefault("TE2_SERVER_APP_ROOTS", os.pathsep.join(str(root) for root in app_roots))
     env["TE_PORT"] = str(args.port)
     env["TE_FRAMEWORK_URL"] = _http_url(exposure.internal_host, args.port)
     runtime_bridge_host = env.get("TE2_RUNTIME_BRIDGE_HOST", DEFAULT_RUNTIME_BRIDGE_HOST)
@@ -512,23 +527,60 @@ def _cached_server_command(
     return ServerCommand([str(selected)], build_already_done=usable)
 
 
-def _native_worker_registry() -> list[NativeWorkerBuild]:
-    # Built-in app ownership is explicit in its own directory. Do not scan
-    # arbitrary projects, external app trees or runtime data for build commands.
-    app_root = _project_root() / 'app/apps'
-    paths = sorted(app_root.glob('*/native_build.json'))
-    builds = [_load_native_build(path) for path in paths]
-    ids = [worker.app_id for worker in builds]
+def _native_app_roots(env: Mapping[str, str]) -> tuple[Path, ...]:
+    raw = env.get('TE2_SERVER_APP_ROOTS')
+    roots = ([Path(value) for value in raw.split(os.pathsep) if value] if raw is not None
+             else [_project_root() / 'app/apps', resolve_te2_paths(env).data_home / 'apps'])
+    return tuple(dict.fromkeys(root.resolve() for root in roots))
+
+
+def _native_worker_registry(env: Mapping[str, str] | None = None) -> list[NativeWorkerBuild]:
+    roots = _native_app_roots(os.environ if env is None else env)
+    builds: list[NativeWorkerBuild] = []
+    seen: set[str] = set()
+    for root in roots:
+        for directory in sorted(root.glob('*')):
+            if not directory.is_dir() or directory.name.startswith('_'):
+                continue
+            path = directory / 'native_build.json'
+            app_manifest = directory / 'manifest.json'
+            owner = directory.name
+            if app_manifest.exists():
+                try:
+                    declaration = cast(object, json.loads(app_manifest.read_text()))
+                    if not isinstance(declaration, dict):
+                        raise ValueError('expected app object')
+                    fields = cast(dict[str, object], declaration)
+                    identity = fields.get('id')
+                    if not isinstance(identity, str) or not identity:
+                        raise ValueError('expected app id')
+                    owner = identity
+                except (OSError, ValueError) as exc:
+                    if not path.exists():
+                        continue  # Unrelated invalid apps remain the registry's concern.
+                    raise SystemExit(f'Invalid owning app manifest: {app_manifest}: {exc}') from exc
+            else:
+                continue
+            # Match registry first-root-wins semantics, even if the first app
+            # has no native worker. Never import/build a shadowed declaration.
+            if owner in seen:
+                continue
+            seen.add(owner)
+            if not path.exists():
+                continue
+            if path.resolve().parent.parent not in roots:
+                raise SystemExit('Native build declaration must remain inside its configured app root')
+            worker = _load_native_build(path, app_roots=roots)
+            if worker.app_id != owner:
+                raise SystemExit('Native build appId must match its owning app directory')
+            builds.append(worker)
     keys = [worker.environment_key for worker in builds]
-    if len(ids) != len(set(ids)) or len(keys) != len(set(keys)):
-        raise SystemExit('Duplicate native build appId/environmentKey')
-    for worker, path in zip(builds, paths):
-        if worker.app_id != path.parent.name:
-            raise SystemExit('Native build appId must match its owning app directory')
+    if len(keys) != len(set(keys)):
+        raise SystemExit('Duplicate native build environmentKey')
     return builds
 
 
-def _load_native_build(registry: Path) -> NativeWorkerBuild:
+def _load_native_build(registry: Path, *, app_roots: Sequence[Path] | None = None) -> NativeWorkerBuild:
     try:
         document = cast(object, json.loads(registry.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError) as exc:
@@ -539,8 +591,8 @@ def _load_native_build(registry: Path) -> NativeWorkerBuild:
     manifest_base = entry.get('manifestBase', 'framework')
     if manifest_base == 'framework':
         source_root = _source_root().resolve()
-    elif manifest_base == 'app' and registry.parent.resolve().is_relative_to(
-        (_project_root() / 'app/apps').resolve()
+    elif manifest_base == 'app' and registry.parent.resolve().parent in (
+        app_roots if app_roots is not None else _native_app_roots(os.environ)
     ):
         source_root = registry.parent.resolve()
     else:
@@ -599,11 +651,19 @@ def _load_native_build(registry: Path) -> NativeWorkerBuild:
     target_env = cache.get('targetDirectoryEnvironment')
     if target_env is not None and (not isinstance(target_env, str) or not target_env.isidentifier() or not target_env.isascii()):
         raise SystemExit('Invalid native build target environment key')
+    provider = entry.get('runtimeProvider')
+    provider_path: Path | None = None
+    if provider is not None:
+        if not isinstance(provider, str) or not provider or Path(provider).is_absolute():
+            raise SystemExit('Invalid native runtimeProvider')
+        provider_path = (registry.parent / provider).resolve()
+        if provider_path.parent != registry.parent.resolve() or provider_path.suffix != '.py':
+            raise SystemExit('Native runtimeProvider must remain inside its owning app')
     return NativeWorkerBuild(app_id, manifest, binary, key, python_abi,
         cache_values['root'], cast(str | None, package), tuple(cast(list[str], features)),
         tuple(cast(list[str], inputs)), cache_values['targetDirectory'],
         cache_values['publishedDirectory'], target_env,
-        tuple(cast(list[str], shared_inputs)))
+        tuple(cast(list[str], shared_inputs)), provider_path, registry.resolve())
 
 
 def _native_worker_fingerprint(worker: NativeWorkerBuild, profile: str, env: Mapping[str, str]) -> str:
@@ -628,6 +688,38 @@ def _native_build_compatibility(spec: NativeWorkerBuild) -> dict[str, object]:
     return identity
 
 
+def _native_selection_usable(selected: Path, receipt: Path,
+    compatibility: Mapping[str, object], *, python_abi: bool, force_build: bool,
+) -> bool:
+    if not _cached_binary_is_usable(selected) or force_build:
+        return False
+    # Pre-receipt framework cache keys remain valid; Python ABI never does.
+    if not python_abi and not receipt.exists():
+        return True
+    try:
+        return bool(json.loads(receipt.read_text()) == compatibility)
+    except (OSError, ValueError):
+        return False
+
+
+def select_native_build(
+    spec: NativeWorkerBuild, env: Mapping[str, str], *, profile: str,
+    features: Sequence[str], root: Path, force_build: bool = False,
+) -> NativeBuildSelection:
+    """Read-only selector; identical policy is used by actual preparation."""
+    if not spec.manifest.is_file():
+        raise SystemExit(f'Native Cargo manifest is missing: {spec.manifest}')
+    fingerprint = _rust_source_fingerprint(spec.manifest, profile=profile,
+        features=features, inputs=spec.source_inputs, shared_inputs=spec.shared_inputs)
+    name = spec.binary + ('.exe' if sys.platform == 'win32' else '')
+    selected = root / spec.published_directory / fingerprint / profile / name
+    receipt = selected.with_name(selected.name + '.build.json')
+    compatibility = _native_build_compatibility(spec)
+    usable = _native_selection_usable(selected, receipt, compatibility,
+        python_abi=spec.python_abi, force_build=force_build)
+    return NativeBuildSelection(selected, receipt, fingerprint, compatibility, usable)
+
+
 def _prepare_native_build(
     spec: NativeWorkerBuild, args: BootstrapArgs, env: Mapping[str, str], *,
     profile: str, features: Sequence[str], root: Path, build: bool,
@@ -635,31 +727,19 @@ def _prepare_native_build(
     # Both framework and app workers use the established framework fingerprint,
     # target/cache layout, lock and atomic binary publisher. Shell environment
     # differences do not change the source build identity.
-    if not spec.manifest.is_file():
-        raise SystemExit(f'Native Cargo manifest is missing: {spec.manifest}')
-    fingerprint = _rust_source_fingerprint(spec.manifest, profile=profile,
-                                           features=features, inputs=spec.source_inputs,
-                                           shared_inputs=spec.shared_inputs)
-    name = spec.binary + ('.exe' if sys.platform == 'win32' else '')
-    selected = root / spec.published_directory / fingerprint / profile / name
+    selection = select_native_build(spec, env, profile=profile, features=features,
+                                    root=root, force_build=args.force_build)
+    selected, fingerprint, receipt = selection.executable, selection.fingerprint, selection.receipt
+    name = selected.name
     target = Path(env.get(spec.target_environment, '')) if spec.target_environment and env.get(spec.target_environment) else root / spec.target_directory
-    compatibility = _native_build_compatibility(spec)
-    receipt = selected.with_name(selected.name + '.build.json')
+    compatibility = selection.compatibility
 
     def usable() -> bool:
-        if not _cached_binary_is_usable(selected) or args.force_build:
-            return False
-        # Existing framework cache entries predate receipts. Their identical
-        # source/profile/platform key remains valid and must not force rebuild.
-        if not spec.python_abi and not receipt.exists():
-            return True
-        try:
-            return json.loads(receipt.read_text()) == compatibility
-        except (OSError, ValueError):
-            return False
+        return _native_selection_usable(selected, receipt, compatibility,
+            python_abi=spec.python_abi, force_build=args.force_build)
 
     if not build:
-        return selected, usable()
+        return selected, selection.usable
     startup_progress.emit("preparing", unit=spec.app_id)
     with _exclusive_build_cache_lock(root):
         if not usable():
@@ -700,79 +780,123 @@ def _prepare_native_build(
     return selected, True
 
 
-def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], *, build: bool) -> None:
-    workers = _native_worker_registry()
-    if not workers:
-        return
-    if not args.cargo_manifest and packaged_server_path() is not None:
-        if env.get('CODE_TE2_FORCE_INTERPRETED') == '1':
-            raise SystemExit('CODE_TE2_FORCE_INTERPRETED=1 is only supported for editable installs; '
-                             'packaged Code TE2 requires its matched compiled domain.')
-        from importlib.metadata import version
-        from app.release_runtime.code_te2 import packaged_runtime
-        if {worker.app_id for worker in workers} != {"code_te2"}:
-            raise SystemExit("Binary release has unsupported native-worker registry entries")
-        try:
-            runtime = packaged_runtime(version("te2"))
-        except ReleaseRuntimeError as exc:
-            raise SystemExit(f"Binary release native-worker payload is unusable: {exc}; refusing a Cargo fallback.") from exc
-        env[workers[0].environment_key] = str(runtime.executable)
-        env["CODE_TE2_MYPYC_DIR"] = str(runtime.domain)
-        env["CODE_TE2_PYTHON_CACHE_PREFIX"] = str(runtime.executable.parent.parent / ".disabled-bytecode-cache")
-        env["CODE_TE2_HOST_PYTHON_EXECUTABLE"] = sys.executable
-        env["CODE_TE2_HOST_PACKAGE_ROOT"] = str(_project_root())
-        env["CODE_TE2_PYTHON_HOME"] = str(runtime.python_home) if runtime.python_home else sys.base_prefix
-        env["CODE_TE2_PYTHON_EXECUTABLE"] = str(runtime.python_executable) if runtime.python_executable else sys.executable
-        if runtime.source_root is not None:
-            env["CODE_TE2_PYTHON_ISOLATED"] = "1"
-            env["CODE_TE2_PYTHON_SOURCE"] = str(runtime.source_root)
-        else:
-            env.pop("CODE_TE2_PYTHON_ISOLATED", None)
-            env.pop("CODE_TE2_PYTHON_SOURCE", None)
-        return
-    profile = _rust_build_profile(args)
-    env.pop("CODE_TE2_PYTHON_CACHE_PREFIX", None)
-    paths = resolve_te2_paths(env)
-    for worker in workers:
-        root = paths.cache_home / worker.cache_root
-        selected, _ = _prepare_native_build(worker, args, env, profile=profile,
-                                           features=worker.features, root=root, build=build)
-        env[worker.environment_key] = str(selected)
-        if worker.app_id == 'code_te2':
-            _select_editable_domain(env)
-            env['CODE_TE2_PYTHON_HOME'] = sys.base_prefix
-            env['CODE_TE2_PYTHON_EXECUTABLE'] = sys.executable
-            env['CODE_TE2_HOST_PYTHON_EXECUTABLE'] = sys.executable
-            env['CODE_TE2_HOST_PACKAGE_ROOT'] = str(_project_root())
-            env.pop('CODE_TE2_PYTHON_ISOLATED', None)
-            env.pop('CODE_TE2_PYTHON_SOURCE', None)
-        print(f"[te2] Native worker {worker.app_id}: {selected}", flush=True)
-
-
-def _select_editable_domain(env: MutableMapping[str, str]) -> None:
-    if env.get('CODE_TE2_FORCE_INTERPRETED') == '1':
-        env['CODE_TE2_MYPYC_DIR'] = ''
-        print('[te2] Code TE2 domain: interpreted (CODE_TE2_FORCE_INTERPRETED=1). '
-              'The selected snapshot is unchanged.', flush=True)
-        return
-    # Explicit selections (including an intentional empty value) remain user
-    # policy. Broken selected snapshots must not silently become interpreted.
-    if 'CODE_TE2_MYPYC_DIR' in env:
-        return
-    selected = _project_root() / '.codex-scratch' / 'mypyc-active'
+def _app_runtime(worker: NativeWorkerBuild, env: Mapping[str, str], *, packaged: bool) -> NativeRuntimeResult:
+    path = worker.runtime_provider
+    if path is None:
+        if packaged:
+            raise SystemExit(f'Packaged native worker {worker.app_id} has no runtimeProvider; refusing a Cargo fallback.')
+        return NativeRuntimeResult({})
+    module_name = '_te2_native_runtime_' + hashlib.sha256(str(path).encode()).hexdigest()
+    module_spec = importlib.util.spec_from_file_location(module_name, path)
+    if module_spec is None or module_spec.loader is None:
+        raise SystemExit(f'Cannot load native runtimeProvider: {path}')
+    module = importlib.util.module_from_spec(module_spec)
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
     try:
-        selected.stat()  # Follow the automatic selector; a dangling link is absent.
-    except FileNotFoundError:
-        env['CODE_TE2_MYPYC_DIR'] = ''
-        print('[te2] Code TE2 domain: interpreted (no editable mypyc snapshot). '
-              'To compile/activate: python -B app/apps/code_te2/build_mypyc.py', flush=True)
-    else:
-        # Do not inspect/suppress malformed manifests, missing libraries, or ABI
-        # failures here. Existing targets retain strict worker admission.
-        env['CODE_TE2_MYPYC_DIR'] = str(selected)
+        module_spec.loader.exec_module(module)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+        raise
+    callback = cast(object, getattr(module, 'prepare_runtime', None))
+    if not callable(callback):
+        raise SystemExit(f'Native runtimeProvider lacks prepare_runtime: {path}')
+    result = cast(NativeRuntimeProvider, callback)(NativeRuntimeContext(
+        _project_root(), path.parent, packaged, dict(env)))
+    if not isinstance(result, NativeRuntimeResult):
+        raise SystemExit(f'Invalid native runtimeProvider result: {path}')
+    if any(not isinstance(key, str) or not isinstance(value, str)
+           for key, value in result.environment.items()) or any(
+               not isinstance(key, str) for key in result.remove_environment):
+        raise SystemExit(f'Invalid native runtimeProvider environment: {path}')
+    if result.executable is not None and not isinstance(result.executable, Path):
+        raise SystemExit(f'Invalid native runtimeProvider executable: {path}')
+    return result
 
 
-def _rust_build_profile(args: BootstrapArgs) -> str:
+def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], *, build: bool) -> None:
+    workers = _native_worker_registry(env)
+    packaged = not args.cargo_manifest and packaged_server_path() is not None
+    profile = _rust_build_profile(args)
+    paths = resolve_te2_paths(env)
+    # Publish environment only after every declared worker prepares successfully.
+    prepared = dict(env)
+    receipts: dict[str, RuntimeReceipt] = {}
+    for worker in workers:
+        declaration = (declaration_digest(worker.declaration_path, worker.runtime_provider)
+                       if worker.declaration_path is not None else None)
+        runtime = _app_runtime(worker, prepared, packaged=packaged)
+        if packaged:
+            if runtime.executable is None:
+                raise SystemExit(f'Packaged native worker {worker.app_id} supplied no executable; refusing a Cargo fallback.')
+            selected = runtime.executable
+            if not selected.is_absolute() or not _cached_binary_is_usable(selected):
+                raise SystemExit(f'Packaged native worker {worker.app_id} supplied an unusable executable; refusing a Cargo fallback.')
+        else:
+            if runtime.executable is not None:
+                raise SystemExit('Editable runtimeProvider cannot override native build selection')
+            selected, _ = _prepare_native_build(worker, args, prepared, profile=profile,
+                features=worker.features, root=paths.cache_home / worker.cache_root, build=build)
+        for key in runtime.remove_environment:
+            prepared.pop(key, None)
+        prepared.update(runtime.environment)
+        prepared[worker.environment_key] = str(selected)
+        if worker.declaration_path is not None:
+            if declaration_digest(worker.declaration_path, worker.runtime_provider) != declaration:
+                raise SystemExit('Native runtime declaration changed during preparation; refusing stale context.')
+            assert declaration is not None
+            receipts[worker.app_id] = RuntimeReceipt(
+                declaration,
+                str(selected), dict(runtime.environment), list(runtime.remove_environment),
+                executable_digest(selected) if packaged else None)
+        print(f'[te2] Native worker {worker.app_id}: {selected}', flush=True)
+    if profile not in ('release', 'debug', 'memory'):
+        raise SystemExit('Unsupported native selection profile')
+    prepared[CONTEXT_ENV] = encode_context(SelectionContext(1, profile, packaged, receipts))
+    env.clear()
+    env.update(prepared)
+
+
+def native_selection_snapshot(env: Mapping[str, str], context: SelectionContext) -> SelectionSnapshot:
+    """Private owner adapter: read-only, no provider imports or preparation."""
+    workers: list[WorkerSelection] = []
+    paths = resolve_te2_paths(env)
+    for spec in _native_worker_registry(env):
+        if spec.declaration_path is None:
+            raise ValueError('Native selection lacks declaration provenance')
+        declaration = declaration_digest(spec.declaration_path, spec.runtime_provider)
+        receipt = context.workers.get(spec.app_id)
+        prepared = receipt is not None and receipt.declaration == declaration
+        status: Literal['ready', 'build_required', 'preparation_required']
+        if context.packaged:
+            executable = receipt.executable if prepared and receipt is not None else None
+            ready = (executable is not None and receipt is not None and Path(executable).is_absolute()
+                and _cached_binary_is_usable(Path(executable))
+                and executable_digest(Path(executable)) == receipt.executable_digest)
+            status = 'ready' if ready else 'preparation_required'
+            fingerprint = None
+        else:
+            selection = select_native_build(spec, env, profile=context.profile,
+                features=spec.features, root=paths.cache_home / spec.cache_root)
+            executable, fingerprint = str(selection.executable), selection.fingerprint
+            status = ('preparation_required' if spec.runtime_provider is not None and not prepared
+                      else 'ready' if selection.usable else 'build_required')
+        if (declaration_digest(spec.declaration_path, spec.runtime_provider) != declaration
+            or _load_native_build(spec.declaration_path, app_roots=_native_app_roots(env)) != spec):
+            raise ValueError('Native declaration changed during selection')
+        workers.append(WorkerSelection(spec.app_id, spec.environment_key, declaration,
+            status, executable, fingerprint,
+            dict(receipt.environment) if prepared and receipt is not None else {},
+            list(receipt.remove_environment) if prepared and receipt is not None else []))
+    import msgspec
+    generation = hashlib.sha256(msgspec.json.encode(workers)).hexdigest()
+    return SelectionSnapshot(1, context.profile, context.packaged, generation, workers)
+
+
+def _rust_build_profile(args: BootstrapArgs) -> Literal['release', 'debug', 'memory']:
     if args.memory_profile_dir:
         return "memory"
     return "release" if args.release else "debug"

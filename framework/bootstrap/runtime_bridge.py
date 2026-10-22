@@ -18,6 +18,7 @@ from app.libs.native_console_owner import console_owner_routes
 from app.te2_console_runtime import list_console_workers, request_console_eval
 from app.libs.native_scaffold_owner import scaffold_owner_routes
 from app.libs.native_fws_log_owner import fws_log_owner_routes
+from app.libs.native_selection_owner import native_selection_owner_routes
 from app.extensions.apps.scaffold import list_templates, validate_proxy_shell_wrapper, scaffold_proxy_shell_wrapper
 
 
@@ -40,6 +41,7 @@ def build_app() -> Starlette:
         *scaffold_owner_routes(owner_key, list_templates, validate_proxy_shell_wrapper,
                               scaffold_proxy_shell_wrapper),
         *fws_log_owner_routes(owner_key),
+        *native_selection_owner_routes(owner_key, os.environ),
     ])
     mount_te2_runtime_services(app)
     return app
