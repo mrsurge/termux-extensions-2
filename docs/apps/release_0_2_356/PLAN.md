@@ -21,9 +21,16 @@ configured-root discovery, a typed read-only selector and app-owned runtime
 provider. User subsequently approves Stage A2: the read-only cross-language
 selector uses the existing capability-protected sidecar and installed bootstrap
 locator, with bounded startup receipts and strict typed Python/Rust contracts.
-No lifecycle/reload caller is enabled by A2. Rust refresh wiring and remaining policy
-migrations require their next concrete approval; earlier bounded Refresh approval
-is not permission for the whole broader cutover.
+No lifecycle/reload caller was enabled by A2. User then approves Stage B source
+implementation and isolated tests: one immutable manifest/initialization/intent/
+route/native-selection catalog, dynamic guarded socket dispatch, generation-pinned
+launch admission and rollback without touching active owners. Stage B is now
+source-wired; shared framework/sidecar adoption and live refresh remain separate
+approval gates. User subsequently approves Stage C: app-owned intent/CORS/state/
+capability declarations, structured exact-target diagnostics and isolated tests.
+Stage C is source-wired; live adoption remains gated. User then approves Stage D
+neutral fixtures/source guardrails, explicitly including the retired editor alias.
+That source cleanup is implemented; grouped live adoption remains pending.
 
 Validation is a gate within implementation work, not a standalone phase. User
 confirms the startup work has passed live validation; do not ask them to repeat
@@ -438,8 +445,13 @@ native RPC validation and native socket-context wrapping. Next propose retained
 validated original payload bytes plus native-owned context, not re-encoding the
 wrapper; preserve handler/admission/ACK/error/cancellation semantics and leave
 direct forwarding alone. Native HTTP helpers and FWS conversion remain separate.
-Full design/evidence/reproduction: INGRESS_AUDIT.md. No network implementation
-is approved by this entry. Targeted mypyc-native-type review remains after the
+Full design/evidence/reproduction: INGRESS_AUDIT.md. User subsequently approves
+the bounded three-lane network inbound byte handoff, strict typing, native/Python
+tests and an isolated source/compiled PyO3 dispatch probe. Source is implemented;
+matching production worker/domain build/adoption remains separately gated. Native
+guards, wrapper conversion budgets, SocketRef context, admission/Future/ACK/error
+behavior remain; no other events/HTTP helpers/outbound/direct-WBA paths migrate.
+No runtime transition, OTA, version or commit is included. Targeted mypyc-native-type review remains after the
 selected PyO3 conversion work, without broadening into a zero-PyObject goal.
 
 #### Follow-up after PyO3 optimization — targeted mypyc native types
@@ -600,6 +612,40 @@ moving to Sidebar/intent work; do not start O9 as the next slice.
 
 This is a provisional dependency-aware investigation order, not a promise to ship
 all eight items in .356. User can reprioritize as the optimization list develops.
+
+## Deferred — standalone Terminal headless projection audit / Pyte alternative
+
+User requests planning only while testing the network ingress slice. Standalone
+Terminal rendering/restoration feels janky compared with the existing Pyte-based
+implementations, including File Explorer's independent Node PTY backend. This is
+user-observed behavior, not yet a diagnosis of headless xterm or proof that a
+replacement is required. Do not interrupt the current testing or change runtimes.
+
+First audit the pinned xterm-headless/SerializeAddon configuration and actual
+checkpoint/restore flow. Reproduce and distinguish live-output issues from
+projection serialization/replay, resize ordering, cursor/application/mouse modes,
+alternate-screen state, colors, scrollback and reconnect. Compare the same
+bounded PTY output/resize/reload sequences against File Explorer and the drawer;
+do not infer parser correctness or latency from appearance alone.
+
+If a bounded configuration/restore fix cannot resolve it, evaluate replacing
+only standalone Terminal's headless screen projection with the shared app-neutral
+Pyte machinery. File Explorer already uses its own node-pty worker/raw byte
+offsets plus Pyte checkpoint parsing off the live-output path. Reuse that neutral
+library/pattern, never another app's backend, shellspec or session implementation.
+Keep browser xterm.js as the renderer; this proposal does not replace it with
+Pyte or remove the Node PTY shell merely to change screen projection.
+
+Before implementation, qualify ANSI/Unicode/wide-cell and truecolor fidelity,
+cursor/mouse/application modes, alternate screen, resize/reload/reconnect,
+scrollback expectations, raw stream ordering/gap detection, checkpoint identity,
+resource use and shell/session lifetime. Preserve each app's existing ownership,
+input behavior and transport. Present a concrete repair versus replacement scope,
+parity tests, rollback and grouped live checks for approval. No new dependency,
+transport cutover or migration is authorized by this planning entry.
+
+Source orientation: app/apps/terminal/terminal_stream_broker.mjs and package.json;
+app/apps/file_explorer/TERMINAL.md; app/libs/terminal_runtime/README.md.
 
 ## Deferred — ALS renderer-owned Markdown file actions
 

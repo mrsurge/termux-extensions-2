@@ -478,6 +478,51 @@ Python `services` modules. The current Sidebar lane is worker-owned
 until source either wires or retires them. The removed `vscode_rpc` side channel
 is not part of the current architecture.
 
+### App-owned integration declarations and catalog refresh
+
+The framework has no built-in app-ID permission/recipient table. Each owning
+manifest declares its integration surface:
+
+- `ipc.services`: versioned app RPC exports, exact callers/methods and optional
+  per-method request/reply/timeout limits. The framework brokers `app.rpc.call`
+  to `app.rpc.deliver` with framework-derived source app/shell identity; the
+  receiver owns payload, project and presentation validation.
+- `framework_integration.intents`: intent-name to explicit allowed caller IDs
+  for the retained `app.intent.dispatch` / `app.intent.deliver` envelope.
+- `framework_integration.capabilities`: capability to worker operation, including
+  `sidebarShortcut.add` and `workbench.debug`. Shortcut discovery requires exactly
+  one enabled provider; absence/ambiguity rejects rather than choosing a running
+  app or global foreground. Debug callers supply an exact target and credential.
+- `framework_integration.proxyCors`: bounded path-prefix/exact-origin/method/
+  header rules. Missing/invalid policy grants no CORS exception.
+- `framework_integration.stateMigrationFrom`: explicit owned legacy alias for
+  existing state-key migration. Current alias resolution must still identify the
+  same app; registering an alias alone never authorizes migration.
+
+These policies live with the apps, not in a framework file listing built-ins.
+`sio_service` already accepts an app-relative JSON path; integration policy is
+currently inline, not a newly implemented generic manifest-include mechanism.
+
+`POST /api/apps/reload` and native MCP share one reload owner. It constructs and
+validates an immutable `AppCatalog` containing registry/entrypoints, IPC policy,
+referenced Socket.IO JSON/shellspec YAML and native future-launch selections.
+Publication swaps one generation only after declaration/source rechecks. Invalid
+or conflicting candidates preserve the prior catalog. Dynamic socket dispatch
+can add/change/remove declared mounts without remounting Axum; protected framework
+paths, foreign-owner mounts, encoded escapes and collisions reject.
+
+Refresh does not restart workers, terminate removed apps, replace their running
+owner records or close upgraded connections. Established connections retain
+their captured owner; new requests use the new catalog and launches pin one
+generation through spawn. The response reports `generation`, `added`, `changed`,
+`removed`, `restart_required` and `native_status` alongside compatible count data.
+Catalog refresh is not live code replacement, native build or asset publication.
+The source guard in `tests/test_framework_app_agnostic.py` derives built-in IDs/
+aliases/directories from manifests and checks every Rust crate source, including
+test fixtures, while distinguishing generic service words from app addressing.
+Detailed schemas, bounds and evidence: `docs/apps/sidebar_app_intents/APP_RPC.md`
+and `docs/apps/release_0_2_356/FRAMEWORK_AGNOSTIC_AUDIT.md`.
+
 ---
 
 ## 4) SSOT (HistoryStore / PreferencesStore) model
@@ -2336,7 +2381,8 @@ The editor, host/main page, Explorer, sidebar, and terminal surfaces remain sepa
 ```text
 Host/main page frontend
   -> /ui_ipc msgpack-v1 JSON-RPC
-  -> native rpc_codec.rs decodes MessagePack, PyO3 carries structural values
+  -> native rpc_codec.rs validates MessagePack; PyO3 carries original bytes plus native socket context
+  -> network_rpc_ingress.py decodes the body, then the existing namespace owner
   -> ui_ipc_ws.py validates the JSON-RPC envelope
   -> ui_ipc.rpc_contract dispatch method
   -> backend hook/service
@@ -4805,6 +4851,16 @@ Python reconciles each complete WBA extension-surface snapshot as one idempotent
 
 ## 45) Sidebar Membership And Host Presentation Ownership
 
+### Embedded App Presentation State
+
+**Embedded App Presentation State** names the host/embedded-app relationship,
+not app intents or framework FS/search/Git services. It covers stable app/session
+membership, host/client association, restoration and client-local presentation
+(visibility, focus, docked/hidden/detached modes). Code TE2 presents this contract
+as its Sidebar; the concept is not inherently editor- or sidebar-specific. This
+name does not rename existing `sidebar.*` methods or claim a second independent
+framework-owned presentation store/API has been implemented.
+
 Sidebar state deliberately has two authorities. The shared backend ledger owns
 which surfaces exist; every client host owns how those surfaces are presented.
 This separation prevents a browser, Electron, GeckoView, or Cefrium renderer
@@ -4821,8 +4877,11 @@ cannot activate a client or create slots. Terminal/File Editor use ordinary
 HTTP-plus-pipe workers; frontend sockets and HTTP readiness are unchanged.
 ALS explicit framework mode uses the same relay for file/project intents,
 review/MCP drafts and CWD/state; standalone ALS retains its socket integration.
-Matching installations/domain and ALS caller-proof assets must be activated
-together; source wiring is not a deployment claim.
+Managed backend calls never fall back to sockets on timeout, disconnect or stale
+route state. Route discovery admits standalone integration only on complete
+managed absence, not a failed/starting route. Matching installations/domain and
+ALS caller-proof assets must be activated together; frontend presentation sockets
+remain separate from this backend-to-backend cutover.
 Contract, bounds and matching activation: `docs/apps/sidebar_app_intents/APP_RPC.md`.
 
 Ledger v2 persists only stable slot identity, membership, lifecycle/readiness,
@@ -4843,8 +4902,11 @@ Embedded app file opens name the originating URL's `clientInstanceId`, shared
 `te2_host_id` and ephemeral `presentationId`. ALS preserves this target through
 its own frontend/Rust RPC; it must not select a client from global last-focus
 state. Code TE2 admits only a live registered host, matching app slot, active
-client-local window and exact presentation. Shared document membership updates
-remain independent of the initiating client's foreground notification.
+client-local window and exact presentation. Document opens alone may proceed
+with an exact registered incarnation despite lagging client active-window state;
+this does not rewrite focus authority or weaken other intents. Shared document
+membership updates remain independent of the initiating client's foreground
+notification. No missing/stale-identity broadcast or global-client fallback exists.
 
 Presentation registration republishes `active: true` for the locally foreground
 slot on reconnect. The backend restores only that client's transient active
@@ -4903,16 +4965,26 @@ durable state. A re-created host must publish its fresh presentation identity
 before exact-client mention routing may succeed. Canonical legacy slot and
 presentation identities migrate once; canonical records win collisions.
 
+Backend-issued `mainPageId`, `sidebarStateId` and qualified `sidebarWindowId`
+associate shared state with its exact parent presentation; they do not replace
+the live client/slot/incarnation guards. The compact console name can reflect
+that relationship but never grants routing authority (see §25). Deliberately
+duplicated full app instances sharing one persistent client identity are
+unsupported mirror projections, not independent routing clients.
+
 Terminal directory destination is a separate client/framework-wide preference (`ask`, `drawer`, `sidebar`), independent of dock layout and project membership. The initiating Code TE2 host owns the shared dialog for its Explorer and embedded File Explorer; Don't ask again persists the choice, and the app-owned selector beneath Cursor style in Editor Settings can restore Ask every time. Electron stores a bounded map in existing `desktop-state.json`; GeckoView/Cefrium store separate records in their existing application-private state container through the native bridge, keyed by stable client and configured upstream origin. Browser clients use localStorage; native clients never silently use random relay-origin storage. Reads are lazy/cached, and preference changes create no PTY. Storage errors are reported without pretending persistence succeeded.
 
 `ui.terminal.destination` is an exact-client host notification, answered by `ui.host.terminal.destination` on the host's own RPC lane. The originating intent returns pending immediately rather than holding the 15-second framework broker window open. Backend single-use choice records are bounded (64 overall, one/client), expire after 120 seconds and are cancelled on host disconnect. Replies revalidate the saved project generation and embedded presentation before the existing fresh-session service runs; cancellation, stale/wrong-client/replayed replies have no creation effects. See sidebar-app PLAN, Terminal Intent Slice. New native bridge methods require matching native/client publication, not just a server reload.
 
 ### Stateful App Peer Routing
 
-ALS-RS Sidebar traffic resolves injected `TE_FRAMEWORK_URL`, then `TE_PORT`, then
-standalone loopback 8089; its own 12459 listener is not the framework destination.
-Reconnect registers its peer before exact-client effects can route. Frontends
-do not bypass their backend or use another surface's private API.
+Managed ALS `--stdio` uses its owned bidirectional framework pipe, including
+request correlation and bounded admission/writes. Readiness is flushed before
+CWD hydration; shutdown closes pipe admission before adapter owners. It does not
+connect a backend Sidebar socket. Explicit standalone integration retains peer
+registration/reconnect and resolves injected `TE_FRAMEWORK_URL`, then `TE_PORT`,
+then standalone loopback 8089; its own listener is not the framework destination.
+Frontends do not bypass their backend or use another surface's private API.
 
 ### Exact-client Sidebar mentions
 
@@ -5053,7 +5125,8 @@ Built-in backend module identity comes from package path rather than public app 
 - Rust owns framework filesystem, Git, search, bookmarks, settings, state, app
   lifecycle, proxying, shell orchestration, and the loaded-app/running-app index.
   Ordinary request, WebSocket, proxy, and Socket.IO handling never rediscovers
-  FWS metadata or scans `/proc`; only explicit reload/reconciliation may do so.
+  FWS metadata or scans `/proc`. Catalog reload preserves existing running-owner
+  records; separate lifecycle reconciliation retains its established owner.
 
 - The Rust server uses a multi-threaded Tokio runtime. Each app-worker bridge
   has a bounded 256-frame nonblocking queue and dedicated blocking writer:
@@ -5062,7 +5135,7 @@ Built-in backend module identity comes from package path rather than public app 
 
 - `app.libs.jobs` is a core-only persisted job manager/handler registry. Its
   unmounted FastAPI/SSE router and global `/api/jobs` surface were removed.
-  TE2 does not directly declare `sse-starlette`; MCP may still pull it in.
+  TE2 does not directly declare `sse-starlette`; native MCP owns its transports.
 
 - App manifests are the catalog contract. Semantic backend readiness opts in
   with `readiness_support: true` and publishes at
@@ -5120,8 +5193,38 @@ Built-in backend module identity comes from package path rather than public app 
   working directory, bytecode caches, profiler output, or build intermediates.
 
 - Framework builds are optimized by default; `--debug` is opt-in. Cache builds
-  use one cross-process lock for build/validation/atomic publish/pruning; retain
-  incremental Cargo artifacts but only the chosen validated final binary.
+  use the existing cross-process lock and validated atomic publication. Retain
+  Cargo caches and fingerprinted validated binaries; changing back to a previous
+  source fingerprint can reuse that artifact rather than rebuilding it.
+
+#### Manifest-driven native preparation and selection
+
+`framework/bootstrap/native_build.json` configures the server. Apps declare their
+own `native_build.json` under configured app roots; first-root manifest ownership
+also applies when an earlier app has no native declaration. App ID and directory
+need not match. The shared framework-source-v2 fingerprint/cache/ABI-receipt flow
+builds each declared Cargo target and selects its declared executable environment
+key. An optional app-relative `runtimeProvider` supplies app-owned preparation,
+such as Code TE2's editable/mypyc or private packaged Python policy. Discovery
+and refresh never import/execute providers or build code.
+
+The bootstrap's bounded `TE2_NATIVE_SELECTION_CONTEXT` records explicit runtime
+preparation. Its existing private sidecar exposes capability-protected
+`POST /internal/native-runtime/select`; callers cannot choose roots/profile/env.
+The selector reuses Python's existing fingerprint/receipt implementation rather
+than duplicating it in Rust. Selection reports `ready`, `build_required` or
+`preparation_required`, with strict bounds and no proxy/redirect/retry fallback.
+Changed provider/declaration context requires renewed bootstrap preparation;
+refresh cannot silently run app code to repair it.
+
+Catalog publication captures matching selections. A future launch uses that
+generation's executable/environment defaults rather than a frozen old inherited
+worker path, while explicit shellspec/app overrides keep precedence. Parent
+process environment is not mutated. Existing workers keep their executable and
+imports until an explicit lifecycle action replaces them. See
+`framework/native_editor_worker/README.md` and the app-agnostic audit in §3.
+
+#### Other build and deployment contracts
 
 - Supported framework source is `framework/` (bootstrap/runtime bridge,
   `tests/`, Rust workspace), and active Electron source is
@@ -5147,13 +5250,12 @@ Built-in backend module identity comes from package path rather than public app 
   environment still owns exact Node/npm and matching headers through
   `nodejs-wheel`; users must not install a second global Node runtime for this.
 
-- Framework-Shells 0.0.64 release wheels are native: ordinary CPython uses
-  `cp39-abi3`, free-threaded CPython uses its exact `cp314-cp314t` tag, and
-  both carry the PyO3 pump plus Rust terminal broker. Agent Log Server 0.2.131
-  depends on that exact version and its platform wheel carries a verified
-  `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack
-  parser. Release construction rejects incomplete wheel payloads. Neither
-  release path silently degrades to pure Python or Cargo.
+- Framework-Shells and ALS native payloads require target-specific ABI/artifact
+  validation. TE2 declares bare `framework-shells` and `agent-log-server`
+  dependencies, not old release pins; exact tested versions belong to release
+  receipts, not this runtime contract. Release construction must reject
+  incomplete native/runtime resources rather than silently degrade to pure
+  Python or Cargo.
 
 - New framework builds serve all 24 MCP tools natively through rmcp 3.5.1 at
   `/te2_mcp_http`; root and trailing slash share sessions. Native status reports
@@ -5167,10 +5269,10 @@ Built-in backend module identity comes from package path rather than public app 
   `framework/mcp_probe/README.md` for transport and acceptance gates.
 
 - TE2's direct FastMCP requirement and Python MCP implementation are removed.
-  ALS's separately packaged conversation-scoped `agent-pty-blocks` stdio server
-  still uses the Python MCP SDK and its own dependency declarations. That
-  coordinated migration and release-lock/wheelhouse regeneration remain necessary
-  before claiming Pydantic/cryptography disappear from clean installations.
+  ALS's separately owned conversation-scoped `agent-pty-blocks` server uses its
+  native rmcp/PyO3 executable behind the retained Python invocation/bootstrap.
+  Do not infer its dependency/runtime state from retired Python SDK code or
+  old release locks; installed wheel closure remains a release-validation fact.
 
 - Memory profiling is explicit through `te2 --memory-profile OUTPUT_DIR` and
   relies on Heaptrack plus opt-in process-separated Python/Node snapshots.
@@ -5823,11 +5925,10 @@ forwards HTTP/WebSocket scopes unchanged except for the reserved
 worker readiness/debug-loop binding; worker cleanup runs before native shutdown.
 Paired application hooks still surround Uvicorn serving inside signal capture.
 
-Router-based apps retain `TE2_APP_ROUTER` or the legacy `<app_id>_bp` contract via
-lazy `app_worker_fastapi.py` assembly and existing mounted-subapp lifespans.
-Pipe-only workers import no HTTP stack; ASGI network workers import Uvicorn
-and Starlette but not necessarily FastAPI/Pydantic. Those generic contracts
-remain available to other apps.
+Legacy `TE2_APP_ROUTER`, `<app_id>_bp` and mounted-subapp FastAPI assembly are
+retired, not fallback contracts. Ordinary HTTP apps export `TE2_ASGI_APP`;
+pipe-only workers import no HTTP stack. Worker lifecycle/readiness stays separate
+from app-owned routes, DTOs and request policy.
 
 On the native-services branch, Code TE2 instead launches the separate FWS-owned
 raw `code-te2-worker` executable resolved by framework bootstrap through
@@ -5844,8 +5945,11 @@ application start/stop and runtime-debug dispatch. `native_socketio.py` adapts t
 existing namespace handlers to native emit/room/session operations through typed
 local namespace helpers, not Python Socket.IO server classes. Domain state,
 client identity, validation and effects stay Python-owned. Rust decodes/encodes
-framework pipe frames and frontend RPC payloads; PyO3 carries structural values.
-msgspec DTO validation and remaining Python persistence/HTTP work
+framework pipe frames and frontend RPC payloads. Framework control ingress now
+crosses PyO3 as validated original bytes (see below). Outbound conversion is
+unchanged. The three frontend RPC request
+lanes also use validated bytes plus separate native context (see below), while
+other events and native HTTP helpers retain graph conversion. msgspec DTO validation and Python persistence/HTTP work
 remain. FWS observation networking is Rust-owned. Fresh main-module import tests
 also block socketio, engineio, aiohttp and framework_shells; this does not certify
 every optional feature's later import graph or eliminate every external import.
@@ -5854,7 +5958,7 @@ The listener binds after application startup; native code emits the serving
 readiness fact through the framework MessagePack pipe, not HTTP. The manifest's
 `readiness_support: "pipe"` mode requires a pipe app-worker shell and rejects
 HTTP readiness POST/PUT with 403. Boolean `true` retains the existing callback
-behavior for other apps (including ALS, not migrated in this slice). Catalogs
+behavior for apps that declare it; managed ALS also declares pipe readiness. Catalogs
 project the supported mode as boolean `true` for existing frontend gates.
 `app.readiness` is a notification addressed to `framework.rust` (NID 1), with
 exact params `{status: "ready", phase: "serving"}`. The framework attributes it
@@ -5867,11 +5971,11 @@ are not implemented in this initial native slice. The old Python HTTP resource
 module remains a parity fixture, not a fallback listener. Direct WBA transport,
 existing shell ownership and native-client frontend asset authority do not change.
 
-This branch requires a manual independent Cargo build against the matching system
-CPython ABI before opening Code TE2. Bootstrap/wheel integration remains deferred;
-do not release a package with an unresolved source-target executable path. See
-`framework/native_editor_worker/README.md` for exact Pixel build/test commands.
-Isolated real-worker tests are not live Pixel acceptance or measured startup gains.
+Bootstrap prepares/selects declared native artifacts; packaged installs validate
+their payload rather than building. Explicit mypyc compilation/activation remains
+separate. ABI/resource/provenance and deployment details are in
+`framework/native_editor_worker/README.md`; source tests alone do not prove that
+a running worker adopted a newly built artifact.
 
 #### Native Intelligence Child Ownership
 
@@ -5983,15 +6087,20 @@ all lazy HTTP clients, or the remaining Python filesystem operations.
 
 #### Native Domain Compilation And Artifact Preservation
 
-The native worker's independent build requires matching regular CPython and
-venv ABI. Its branch shellspec selects `CODE_TE2_MYPYC_DIR` at
-`.codex-scratch/mypyc-active`; the matching manifest/lib group must exist before
-startup. Missing artifacts fail closed: no automatic compile or silent
-interpreted fallback. Developer resource symlinks are not wheel packaging.
-Source executable bootstrap/cache integration is implemented through
-`app/native_worker_builds.json`. Mypyc remains explicit; atomic matched-set and
-binary-wheel packaging/ABI tagging are still deferred. Do not publish an installed
-release that depends on an unresolved domain overlay or developer resource link.
+The native worker requires regular CPython 3.14 ABI compatibility. Linux wheels
+carry their private runtime; Termux uses the resolved system ABI. The app-owned
+runtime provider selects `CODE_TE2_MYPYC_DIR`, not a mandatory workspace scratch
+path or the retired central `app/native_worker_builds.json` registry. Mypyc builds
+are explicit and publish verified immutable snapshots separately from compiler
+caches and worker execution. Build success does not restart or activate a worker.
+
+Editable installs may use interpreted modules in the same Rust/PyO3 worker when
+the automatic selector target is absent; explicit/broken selections stay strict.
+`CODE_TE2_FORCE_INTERPRETED=1` deliberately selects editable interpreted execution,
+including over an explicit domain path. Packaged installs reject that override
+and retain strict payload/ABI validation. No startup mypyc compile or packaged
+Cargo fallback is introduced. See the native worker README for snapshot recipes,
+ccache probing/progress and activation contracts.
 
 Mypyc type-check/shared-library success does not prove domain runtime parity.
 Retain interpreted islands or adapt them with behavior tests: mutable `ClassVar`
@@ -6129,8 +6238,8 @@ are supported with a 32 MiB per-frame limit. Truncated/corrupt streams are not
 resynchronized by guessing. Python closes transport admission and wakes pending
 calls on EOF/error; Rust closes its writer/debug route when its reader exits.
 Human output stays on stderr, and app-worker shellspecs declare stdout MessagePack
-observation. FWS dependencies are pinned by commit because the log-codec handoff
-did not bump package versions.
+observation. Native log-codec support must match the deployed FWS implementation;
+historical commit-pinned experiments do not describe normal dependency policy.
 
 This cutover covers framework/app-worker pipes, including runtime-debug traffic,
 and WBA stdio. WBA stdin carries JSON-RPC-shaped maps; stdout carries
@@ -6145,6 +6254,38 @@ Standalone Terminal's app worker is proc-based; its separate Node stream remains
 uint32-BE length-prefixed MessagePack. FWS observation support for that framing and
 large-record indexing beyond the existing 1 MiB preview budget is still pending.
 No browser socket, PTY terminal text, or native VS Code protocol changed.
+
+#### Native inbound byte-frame boundary
+
+Framework-to-Code TE2 control ingress retains each original bounded frame under
+the existing Rust decode guards, passes `PyBytes` to `native_worker.control_bytes`,
+and uses the cached typed msgspec decoder before the unchanged envelope router.
+Schema rejection alone may use the prior conversion to preserve precise errors;
+there is no second dispatch or execution retry. Native startup checks that the
+selected Python domain exposes the callable, so stale compiled domains fail
+before the reader starts.
+
+WBA control ingress similarly uses Rust `WbaMessagePackStream.feed_frames` to
+capture complete guarded frames and Python msgspec to decode them before existing
+reply/push routing. Push byte-count re-encoding runs only when diagnostics metrics
+are enabled: it is telemetry, not queue admission. Wire format, ordering,
+coalescing, outbound conversion and direct browser-to-WBA forwarding are unchanged.
+Matching worker/domain adoption is required. Qualification/trade-offs:
+`docs/apps/release_0_2_356/BOUNDARY_PROBE.md` and `INGRESS_AUDIT.md` there.
+
+For frontend network ingress, only `rpc` on `/rpc/editor`, `/rpc/explorer` and
+`/ui_ipc` retains the original validated body in `ValidatedRpc`. Native SocketRef/
+Event values provide namespace/SID/event separately. The shared Backend admission,
+blocking Future wait/cancel and result encoding are unchanged; Python
+`submit_rpc` schedules the cached msgspec decode and same namespace dispatcher.
+Payload fields cannot override the transport identity. Native guards and the
+former wrapper's effective depth/node budget remain, including their distinct
+parse-error versus backend-failure behavior. Startup rejects old domains without
+`submit_rpc`. This does not migrate other events, lifecycle/control calls, HTTP
+helpers, outbound data or direct WBA sockets, and it adds no reconnect replay.
+Source/compiled isolated dispatch parity is not live deployment or a measured
+speedup; this slice requires matching native worker and full domain adoption,
+without a new frontend wire protocol or client publication.
 
 ### WBA Runtime I/O
 
@@ -6315,6 +6456,16 @@ pipe. `workbench_runtime_debug.py` checks the expected shell; WBA's pipe-only
 `runtime.debug.*` handler verifies its per-process UUID. Both workers require
 `TE2_RUNTIME_DEBUG`; HTTP and browser WBA sockets reject evaluation. No new
 listener, Rust route or browser console identity is introduced.
+
+Native MCP now selects the exact parent's manifest-declared `workbench.debug`
+capability and sends structured parameters to `runtime.debug.workbench`. The
+existing runtime-debug credential, shell/instance route, bounded single-operation
+admission and off-loop reply owner remain mandatory. Code TE2 explicitly binds
+the operation to `dispatch_workbench_debug` / `request_wba`; framework Rust no
+longer generates app Python import/evaluation programs. The retained Python CLI
+helper still uses its app-specific authenticated eval adapter; it is not evidence
+that the framework retains an app-ID branch. Public MCP names/arguments/result
+envelopes are preserved, and uncertain execution is never replayed.
 
 Trusted JavaScript can inspect/mutate the real `wb` and `state`, use `await`, and
 install/remove temporary probes stored in `probe`. It is not sandboxed or

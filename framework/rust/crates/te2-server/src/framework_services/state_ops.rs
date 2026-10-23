@@ -280,7 +280,7 @@ mod tests {
         set_state(
             &store,
             StateWriteRequest {
-                key: "app_state:file_editor_cm6".to_owned(),
+                key: "app_state:legacy_editor".to_owned(),
                 value: json!({"legacy": true}),
                 merge: false,
             },
@@ -288,28 +288,28 @@ mod tests {
         .expect("legacy write");
 
         let moved =
-            move_state_key_if_present(&store, "app_state:file_editor_cm6", "app_state:code_te2")
+            move_state_key_if_present(&store, "app_state:legacy_editor", "app_state:sample_editor")
                 .expect("move state key");
         assert_eq!(moved, json!({"legacy": true}));
         let persisted = load_value_map(&store.path);
-        assert!(!persisted.contains_key("app_state:file_editor_cm6"));
-        assert_eq!(persisted.get("app_state:code_te2"), Some(&moved));
+        assert!(!persisted.contains_key("app_state:legacy_editor"));
+        assert_eq!(persisted.get("app_state:sample_editor"), Some(&moved));
 
         set_state(
             &store,
             StateWriteRequest {
-                key: "app_state:file_editor_cm6".to_owned(),
+                key: "app_state:legacy_editor".to_owned(),
                 value: json!({"stale": true}),
                 merge: false,
             },
         )
         .expect("second legacy write");
         let retained =
-            move_state_key_if_present(&store, "app_state:file_editor_cm6", "app_state:code_te2")
+            move_state_key_if_present(&store, "app_state:legacy_editor", "app_state:sample_editor")
                 .expect("destination wins");
         assert_eq!(retained, moved);
         let persisted = load_value_map(&store.path);
-        assert!(!persisted.contains_key("app_state:file_editor_cm6"));
-        assert_eq!(persisted.get("app_state:code_te2"), Some(&moved));
+        assert!(!persisted.contains_key("app_state:legacy_editor"));
+        assert_eq!(persisted.get("app_state:sample_editor"), Some(&moved));
     }
 }

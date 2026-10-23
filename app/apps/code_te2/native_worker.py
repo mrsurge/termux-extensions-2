@@ -18,6 +18,7 @@ from app.libs.pipe_protocol import PipeEnvelope, PipeIdentity, PipeError, PipePr
 from app.libs.runtime_debug_pipe import RuntimeDebugPipe
 from .native_socketio import NativeBridge
 from .app_intent_pipe import AppIntentPipe, dispatch_app_intent
+from .network_rpc_ingress import deliver_rpc
 
 _loop: asyncio.AbstractEventLoop | None = None
 _stop: asyncio.Event | None = None
@@ -104,9 +105,11 @@ def start(bridge: NativeBridge) -> dict[str, object]:
                 from .socketio_gateway import CODE_TE2_SIO
                 CODE_TE2_SIO.attach(bridge)
                 pipe_runtime.configure(main.te2_pipe_dispatch, identity)
+                from .workbench_runtime_debug import dispatch_workbench_debug
                 _debug = RuntimeDebugPipe(
                     enabled=os.environ.get("TE2_RUNTIME_DEBUG", "").lower() in {"1", "true", "yes"},
                     identity=identity, reply=pipe_runtime.write_envelope, backend=main,
+                    operations={"runtime.debug.workbench": dispatch_workbench_debug},
                 )
                 _debug.bind(asyncio.get_running_loop())
                 _intents = AppIntentPipe(identity=identity, reply=pipe_runtime.write_envelope,
@@ -198,6 +201,14 @@ def submit(value: dict[str, object]) -> concurrent.futures.Future[object]:
         from .socketio_gateway import CODE_TE2_SIO
         return await CODE_TE2_SIO.deliver(value)
     return asyncio.run_coroutine_threadsafe(deliver(), loop)
+
+
+def submit_rpc(namespace: str, sid: str, event: str, payload: bytes) -> concurrent.futures.Future[object]:
+    loop = _loop
+    if loop is None or not loop.is_running():
+        raise RuntimeError("native domain loop unavailable")
+    from .socketio_gateway import CODE_TE2_SIO
+    return asyncio.run_coroutine_threadsafe(deliver_rpc(CODE_TE2_SIO, namespace, sid, event, payload), loop)
 
 
 def stop(reason: str) -> None:

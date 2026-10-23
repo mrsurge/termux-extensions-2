@@ -9,7 +9,7 @@ manifest-driven; app-specific implementation belongs to the app. Names inside
 app manifests are legitimate policy data, not framework knowledge.
 
 This document records the approved **audit and staged plan** plus the separately
-approved Stage A1 bootstrap implementation below. It supersedes the earlier assumption that restoring Refresh is merely
+approved Stage A1/A2 and B source implementation below. It supersedes the earlier assumption that restoring Refresh is merely
 a route-index fix. User previously approved that bounded restoration; discovery
 of deeper native selection/policy coupling now requires concrete slice approvals.
 The original audit performed no production source edits, refresh request,
@@ -274,12 +274,182 @@ manifests/SystemExit become controlled 503 errors, not sidecar loop termination.
 Missing startup context is preparation_required/503; old peers never silently
 fall back to a separate resolver or inherited path.
 
-The Rust native_selection client is compiled but not called by lifecycle/reload.
+At completion of A2 the Rust native_selection client was compiled but not called
+by lifecycle/reload. Stage B below adds that shared reload caller.
 It accepts only explicit numeric-loopback HTTP owner URLs and a supplied key,
 uses a dedicated no-proxy/no-redirect/no-retry client with a 30-second bound,
 checks status before bounded response reading, and strictly decodes/validates
 schema/profile/status, IDs, environment keys, duplicate exports and ready paths.
 This introduces no app literals or second fingerprint implementation. Native
 routes, registry publication, launch behavior and existing running owners are
-not cut over by A2. A matching bootstrap/sidecar must be adopted before any future
-caller is enabled; source/test success does not establish live activation.
+were not cut over by A2. A matching bootstrap/sidecar must be adopted with B;
+source/test success does not establish live activation.
+
+## Stage B — immutable declaration catalog and dynamic dispatch
+
+AppCatalog is the single replaceable configuration generation: AppRegistry,
+entrypoints/raw IPC exports, inlined referenced sio_service JSON, parsed referenced
+shellspec YAML, native declaration/provider proofs and A2 native selections.
+Application implementation/source/assets remain app-owned files, not a copied
+code runtime. The manifest graph (including the conventional app-owned
+native_build.json companion) supplies initialization and intent data. No central
+built-in-app policy table is introduced.
+
+Configuration inventory reads are bounded to 1 MiB/file and 4,096 files/16 MiB;
+path/owner checks reject reference escape, and I/O errors cannot masquerade as an
+empty configuration. Existing registry root/alias ownership remains authoritative.
+Shellspec YAML syntax/object shape is captured here; the existing Ferrous renderer
+still owns concrete shell interpretation at explicit launch. IPC services are
+eagerly checked through the existing app-RPC policy/limit admission validator.
+Invalid candidate policy/routes/references do not evict the previous catalog.
+
+Reload uses the existing HTTP endpoint and native MCP shared owner. Build the
+candidate off-loop; query A2 selection without provider execution/builds; compare
+native declaration proofs with the candidate; take exclusive launch/publication
+admission; requery selection and recheck inventory; publish one Arc generation.
+No filesystem transaction or immunity to edits after the check is claimed: the
+captured configuration and selected immutable cached path remain pinned, and a
+subsequent Refresh admits subsequent source changes. Mutable Python/app code is
+still adopted only by explicit worker restart, never merely by swapping metadata.
+
+Concurrent reload requests fail explicitly rather than queue/replay. Blocking
+candidate construction/recheck own their admission guards even if the HTTP
+request is cancelled. App launch
+holds a shared admission permit across snapshot lookup and physical spawn. The
+blocking launch task owns that permit, so request cancellation cannot release it
+early while spawn continues. Normal readiness and existing FWS owner remain
+separate. Refresh never rescans/replaces running-app ownership or stops processes.
+Removed definitions stop new catalog routing but leave live process records and
+already-upgraded connections alone until their normal lifecycle ends.
+
+Socket dispatch is middleware under the existing network exposure policy and
+outside the fixed app routing table. It captures one declared MatchedSioRoute,
+then uses the existing HTTP/WebSocket proxy and exact canonical running-owner
+lookup, not a second alias lookup in a possibly newer catalog. This makes newly
+added base/slash/rest paths reachable without remounting Axum. Application paths
+must belong to the owning canonical/declared-alias app prefix (excluding the
+reserved proxy-shell subtree) or the retained simple root *_ws/socket.io shape.
+Framework FWS/console aliases are protected. Encoded/dot/wildcard declarations,
+duplicate mounts and cross-owner subtree overlaps reject. Existing HTTP body
+buffer bounds and proxy transport behavior are retained.
+
+New launches use captured shellspecs and refreshed native executable/runtime
+defaults; explicit shellspec/app values retain their precedence, with framework
+identity/debug overrides still final. Unusable/missing selections report build or
+preparation required; no Cargo, mypyc or inherited-old-path fallback is performed.
+Unsupported environment removal against a retained parent fails explicitly rather
+than pretending a stale child environment was cleared. No process-global env is
+mutated to launch an app. Initial startup keeps the existing broken-app catalog
+behavior; if its socket declarations are unsafe, app socket routes are withheld
+with a warning rather than installing an unguarded fallback over framework APIs.
+
+The compatible reload response/event retains count and adds generation,
+added/changed/removed IDs, restart_required and native_status. It does not expose
+private executable paths, environment deltas or owner credentials. Those fields
+describe future-launch configuration, not a claim that live worker code changed.
+Existing frontends need no APK/OTA change for the endpoint/route correction.
+
+Activation requires the matching bootstrap/A2 Python bridge and rebuilt Rust
+framework in an explicitly approved shared-runtime transition. No new Code TE2
+domain/mypyc, Android, Electron or static bundle changes are introduced by B.
+Remaining app-specific intent/MCP/debug/CORS/state/version policy from inventory
+Stage C was separately approved and implemented below; source guardrails in D
+remain follow-up work, not implicitly completed by B.
+
+## Stage C — app-owned broker and ancillary policy
+
+User explicitly chooses source implementation before shared-runtime validation
+and approves concrete framework/app contract edits plus isolated tests. No runtime
+transition, production build, version bump, push or asset publication is included.
+Actual frontend JS/HTML/CSS assets remain untouched. Rust frontend_assets.rs is
+server source, not a frontend asset: its private version path now delegates to
+the existing bundle-manifest version owner, retaining the service-worker's zero
+fallback. Public /api/editor_version and /sw.js contracts remain unchanged.
+
+App manifests may declare framework_integration (absent means no grants):
+
+```json
+{
+  "framework_integration": {
+    "intents": {"document.open": ["sender-app"]},
+    "capabilities": {
+      "sidebarShortcut.add": "app.mcp.addShortcut",
+      "workbench.debug": "runtime.debug.workbench"
+    },
+    "proxyCors": [{
+      "pathPrefix": "integration/",
+      "origins": ["http://localhost:12359"],
+      "methods": ["GET", "POST", "OPTIONS"],
+      "headers": ["Content-Type"],
+      "maxAge": 600
+    }],
+    "stateMigrationFrom": "explicit-legacy-alias"
+  }
+}
+```
+
+AppPolicy rejects unknown fields/malformed policy, wildcard callers/origins,
+non-exact HTTP origins, escaping CORS prefixes, invalid header tokens and bounded
+policy overflows. The immutable catalog validates this policy before publication;
+runtime consumers fail closed even when startup's diagnostic catalog contains an
+invalid declaration. Intent dispatch canonicalizes the declared target, retains
+framework-derived source identities and existing pipe admission/correlation, and
+leaves payload/presentation validation with the receiver. Existing ipc.services
+app-RPC policy is unchanged, not replaced by these legacy intent declarations.
+
+Shortcut MCP chooses exactly one enabled declared sidebarShortcut.add provider
+from the captured registry. Missing/ambiguous providers fail, even if only one
+happens to be running. Exact current pipe ownership and the existing bounded
+administrative request/response path remain mandatory; no first/global fallback.
+
+WBA MCP tool names/arguments/result envelopes remain compatible. The owner first
+checks the caller-supplied runtime-debug credential, then the exact canonical
+parent's declared workbench.debug capability. Existing debug route shell/instance
+checks select its pipe. A bounded structured operation replaces generated Python
+imports/evaluation code. Code TE2 explicitly binds runtime.debug.workbench to its
+app-owned request_wba adapter in RuntimeDebugPipe; standard debug status/eval,
+single-operation admission, loop ownership, disabled policy, close/cancellation
+and reply correlation stay unchanged. Child shell/instance and code remain data;
+the existing WBA owner validates them without execution replay.
+
+Proxy CORS preserves the app's existing agent prefix/exact origins/methods/header/
+max-age through its manifest rather than an app-ID branch. State migration names
+one explicit alias, additionally checking current alias resolution before using
+the existing non-overwriting state-key move. Alias registration alone never
+triggers migration. No automatic broad migration or new state store is introduced.
+
+The production Rust app-ID/private-import branches in this inventory are removed.
+The initial remaining concrete built-in names were test fixtures (including
+filesystem pipe origin_name), not runtime policy; Stage D source cleanup below
+now removes those as well.
+Source-only changes need matching framework/bridge bootstrap preparation and
+Code TE2 Python/domain adoption (new mypyc if selected); unlike B alone, C includes
+an app manifest and domain hook change. Existing live workers are not upgraded by
+catalog refresh. Actual acceptance is still required, not claimed by tests.
+
+## Stage D — source guardrails and neutral fixture cleanup
+
+User approves removal of remaining framework app-name fixtures and explicitly
+includes the retired editor alias. Framework unit tests now use neutral sample
+identities for registry aliases, state migration, app intents, native MCP,
+running-owner bookkeeping, static bundle paths and pipe-origin/reply receipts.
+The launcher test constructs an equivalent neutral shellspec rather than reading
+the real editor app's source/configuration. No product permissions, app manifests,
+legacy user state or runtime data were removed by this test-only cleanup.
+
+tests/test_framework_app_agnostic.py derives built-in IDs, aliases and directory
+names from owning manifests and audits every Rust source file in framework/rust/
+crates, including test blocks. Qualified identities/private paths/environment
+keys are forbidden; generic one-word concepts remain usable as protocol/service
+keys but not explicit app addressing. The guard's examples verify that distinction.
+It does not claim to prove all possible semantic couplings by string matching.
+Actual frontend assets remain outside this Rust-source guard; no whole runtime
+module is excluded. The current grep for editor IDs/retired alias, browser app ID,
+agent app ID and quoted Terminal ID returns no hits in that tree.
+
+Optional app-relative integration-manifest includes were offered, not selected;
+existing inline integration/IPC declarations and sio_service.json route reference
+remain the source contract. The subsequent user reports pipe actions, intents
+and app presentation-state behavior working and considers validation complete;
+the owning release tracker records that acceptance. No new agent-triggered
+runtime transition is implied or authorized by this documentation update.

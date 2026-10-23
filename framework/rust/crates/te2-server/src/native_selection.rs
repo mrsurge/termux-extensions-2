@@ -1,8 +1,7 @@
-//! Private selector client. No lifecycle/refresh caller is wired yet.
-#![allow(dead_code)]
+//! Private read-only selector client used by atomic app catalog refresh.
 
 use anyhow::{Context, Result, bail, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -11,7 +10,7 @@ use std::{
 
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SelectionStatus {
     Ready,

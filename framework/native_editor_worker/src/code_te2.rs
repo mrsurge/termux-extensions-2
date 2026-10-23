@@ -8,6 +8,7 @@ mod persistence;
 #[allow(dead_code)] // Shared helpers also compile into the isolated pipe harness.
 mod protocol;
 mod rpc_codec;
+mod rpc_ingress;
 mod shells;
 mod terminal_log;
 mod values;
@@ -390,8 +391,40 @@ struct Backend {
     admission: Arc<Semaphore>,
     control: Arc<Semaphore>,
 }
+enum BackendInput {
+    Graph(Value),
+    Rpc {
+        namespace: String,
+        sid: String,
+        event: String,
+        frame: rpc_codec::ValidatedRpc,
+    },
+}
 impl Backend {
     async fn call(&self, value: Value, control: bool) -> Result<Value> {
+        self.call_input(BackendInput::Graph(value), control).await
+    }
+
+    async fn rpc(
+        &self,
+        namespace: String,
+        sid: String,
+        event: String,
+        frame: rpc_codec::ValidatedRpc,
+    ) -> Result<Value> {
+        self.call_input(
+            BackendInput::Rpc {
+                namespace,
+                sid,
+                event,
+                frame,
+            },
+            false,
+        )
+        .await
+    }
+
+    async fn call_input(&self, input: BackendInput, control: bool) -> Result<Value> {
         let permit = if control {
             self.control.clone()
         } else {
@@ -403,8 +436,17 @@ impl Backend {
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             Python::attach(|py| -> PyResult<Value> {
-                let future =
-                    module.call_method1(py, "submit", (values::to_python(py, &value)?,))?;
+                let future = match input {
+                    BackendInput::Graph(value) => {
+                        module.call_method1(py, "submit", (values::to_python(py, &value)?,))?
+                    }
+                    BackendInput::Rpc {
+                        namespace,
+                        sid,
+                        event,
+                        frame,
+                    } => rpc_ingress::submit(py, &module, &namespace, &sid, &event, &frame)?,
+                };
                 let result = future.call_method1(py, "result", (120.0,));
                 if result.is_err() {
                     let _ = future.call_method0(py, "cancel");
@@ -612,6 +654,7 @@ fn initialize(root: &std::path::Path) -> Result<Arc<Py<PyAny>>> {
         }
         let module = py.import("app.apps.code_te2.native_worker")?;
         inbound::check_domain(module.as_any())?;
+        rpc_ingress::check_domain(module.as_any())?;
         Ok(Arc::new(module.into_any().unbind()))
     })
     .map_err(|e| anyhow::anyhow!("native Python import: {e}"))

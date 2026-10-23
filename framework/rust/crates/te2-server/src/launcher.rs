@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use std::path::Path;
 #[cfg(feature = "ferrous-framework-native")]
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Debug, Serialize)]
 pub struct LaunchResult {
@@ -74,6 +74,8 @@ pub fn launch_app(
     framework_url: &str,
     framework_port: u16,
     framework_shells_env: &std::collections::HashMap<String, String>,
+    initialization: &crate::app_catalog::AppInitialization,
+    native: Option<&crate::native_selection::WorkerSelection>,
 ) -> Result<LaunchResult> {
     let launch_started = std::time::Instant::now();
     let trace_startup = runtime_debug_enabled();
@@ -89,6 +91,8 @@ pub fn launch_app(
             framework_url,
             framework_port,
             framework_shells_env,
+            initialization,
+            native,
         );
         bail!("TE2 server was built without the ferrous-framework-native feature")
     }
@@ -108,13 +112,19 @@ pub fn launch_app(
 
         // App launch keeps the manifest app-worker as the lifecycle/proxy
         // authority. If that shellspec renders backend=pipe, the same process
-        // is both the FastAPI worker and the framework RPC pipe endpoint.
+        // is both the app server and the framework RPC pipe endpoint.
         for shell in &app.shells {
             let (shellspec_path, shellspec_entry) = shellspec_launch_target(app, shell)?;
             let entry_name = shellspec_entry.unwrap_or_else(|| "app-worker".to_owned());
-            let document = load_shellspec_document(&shellspec_path)?;
+            let document = initialization.shellspecs.get(&shellspec_path).context(
+                "shellspec is not part of the selected catalog generation; refresh apps",
+            )?;
 
             let mut launch_env_overrides = HashMap::new();
+            let mut parent: HashMap<String, String> = std::env::vars().collect();
+            let mut native_defaults = HashMap::new();
+            apply_native_launch_environment(&mut parent, &mut native_defaults, native)?;
+            parent.extend(native_defaults.clone());
             merge_shell_env_overrides(&mut launch_env_overrides, shell);
             apply_framework_launch_env(
                 &mut launch_env_overrides,
@@ -125,17 +135,29 @@ pub fn launch_app(
                     .get("TE2_RUNTIME_DEBUG")
                     .is_some_and(|value| value == "1"),
             );
-            let render_env = shellspec_render_environment(
-                std::env::vars().collect(),
-                framework_shells_env,
-                &launch_env_overrides,
-            );
+            let render_env =
+                shellspec_render_environment(parent, framework_shells_env, &launch_env_overrides);
 
             let input = ShellspecRenderInput {
                 ctx: ctx.clone(),
                 env: render_env,
             };
-            let mut rendered_shell = render_shellspec_entry(&document, &entry_name, &input)?;
+            let mut rendered_shell = render_shellspec_entry(document, &entry_name, &input)?;
+            merge_native_spawn_defaults(
+                &native_defaults,
+                &rendered_shell.env,
+                &mut launch_env_overrides,
+            );
+            if let Some(native) = native {
+                for key in &native.remove_environment {
+                    anyhow::ensure!(
+                        std::env::var_os(key).is_none()
+                            || launch_env_overrides.contains_key(key)
+                            || rendered_shell.env.contains_key(key),
+                        "native environment removal requires renewed bootstrap preparation"
+                    );
+                }
+            }
             anyhow::ensure!(
                 !app.pipe_readiness()
                     || !is_app_worker_shell(shell)
@@ -215,6 +237,47 @@ pub fn launch_app(
             source: "ferrous_framework_native",
         })
     }
+}
+
+#[cfg(feature = "ferrous-framework-native")]
+fn merge_native_spawn_defaults(
+    defaults: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    overrides: &mut HashMap<String, String>,
+) {
+    for (key, value) in defaults {
+        if !declared.contains_key(key) {
+            overrides
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+        }
+    }
+}
+
+#[cfg(feature = "ferrous-framework-native")]
+fn apply_native_launch_environment(
+    parent: &mut HashMap<String, String>,
+    overrides: &mut HashMap<String, String>,
+    native: Option<&crate::native_selection::WorkerSelection>,
+) -> Result<()> {
+    if let Some(native) = native {
+        anyhow::ensure!(
+            native.status == crate::native_selection::SelectionStatus::Ready,
+            "native worker requires build/preparation"
+        );
+        for key in &native.remove_environment {
+            parent.remove(key);
+        }
+        overrides.extend(native.environment.clone());
+        overrides.insert(
+            native.environment_key.clone(),
+            native
+                .executable
+                .clone()
+                .context("missing native executable")?,
+        );
+    }
+    Ok(())
 }
 
 #[cfg(feature = "ferrous-framework-native")]
@@ -382,14 +445,6 @@ fn split_shellspec_ref(reference: &str) -> Result<(String, Option<String>)> {
 }
 
 #[cfg(feature = "ferrous-framework-native")]
-fn load_shellspec_document(shellspec_path: &Path) -> Result<Value> {
-    let raw = fs::read_to_string(shellspec_path)
-        .with_context(|| format!("failed to read shellspec {}", shellspec_path.display()))?;
-    serde_yaml::from_str(&raw)
-        .with_context(|| format!("failed to parse shellspec {}", shellspec_path.display()))
-}
-
-#[cfg(feature = "ferrous-framework-native")]
 fn json_scalar_string(value: &Value) -> Option<String> {
     match value {
         Value::Null => Some(String::new()),
@@ -406,14 +461,59 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn refreshed_native_selection_replaces_inherited_command_without_process_env_mutation() {
+        use crate::native_selection::{SelectionStatus, WorkerSelection};
+        let mut parent = HashMap::from([
+            ("ALPHA_BIN".into(), "/old/alpha".into()),
+            ("OLD_CONTEXT".into(), "stale".into()),
+        ]);
+        let mut overrides = HashMap::new();
+        let mut selected = WorkerSelection {
+            app_id: "alpha".into(),
+            environment_key: "ALPHA_BIN".into(),
+            declaration: "a".repeat(64),
+            status: SelectionStatus::Ready,
+            executable: Some("/new/alpha".into()),
+            fingerprint: Some("b".repeat(24)),
+            environment: HashMap::from([("RUNTIME_HOME".into(), "/new/runtime".into())]),
+            remove_environment: vec!["OLD_CONTEXT".into()],
+        };
+        apply_native_launch_environment(&mut parent, &mut overrides, Some(&selected)).unwrap();
+        assert!(!parent.contains_key("OLD_CONTEXT"));
+        let document = serde_json::json!({"shells":{"app-worker":{"backend":"pipe","command":["${env:ALPHA_BIN}"],"env":{"RUNTIME_HOME":"${env:RUNTIME_HOME}"}}}});
+        let rendered = render_shellspec_entry(
+            &document,
+            "app-worker",
+            &ShellspecRenderInput {
+                ctx: HashMap::new(),
+                env: shellspec_render_environment(parent.clone(), &HashMap::new(), &overrides),
+            },
+        )
+        .unwrap();
+        assert_eq!(rendered.command[0], "/new/alpha");
+        assert_eq!(rendered.env["RUNTIME_HOME"], "/new/runtime");
+        assert_eq!(parent["ALPHA_BIN"], "/old/alpha");
+        let declared = HashMap::from([("RUNTIME_HOME".into(), "/explicit/user/runtime".into())]);
+        let mut spawn = HashMap::new();
+        merge_native_spawn_defaults(&overrides, &declared, &mut spawn);
+        assert!(!spawn.contains_key("RUNTIME_HOME"));
+        assert_eq!(spawn["ALPHA_BIN"], "/new/alpha");
+        selected.status = SelectionStatus::BuildRequired;
+        assert!(
+            apply_native_launch_environment(&mut parent, &mut overrides, Some(&selected)).is_err()
+        );
+    }
+
+    #[test]
     fn native_worker_shellspec_receives_bootstrap_environment() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-        let document =
-            load_shellspec_document(&root.join("app/apps/code_te2/shellspec/app_worker.yaml"))
-                .unwrap();
-        let worker = "/cache/te2/code_te2/build/bin/fingerprint/release/code-te2-worker";
+        let document = serde_json::json!({"version":"1", "shells":{"app-worker":{
+            "backend":"pipe", "cwd":"${ctx:PROJECT_ROOT}",
+            "command":["${env:SAMPLE_EDITOR_WORKER_BIN}", "${ctx:PROJECT_ROOT}", "${free_port}"],
+            "env":{"PYTHONPATH":"${env:PYTHONPATH}:${ctx:PROJECT_ROOT}", "TE_APP_ID":"${ctx:APP_ID}"}
+        }}});
+        let worker = "/cache/te2/sample_editor/build/bin/fingerprint/release/sample-editor-worker";
         let parent = HashMap::from([
-            ("CODE_TE2_WORKER_BIN".to_owned(), worker.to_owned()),
+            ("SAMPLE_EDITOR_WORKER_BIN".to_owned(), worker.to_owned()),
             ("PYTHONPATH".to_owned(), "/parent/python".to_owned()),
             ("TE_FRAMEWORK_URL".to_owned(), "parent".to_owned()),
         ]);
@@ -431,7 +531,7 @@ mod tests {
             &ShellspecRenderInput {
                 ctx: HashMap::from([
                     ("PROJECT_ROOT".to_owned(), "/checkout".to_owned()),
-                    ("APP_ID".to_owned(), "code_te2".to_owned()),
+                    ("APP_ID".to_owned(), "sample_editor".to_owned()),
                 ]),
                 env,
             },

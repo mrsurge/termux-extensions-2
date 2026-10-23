@@ -1685,7 +1685,7 @@ mod search_delivery_tests {
         let request = serde_json::from_value(json!({
             "jsonrpc": JSONRPC_VERSION, "protocolVersion": PROTOCOL_VERSION,
             "kind": "request", "id": "test", "method": "search.content.start",
-            "originNid": 10, "originName": "code_te2"
+            "originNid": 10, "originName": "sample_editor"
         }))
         .unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));

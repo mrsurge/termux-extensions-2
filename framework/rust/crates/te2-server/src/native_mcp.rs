@@ -99,6 +99,13 @@ pub(crate) trait AppToolOwner: Clone + Send + Sync + 'static {
 
 #[cfg(feature = "ferrous-framework-native")]
 pub(crate) enum DebugCall {
+    Capability {
+        credential: String,
+        target: crate::runtime_debug_pipe::DebugTarget,
+        capability: String,
+        params: Value,
+        timeout_seconds: u64,
+    },
     Workers {
         credential: String,
     },
@@ -205,6 +212,23 @@ impl AppToolOwner for FrameworkAppOwner {
     fn debug(&self, call: DebugCall) -> OwnerFuture<'_> {
         Box::pin(async move {
             Ok(match call {
+                DebugCall::Capability {
+                    credential,
+                    target,
+                    capability,
+                    params,
+                    timeout_seconds,
+                } => {
+                    crate::runtime_debug_http::native_operation(
+                        &self.0,
+                        &credential,
+                        target,
+                        &capability,
+                        params,
+                        timeout_seconds,
+                    )
+                    .await
+                }
                 DebugCall::Workers { credential } => {
                     crate::runtime_debug_http::native_workers(&credential)
                 }
@@ -229,9 +253,9 @@ impl AppToolOwner for FrameworkAppOwner {
     }
     fn reload(&self) -> OwnerFuture<'_> {
         Box::pin(async {
-            Ok(Value::Object(
-                apps_lifecycle::reload_apps_data(&self.0).await,
-            ))
+            apps_lifecycle::reload_apps_data(&self.0)
+                .await
+                .map(Value::Object)
         })
     }
     fn start(&self, app_id: String) -> OwnerFuture<'_> {
@@ -358,24 +382,6 @@ struct WbaEval {
     code: String,
     #[serde(default = "default_debug_timeout")]
     timeout_seconds: u64,
-}
-
-#[cfg(feature = "ferrous-framework-native")]
-fn wba_program(
-    operation: &str,
-    shell: Option<&str>,
-    instance: Option<&str>,
-    code: Option<&str>,
-    timeout: u64,
-) -> String {
-    // JavaScript and IDs remain data, including quotes/newlines/backslashes.
-    // JSON string literals are valid Python string literals; decode the object
-    // in the existing parent loop before invoking its WBA-owned helper.
-    let params = json!({"operation":operation,"shell_id":shell,"instance_id":instance,"code":code,"timeout_seconds":timeout}).to_string();
-    let literal = serde_json::to_string(&params).unwrap();
-    format!(
-        "from app.apps.code_te2.workbench_runtime_debug import request_wba\nresult = await request_wba(**__import__('msgspec').json.decode({literal}))"
-    )
 }
 
 #[cfg(feature = "ferrous-framework-native")]
@@ -568,9 +574,9 @@ impl<O: AppToolOwner> NativeAppTools<O> {
         #[cfg(feature = "ferrous-framework-native")]
         if matches!(name, "te2_wba_status" | "te2_wba_eval") {
             use crate::runtime_debug_pipe::DebugTarget;
-            let (credential, target, program, timeout_seconds) = if name == "te2_wba_status" {
+            let (credential, target, params, timeout_seconds) = if name == "te2_wba_status" {
                 let input: DebugStatus = serde_json::from_value(arguments).map_err(invalid)?;
-                let program = wba_program("status", None, None, None, 20);
+                let params = json!({"operation":"status", "timeout_seconds":20});
                 (
                     input.credential,
                     DebugTarget {
@@ -578,7 +584,7 @@ impl<O: AppToolOwner> NativeAppTools<O> {
                         shell_id: input.shell_id,
                         instance_id: input.instance_id,
                     },
-                    program,
+                    params,
                     20,
                 )
             } else {
@@ -594,13 +600,8 @@ impl<O: AppToolOwner> NativeAppTools<O> {
                         None,
                     ));
                 }
-                let program = wba_program(
-                    "eval",
-                    Some(&input.wba_shell_id),
-                    Some(&input.wba_instance_id),
-                    Some(&input.code),
-                    input.timeout_seconds,
-                );
+                let params = json!({"operation":"eval", "shell_id":input.wba_shell_id,
+                    "instance_id":input.wba_instance_id,"code":input.code,"timeout_seconds":input.timeout_seconds});
                 (
                     input.credential,
                     DebugTarget {
@@ -608,25 +609,28 @@ impl<O: AppToolOwner> NativeAppTools<O> {
                         shell_id: input.shell_id,
                         instance_id: input.instance_id,
                     },
-                    program,
+                    params,
                     input.timeout_seconds,
                 )
             };
-            if target.app_id != "code_te2" || program.len() > 32 * 1024 {
+            if target.app_id.is_empty()
+                || target.shell_id.is_empty()
+                || target.instance_id.is_empty()
+            {
                 return Err(ErrorData::invalid_params(
-                    "WBA debug requires the code_te2 parent and a bounded relay program",
+                    "WBA debug requires an exact parent identity",
                     None,
                 ));
             }
             return Ok(
                 match self
                     .owner
-                    .debug(DebugCall::Target {
+                    .debug(DebugCall::Capability {
                         credential,
                         target,
-                        code: Some(program),
+                        capability: "workbench.debug".into(),
+                        params,
                         timeout_seconds,
-                        eval: true,
                     })
                     .await
                 {
@@ -855,6 +859,15 @@ mod tests {
         #[cfg(feature = "ferrous-framework-native")]
         fn debug(&self, call: DebugCall) -> OwnerFuture<'_> {
             let value = match call {
+                DebugCall::Capability {
+                    credential,
+                    target,
+                    capability,
+                    params,
+                    timeout_seconds,
+                } => {
+                    json!({"credential":credential,"target":target,"capability":capability,"params":params,"timeout":timeout_seconds})
+                }
                 DebugCall::Workers { credential } => json!({"credential":credential}),
                 DebugCall::Target {
                     credential,
@@ -1040,7 +1053,7 @@ mod tests {
         let mut tools = NativeAppTools::new(owner.clone()).unwrap();
         let file = tempfile::NamedTempFile::new().unwrap();
         tools.console_path = file.path().to_owned();
-        let target = json!({"credential":"explicit","app_id":"code_te2","shell_id":"parent","instance_id":"generation"});
+        let target = json!({"credential":"explicit","app_id":"sample_editor","shell_id":"parent","instance_id":"generation"});
         let mut eval = target.clone();
         eval["code"] = json!("1");
         let mut wba_eval = eval.clone();
@@ -1240,7 +1253,7 @@ mod tests {
         let owner = FakeOwner::default();
         let tools = NativeAppTools::new(owner.clone()).unwrap();
         let code = "'\\\"\n\\u0000; globalThis.result = 'é'";
-        let input = json!({"credential":"explicit","app_id":"code_te2","shell_id":"parent","instance_id":"generation","wba_shell_id":"child","wba_instance_id":"child-generation","code":code});
+        let input = json!({"credential":"explicit","app_id":"sample_editor","shell_id":"parent","instance_id":"generation","wba_shell_id":"child","wba_instance_id":"child-generation","code":code});
         let data = tools
             .dispatch("te2_wba_eval", input.clone())
             .await
@@ -1249,24 +1262,18 @@ mod tests {
             .unwrap();
         assert_eq!(
             data["data"]["target"],
-            json!({"appId":"code_te2","shellId":"parent","instanceId":"generation"})
+            json!({"appId":"sample_editor","shellId":"parent","instanceId":"generation"})
         );
-        let program = data["data"]["code"].as_str().unwrap();
-        let literal = program
-            .split(".json.decode(")
-            .nth(1)
-            .unwrap()
-            .strip_suffix("))")
-            .unwrap();
-        let encoded: String = serde_json::from_str(literal).unwrap();
-        let params: Value = serde_json::from_str(&encoded).unwrap();
+        assert!(data["data"].get("code").is_none());
+        assert_eq!(data["data"]["capability"], "workbench.debug");
+        let params = &data["data"]["params"];
         assert_eq!(
             params,
-            json!({"operation":"eval","shell_id":"child","instance_id":"child-generation","code":code,"timeout_seconds":20})
+            &json!({"operation":"eval","shell_id":"child","instance_id":"child-generation","code":code,"timeout_seconds":20})
         );
         assert_eq!(owner.calls.lock().unwrap().len(), 1);
         for (field, value) in [
-            ("app_id", json!("other")),
+            ("app_id", json!("")),
             ("wba_instance_id", json!("")),
             ("timeout_seconds", json!(31)),
             ("code", json!("é".repeat(16385))),
@@ -1276,7 +1283,7 @@ mod tests {
             assert!(tools.dispatch("te2_wba_eval", invalid).await.is_err());
         }
         assert_eq!(owner.calls.lock().unwrap().len(), 1);
-        let status = tools.dispatch("te2_wba_status",json!({"credential":"explicit","app_id":"code_te2","shell_id":"parent","instance_id":"generation"})).await.unwrap();
+        let status = tools.dispatch("te2_wba_status",json!({"credential":"explicit","app_id":"sample_editor","shell_id":"parent","instance_id":"generation"})).await.unwrap();
         assert!(status.structured_content.is_some());
         assert_eq!(owner.calls.lock().unwrap().len(), 2);
     }

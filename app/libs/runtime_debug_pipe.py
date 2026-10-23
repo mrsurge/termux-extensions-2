@@ -25,12 +25,14 @@ class RuntimeDebugPipe:
         self, *, enabled: bool, identity: PipeIdentity, reply: ReplyWriter,
         handler: DebugHandler | None = None,
         backend: ModuleType | None = None,
+        operations: dict[str, DebugHandler] | None = None,
     ) -> None:
         self._enabled = enabled
         self._identity = identity
         self._reply = reply
         self._handler = handler or self._status
         self._backend = backend
+        self._operations = dict(operations or {})
         self._lock = threading.RLock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._closed = False
@@ -97,7 +99,8 @@ class RuntimeDebugPipe:
                 return
             pending = self._pending
         try:
-            result = await self._handler(request)
+            handler = self._operations.get(request.method or "", self._handler)
+            result = await handler(request)
             response = result if isinstance(result, PipeEnvelope) else success_response(request, self._identity, result)
         except asyncio.CancelledError:
             raise

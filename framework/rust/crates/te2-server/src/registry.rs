@@ -63,6 +63,9 @@ pub struct AppRegistry {
 }
 
 impl AppRegistry {
+    pub(crate) fn apps_mut(&mut self) -> &mut [AppDefinition] {
+        &mut self.apps
+    }
     pub fn load(roots: &[AppRoot]) -> Self {
         let mut apps_by_id: HashMap<String, usize> = HashMap::new();
         let mut apps_by_dir: HashMap<String, usize> = HashMap::new();
@@ -801,21 +804,21 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         write_app(
             temp.path(),
-            "code_te2",
-            json!({ "id": "code_te2", "name": "Code TE2", "id_aliases": ["file_editor_cm6"] }),
+            "sample_editor",
+            json!({ "id": "sample_editor", "name": "Sample Editor", "id_aliases": ["legacy_editor"] }),
         );
         let registry = load(temp.path());
 
         assert_eq!(
-            registry.canonical_app_id("file_editor_cm6"),
-            Some("code_te2")
+            registry.canonical_app_id("legacy_editor"),
+            Some("sample_editor")
         );
         assert_eq!(
-            registry.get_app("file_editor_cm6").unwrap().app_id,
-            "code_te2"
+            registry.get_app("legacy_editor").unwrap().app_id,
+            "sample_editor"
         );
         assert_eq!(registry.list_payloads().len(), 1);
-        assert_eq!(registry.list_payloads()[0]["id"], "code_te2");
+        assert_eq!(registry.list_payloads()[0]["id"], "sample_editor");
     }
 
     #[test]
@@ -858,14 +861,14 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         write_app(
             temp.path(),
-            "code_te2",
-            json!({ "id": "file_editor_cm6", "name": "Code TE2" }),
+            "sample_editor",
+            json!({ "id": "legacy_editor", "name": "Sample Editor" }),
         );
         let registry = load(temp.path());
 
         let resolved = registry
-            .resolve_asset_path_by_dir("file_editor_cm6", "asset.txt")
+            .resolve_asset_path_by_dir("legacy_editor", "asset.txt")
             .expect("public id should resolve moved source directory");
-        assert_eq!(fs::read_to_string(resolved).unwrap(), "code_te2");
+        assert_eq!(fs::read_to_string(resolved).unwrap(), "sample_editor");
     }
 }

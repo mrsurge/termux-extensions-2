@@ -193,6 +193,10 @@ fn socket_event(socket: &SocketRef, event: &str, data: Value) -> Value {
 }
 
 fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &'static str) {
+    enum Payload {
+        Graph(Value),
+        Rpc(rpc_codec::ValidatedRpc),
+    }
     let middleware_backend = backend.clone();
     let middleware_sockets = sockets.clone();
     let connect = move |socket: SocketRef| {
@@ -209,8 +213,8 @@ fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &
                 async move {
                     let lane = rpc_codec::lane(namespace).filter(|_| event == "rpc");
                     let data = match (data, lane) {
-                        (Ok(data), Some(lane)) => match rpc_codec::decode_for(data, lane, gzip) {
-                            Ok(data) => Ok(data),
+                        (Ok(data), Some(lane)) => match rpc_codec::validate_for(data, lane, gzip) {
+                            Ok(data) => Ok(Payload::Rpc(data)),
                             Err(message) => {
                                 let error = rpc_codec::encode_for(
                                     &rpc_codec::parse_error(message),
@@ -226,12 +230,22 @@ fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &
                                 return;
                             }
                         },
-                        (data, _) => data.map_err(|e| e.to_string()),
+                        (data, _) => data.map(Payload::Graph).map_err(|e| e.to_string()),
                     };
                     let result = match data {
-                        Ok(data) => {
+                        Ok(Payload::Graph(data)) => {
                             backend
                                 .call(socket_event(&socket, &event, data), false)
+                                .await
+                        }
+                        Ok(Payload::Rpc(frame)) => {
+                            backend
+                                .rpc(
+                                    namespace.to_owned(),
+                                    socket.id.to_string(),
+                                    event.clone(),
+                                    frame,
+                                )
                                 .await
                         }
                         Err(error) => Err(anyhow::anyhow!(error.to_string())),

@@ -201,7 +201,7 @@ mod tests {
             id: Some("req-1".to_owned()),
             method: Some(method.to_owned()),
             origin_nid: 1100,
-            origin_name: "code_te2.explorer".to_owned(),
+            origin_name: "sample_editor.explorer".to_owned(),
             target_nid: Some(2100),
             target_name: Some("service.fs".to_owned()),
             project_generation: Some(7),
@@ -1007,7 +1007,7 @@ mod tests {
         assert_eq!(result_frame.target_nid, Some(1100));
         assert_eq!(
             result_frame.target_name.as_deref(),
-            Some("code_te2.explorer")
+            Some("sample_editor.explorer")
         );
         let result_params = result_frame.params.expect("result params");
         assert_eq!(
@@ -1658,7 +1658,10 @@ mod tests {
         assert_eq!(terminal.kind, PipeMessageKind::Notification);
         assert_eq!(terminal.method.as_deref(), Some("git.job.progress"));
         assert_eq!(terminal.target_nid, Some(1100));
-        assert_eq!(terminal.target_name.as_deref(), Some("code_te2.explorer"));
+        assert_eq!(
+            terminal.target_name.as_deref(),
+            Some("sample_editor.explorer")
+        );
         let params = terminal.params.expect("progress params");
         assert_eq!(
             params.get("dto").and_then(|value| value.as_str()),
@@ -1689,7 +1692,7 @@ mod tests {
             targeted_request(
                 "runTarget.route.register",
                 json!({
-                    "ownerId": "runner-profile:code_te2:project:web",
+                    "ownerId": "runner-profile:sample_editor:project:web",
                     "shellId": "shell-4173",
                     "port": 4173,
                     "originalUrl": "http://127.0.0.1:4173/"
@@ -1724,7 +1727,7 @@ mod tests {
             targeted_request(
                 "runTarget.routes.register",
                 json!({
-                    "ownerId": "runner-profile:code_te2:project:web",
+                    "ownerId": "runner-profile:sample_editor:project:web",
                     "shellId": "shell-4173",
                     "primaryPort": 4173,
                     "primaryUrl": "http://127.0.0.1:4173/preview",
@@ -1766,7 +1769,7 @@ mod tests {
         );
         assert_eq!(
             route_set.get("ownerId").and_then(|value| value.as_str()),
-            Some("runner-profile:code_te2:project:web")
+            Some("runner-profile:sample_editor:project:web")
         );
         assert_eq!(
             route_set.get("shellId").and_then(|value| value.as_str()),
@@ -1799,7 +1802,7 @@ mod tests {
             targeted_request(
                 "runTarget.route.release",
                 json!({
-                    "ownerId": "runner-profile:code_te2:project:web",
+                    "ownerId": "runner-profile:sample_editor:project:web",
                     "shellId": "shell-4173"
                 }),
                 &root,

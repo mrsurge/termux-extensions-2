@@ -150,6 +150,48 @@ pub(crate) async fn native_dispatch(
     }
 }
 
+#[cfg(feature = "native-mcp")]
+pub(crate) async fn native_operation(
+    state: &crate::AppState,
+    credential: &str,
+    target: DebugTarget,
+    capability: &str,
+    params: serde_json::Value,
+    timeout_seconds: u64,
+) -> serde_json::Value {
+    if let Err(failure) = check_credential(TOKEN.get().map(|token| token.as_ref()), credential) {
+        return failure.data();
+    }
+    let result = async {
+        anyhow::ensure!(
+            (1..=30).contains(&timeout_seconds),
+            "runtimeDebug.invalidTimeout"
+        );
+        let registry = state.app_registry_snapshot();
+        let app = registry
+            .get_app(&target.app_id)
+            .filter(|app| app.enabled && app.app_id == target.app_id)
+            .ok_or_else(|| anyhow::anyhow!("appCapability.targetUnavailable"))?;
+        let policy = crate::app_policy::AppPolicy::read(app)?;
+        let method = policy
+            .capabilities
+            .get(capability)
+            .ok_or_else(|| anyhow::anyhow!("appCapability.notDeclared"))?;
+        crate::runtime_debug_pipe::operation(
+            &target,
+            method,
+            params,
+            Duration::from_secs(timeout_seconds),
+        )
+        .await
+    }
+    .await;
+    match result {
+        Ok(frame) => json!({"ok":frame.error.is_none(), "data":frame.result, "error":frame.error}),
+        Err(error) => json!({"ok":false, "error":{"code":error.to_string()}}),
+    }
+}
+
 async fn authorize(
     State(token): State<Option<Arc<str>>>,
     request: Request,

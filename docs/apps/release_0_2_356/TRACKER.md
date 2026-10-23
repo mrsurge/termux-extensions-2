@@ -1,6 +1,6 @@
 # 0.2.356 maintenance tracker
 
-## App-agnostic framework / manifest refresh — Stage A1
+## App-agnostic framework / manifest refresh
 
 - [x] User clarifies Refresh means reread manifests and remap app entrypoints/
   routes, especially second-root apps—not indiscriminate worker restarts.
@@ -19,10 +19,11 @@
   worker/framework restart, APK publication, version bump or commit in this audit.
 - [x] Resolve/approve the concrete cross-language generic selection contract;
   reuse existing fingerprint/receipt logic rather than duplicate it in Rust.
-- [ ] Implement individually approved slices with neutral second-root/native
+- [x] Implement individually approved slices with neutral second-root/native
   fixtures, failure rollback, active-owner survival and permission parity.
-- [ ] Obtain separate shared-runtime/client activation approval after isolated
-  acceptance. Previous Refresh approval does not cover the broader migration.
+- [x] User reports live acceptance of pipe actions, intents and Embedded App
+  Presentation State after source work. This records user-run validation, not an
+  agent-observed deployment/profiling claim or permission for another restart.
 
 This design gate precedes the deferred network RPC slice. Existing uncommitted
 PyO3 work and user's shellspec/report/untracked files remain preserved.
@@ -50,9 +51,9 @@ PyO3 work and user's shellspec/report/untracked files remain preserved.
   bootstrap-only strict check reports six pre-existing issues in CLI shutdown/
   subprocess handling and a redundant manifest cast, not a clean-bootstrap claim.
 - [x] Select and implement the Rust-facing read-only owner/receipt exchange (A2).
-- [ ] Implement separately approved B atomic registry/routes/future-launch-context
-  refresh. A1/A2 do not
-  refresh running frameworks, workers, routes or inherited worker selections.
+- [x] Implement separately approved B atomic registry/routes/future-launch-context
+  refresh in source. Runtime adoption remains separately gated; A1/A2/B source
+  changes do not update the currently running framework.
 
 Existing setuptools wheel deprecation warning remains visible. Native builds,
 activation, live refresh and client publication were not performed.
@@ -83,9 +84,107 @@ activation, live refresh and client publication were not performed.
   Full Code TE2 strongest audit: 248 source files pass. Existing no-feature Rust
   dead-code/unused warnings remain visible; no production artifact was published.
 
-Stage B still owns atomic registry/routes/launch selection publication and
-concurrent reload/start/active-owner survival tests. The A2 generation is a
-selection projection digest, not a filesystem transaction or catalog commit.
+Stage B below implements atomic registry/routes/launch selection publication and
+isolated concurrency/owner-survival tests. The A2 generation remains a selection
+projection digest, not a filesystem transaction or catalog commit.
+
+### Checkpoint and Stage B — 2026-10-22
+
+- [x] User requests checkpoint: 6eb74ed6 commits completed ingress and A1/A2
+  source/docs/tests. No version bump or push. User shellspec overrides and
+  untracked reports remain excluded/preserved. B changes are subsequent work.
+- [x] User emphasizes that app initialization and intent policy belong to the
+  replaceable manifest configuration, not framework app-name branches; approves
+  concrete Stage B implementation and isolated tests, not runtime activation.
+- [x] AppCatalog groups registry/entrypoints/raw intent policy, referenced socket
+  JSON and shellspec YAML, native declaration proofs and native selection under
+  one immutable Arc generation. Configuration reads are bounded (1 MiB/file,
+  4,096 files/16 MiB inventory); genuine I/O failures reject refresh.
+- [x] Existing HTTP and native MCP reload now share candidate construction,
+  declaration/proof rechecks and one catalog publication. Concurrent refresh is
+  rejected; a launch read permit stays inside its blocking task even if the
+  caller cancels. Startup retains broken-app catalog visibility but cannot
+  install unsafe socket mounts through a lenient fallback.
+- [x] Dynamic HTTP/upgrade dispatch uses the captured route rather than fixed
+  startup Axum mounts. Canonical/declared-alias app prefixes and legacy *_ws
+  aliases are guarded; protected framework/proxy surfaces, encoded/dot paths,
+  collisions and cross-owner overlaps reject the candidate.
+- [x] Launch uses the captured shellspec and current native selection; prepared
+  native values remain defaults, preserving explicit shellspec/app overrides and
+  existing framework-forced launch identity. No global environment mutation,
+  source build or old-executable fallback on missing preparation.
+- [x] Refresh no longer replaces running-app ownership from a discovery scan.
+  Return/event summary adds generation, added/changed/removed, restart_required
+  and native_status while retaining count. No workers are stopped/restarted.
+- [x] Real isolated HTTP + upgraded WebSocket test covers add/change/remove,
+  removed alias reachability, old connection/owner survival and invalid-candidate
+  rollback. Further tests cover source/reference mutation, second roots, intent
+  policy changes/errors, source bundled-app compatibility, protected routes,
+  launch environment precedence and actual overlapping refresh admission.
+- [x] Final full Rust suites: default features 248 pass / 5 opt-in ignored;
+  no-default-features 204 pass / 5 ignored. Python owner/bootstrap/private-runtime/
+  identity/sidecar group remains 102 passing tests. No new Any/type suppressions.
+  Candidate scan and final recheck own their admission guards across blocking
+  work, so HTTP cancellation cannot permit overlapping unfinished scans/spawns.
+Activation contract: A1/A2 bootstrap/bridge and B server are adopted together;
+B alone needs no Android/OTA/client source change or new mypyc rebuild. The
+later user-reported App IPC acceptance is recorded below, not a new validation
+phase. No agent-triggered shared-runtime transition occurred during source edits.
+
+Test nuance: placing TMPDIR inside this Git checkout makes three existing
+non-repository fixtures discover the parent TE2 .git. User explicitly approves
+/home/mrsurge/knowhere/.te2-catalog-tests for isolated full-suite TMPDIR; no Git
+production behavior or unrelated test source was changed to hide those failures.
+Existing opt-in test skips stay visible. B alone did not remove app-specific
+policy; the separately approved Stage C source migration is recorded below.
+
+### Stage C — 2026-10-22
+
+- [x] User approves framework/app policy changes and isolated tests; explicitly
+  chooses to defer shared-runtime validation until after this source work.
+- [x] Add bounded fail-closed AppPolicy and manifest declarations for intent
+  callers, unique shortcut provider, exact CORS, explicit alias-state migration
+  and exact-parent workbench diagnostics. Catalog validates before publication.
+- [x] Replace generated Python WBA relay code with a structured authenticated
+  exact-target pipe operation and app-owned handler. Public MCP interface stays
+  compatible; no arbitrary app Python import remains in framework source.
+- [x] Reuse bundle-manifest version owner from the Rust service-worker handler,
+  without modifying frontend assets or generating/publicizing new bundles.
+- [x] Production app-ID audit: remaining built-in names outside frontend assets
+  are test fixtures; filesystem pipe origin_name was also confirmed test-only.
+- [x] Final Rust suites: 252 pass default features; 207 pass without default
+  features; five existing opt-in tests ignored in each. Existing no-feature
+  unused/dead-code warnings remain visible. Python group: 126 pass (existing
+  setuptools bdist_wheel deprecation warning). Stronger strict/extra/all-Any
+  Code TE2 check: 248 source files pass. Targeted rustfmt and diff checks pass.
+  New tests cover receiver permission rejection, provider absence/ambiguity,
+  invalid declarations/foreign migration aliases, exact CORS path/origin matching,
+  data-only WBA relay, disabled diagnostics and off-loop correlated replies.
+- [x] Stage D neutral-fixture/source-policy guardrails implemented with explicit
+  user approval, including retired editor alias removal from framework fixtures.
+  Launcher now owns a neutral fixture, not a real app shellspec dependency.
+  Manifest-derived Rust-source guard passes (two Python tests); no runtime module
+  or test block excluded. User-specified identity grep returns zero hits.
+- [x] Stage D full Rust suites after neutral fixture replacement: default 252
+  passed; no-default 207 passed; five opt-in ignored in each. Nine focused Python
+  source-guard/structured-debug tests pass. Existing no-default warnings remain.
+  Removed the newly unused test-only shellspec reader; real app bootstrap and
+  shellspec contract coverage remains outside framework crates in Python tests.
+- [x] User reports all pipe actions, intents and app presentation-state behavior
+  working and considers validation complete. No extra validation phase is queued.
+  The agent did not perform a runtime transition during source/docs edits.
+  Deployment contract remains matched framework/bridge preparation plus Code TE2
+  domain/mypyc adoption when selected; acceptance is not automatic publication.
+
+### Reference consolidation — 2026-10-22
+
+- [x] User approves documentation-only CODE_TE2.md update: declarative app IPC/
+  catalog refresh/native selection, Embedded App Presentation State terminology,
+  original-byte ingress and structured WBA diagnostics. Correct related obsolete
+  central-native-registry, mandatory-scratch-domain, FastAPI fallback and dependency
+  descriptions; retain stable numbered sections and app-owned compatibility data.
+- [x] Finish targeted source-path/reference, stable section-number and diff checks.
+  Documentation-only: no build, runtime transition, publication or version change.
 
 ## Mypyc live target progress
 
@@ -157,11 +256,12 @@ selection projection digest, not a filesystem transaction or catalog commit.
 ## Current work order
 
 1. Startup/HTTP initialization: user live accepted 2026-10-20, complete.
-2. Framework-pipe/Sidebar intents (O1): source checkpointed; grouped live gates remain.
-   Code TE2's Any source audit is complete; native/mypyc build gates remain.
-3. O2 next: eliminate avoidable Python/Rust graph conversions and allocations;
-   first source slice skips telemetry-only WBA push re-encoding when metrics are
-   off (activation pending), then qualify boundary alternatives before queue changes.
+2. Framework-pipe intents and Embedded App Presentation State (O1): user reports
+   working; Any cleanup and app-agnostic refresh follow-up are source-complete.
+3. O2 current: network RPC original-byte handoff is source-implemented after the
+   framework/WBA inbound slices. Finish isolated qualification, then separately
+   prepare matching worker/domain adoption. Targeted native-type review follows;
+   queue/concurrency changes are not silently included.
 4. Native debug/internal console-bridge retirement: deferred behind both.
 5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
 
@@ -240,9 +340,25 @@ Validation belongs within each work phase, never a replacement for actual work.
   WBA slice, with explicit lifecycle approval and live diagnostics/backend-RPC
   validation. Prior framework-pipe acceptance does not accept this later change.
   No frontend/OTA/Node/WBA source publication needed; no activation performed.
-- [ ] Develop/approve the distinct network MessagePack RPC handoff using original
+- [x] Develop/approve the distinct network MessagePack RPC handoff using original
   validated payload bytes plus native socket context; retain current handlers,
-  admission, ACK/error/cancel and direct-proxy behavior. Audit only so far.
+  admission, ACK/error/cancel and direct-proxy behavior. Source now implemented;
+  detailed scope and parity boundaries are in INGRESS_AUDIT.md.
+- [x] Preserve native parse/framing guards, original bytes, separate SocketRef
+  identity and prior wrapper conversion budget. Reuse existing Future/admission
+  code, with no uncertain replay or frontend/wire/outbound migration.
+- [x] Real source and three-module mypyc submit/Future/namespace parity passes;
+  real-PyO3 probe passes 24 cases in each mode and reports actual .py/.so modules.
+  This is isolated synthetic dispatch, not live socket/profiling acceptance.
+- [x] Final native full-worker tests: 49 pass, including wrapper depth/node
+  budget parity and original-frame/codec guard regressions. Source/three-module
+  mypyc parity tests: 2 pass; existing editor/UI RPC and inbound-router group:
+  18 pass. Strongest strict/extra/all-Any Code TE2 check: 249 source files pass.
+  Probe/test helpers pass strict mypy; targeted formatting/diff checks pass.
+- [x] User reports everything working after testing the new network slice and
+  requests commit/push. Record user-run live acceptance, not independently
+  measured throughput or agent-observed artifact provenance. No frontend/OTA/
+  framework build is required by this slice; the agent performed no transition.
 - [x] Record user-requested mypyc-native-type pass immediately after PyO3
   optimization: hot reusable records, numeric loops and repeated dictionary
   accesses with clear benefits, not eliminating all PyObjects.
@@ -642,6 +758,22 @@ User authorizes checkpoint/push of accepted startup/DevTools work and planning/
 release receipts. Preserve research_handoff.md and ty.toml unstaged. WBA remains
 unchanged/deferred. Next: deepen the Sidebar/pipeline contract audit and propose
 bounded implementation; no migration implementation or shared restart yet.
+
+## Deferred — standalone Terminal headless projection
+
+- [x] Record user report: standalone Terminal is comparatively janky; consider
+  misconfiguration/restoration before replacing its headless implementation.
+- [x] Confirm source ownership: standalone uses xterm-headless/SerializeAddon;
+  File Explorer owns a separate Node PTY worker and uses shared neutral Pyte
+  checkpoint projection. Browser xterm.js is a separate component and stays.
+- [ ] On separate approval, reproduce bounded output/resize/reload/reconnect
+  sequences and audit headless configuration, serialized modes/cursor/colors and
+  restore ordering. Identify a minimal fix if possible.
+- [ ] If unresolved, qualify shared Pyte as the standalone headless projection,
+  retaining app-owned shell/session/transport and direct live-output semantics;
+  no cross-app backend reuse. Compare fidelity, resource cost and restore parity.
+- [ ] Approve the selected bounded repair/replacement and its tests/live checks
+  before implementation. Planning only; no runtime/source changes in this slice.
 
 ## Deferred — ALS renderer-owned Markdown file actions
 

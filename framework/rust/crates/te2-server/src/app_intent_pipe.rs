@@ -35,6 +35,7 @@ impl Route {
     #[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
     async fn admin_shortcut(
         self: &Arc<Self>,
+        method: &str,
         params: Value,
         wait: Duration,
     ) -> anyhow::Result<Value> {
@@ -56,7 +57,7 @@ impl Route {
         };
         let request: PipeEnvelope = serde_json::from_value(
             json!({"jsonrpc":"2.0","protocolVersion":1,"kind":"request",
-            "id":id,"correlationId":id,"opId":id,"method":"app.mcp.sidebarShortcut.add","originNid":1,"originName":"framework.rust","params":params}),
+            "id":id,"correlationId":id,"opId":id,"method":method,"originNid":1,"originName":"framework.rust","params":params}),
         )?;
         self.sink.send(request)?;
         let reply = tokio::time::timeout(wait, receiver)
@@ -408,6 +409,64 @@ fn rpc_export_allowed(
         .validate()
 }
 
+pub(crate) fn validate_manifest_exports(manifest: &Map<String, Value>) -> anyhow::Result<()> {
+    let Some(services) = manifest.get("ipc").and_then(|v| v.get("services")) else {
+        return Ok(());
+    };
+    let exports = services
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("appRpc.invalidExports"))?;
+    anyhow::ensure!(exports.len() <= 64, "appRpc.invalidExports");
+    for (service, value) in exports {
+        let export: AppRpcExport = serde_json::from_value(value.clone())?;
+        anyhow::ensure!(
+            export
+                .limits
+                .keys()
+                .all(|method| export.methods.contains(method)),
+            "appRpc.invalidLimits"
+        );
+        // Exercise the actual admission/limit validator for every declared
+        // method. Empty caller/method lists grant nothing, but still validate
+        // their schema and limits by using a private synthetic copy.
+        let mut probe = manifest.clone();
+        let mut item = value
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("appRpc.invalidExports"))?
+            .clone();
+        let callers = if export.callers.is_empty() {
+            vec!["catalog-validation".to_owned()]
+        } else {
+            export.callers.clone()
+        };
+        let methods = if export.methods.is_empty() {
+            vec!["catalog-validation".to_owned()]
+        } else {
+            export.methods.clone()
+        };
+        item.insert("callers".into(), json!(callers));
+        item.insert("methods".into(), json!(methods));
+        let mut selected = Map::new();
+        selected.insert(service.clone(), Value::Object(item));
+        probe.insert("ipc".into(), json!({"services": selected}));
+        for method in &methods {
+            rpc_export_allowed(
+                &probe,
+                &callers[0],
+                &AppRpcRequest {
+                    target_app: String::new(),
+                    service: service.clone(),
+                    version: export.version,
+                    method: method.clone(),
+                    context: Value::Null,
+                    payload: Value::Null,
+                },
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn rpc_route_available(route: Option<&Route>, running_shell: Option<&str>) -> anyhow::Result<bool> {
     match (route, running_shell) {
         (None, None) => Ok(false),
@@ -517,20 +576,6 @@ async fn dispatch_rpc(
     }
 }
 
-fn allowed(source: &str, target: &str, intent: &str) -> bool {
-    target == "code_te2"
-        && match intent {
-            "sidebar.openApp" | "terminal.createSession" => matches!(
-                source,
-                "code_te2" | "file_explorer" | "file_editor" | "terminal"
-            ),
-            "project.openDirectory" | "document.open" => {
-                matches!(source, "file_explorer" | "file_editor")
-            }
-            _ => false,
-        }
-}
-
 fn resolve(instance: &str, app: &str) -> anyhow::Result<Arc<Route>> {
     ROUTES
         .get_or_init(Default::default)
@@ -556,10 +601,16 @@ pub(crate) async fn add_mcp_shortcut(
         serde_json::to_vec(&params)?.len() <= MAX_PARAMS,
         "appIntent.payloadTooLarge"
     );
-    let target = resolve(state.instance_id(), "code_te2")?;
-    let current = state.running_app_for_id("code_te2");
+    let registry = state.app_registry_snapshot();
+    let (app_id, method) = crate::app_policy::provider(&registry, "sidebarShortcut.add")?;
+    anyhow::ensure!(
+        method.starts_with("app.mcp."),
+        "appCapability.invalidOperation"
+    );
+    let target = resolve(state.instance_id(), &app_id)?;
+    let current = state.running_app_exact(&app_id);
     validate_current(&target, current.as_ref().map(|app| app.shell_id.as_str()))?;
-    target.admin_shortcut(params, WAIT).await
+    target.admin_shortcut(&method, params, WAIT).await
 }
 
 /// None means an existing framework service owns this method.
@@ -603,9 +654,17 @@ pub(crate) async fn dispatch(
         }
         let body: IntentRequest = serde_json::from_value(params)?;
         anyhow::ensure!(body.context.is_object(), "appIntent.contextRequired");
-        if !allowed(&source.app, &body.target_app, &body.intent) {
+        let registry = state.app_registry_snapshot();
+        let app = registry
+            .get_app(&body.target_app)
+            .ok_or_else(|| anyhow::anyhow!("appIntent.targetUnavailable"))?;
+        if !crate::app_policy::AppPolicy::read(app)?.permits(&source.app, &body.intent) {
             anyhow::bail!("appIntent.notAllowed");
         }
+        let body = IntentRequest {
+            target_app: app.app_id.clone(),
+            ..body
+        };
         let target = resolve(&source.instance, &body.target_app)?;
         let current = state.running_app_for_id(&target.app);
         validate_current(&target, current.as_ref().map(|app| app.shell_id.as_str()))?;
@@ -664,7 +723,7 @@ mod tests {
     }
     fn body() -> IntentRequest {
         IntentRequest {
-            target_app: "code_te2".into(),
+            target_app: "sample_editor".into(),
             intent: "document.open".into(),
             context: json!({"clientInstanceId":"client"}),
             payload: json!({"path":"/project/file"}),
@@ -674,12 +733,16 @@ mod tests {
     #[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
     #[tokio::test]
     async fn administrative_shortcut_uses_exact_pipe_correlation_and_no_retry() {
-        let (target, mut rx) = fixture("code_te2");
+        let (target, mut rx) = fixture("sample_editor");
         assert!(validate_current(&target, Some("stale-shell")).is_err());
         let t = target.clone();
         let task = tokio::spawn(async move {
-            t.admin_shortcut(json!({"shortcut":{"app_id":"fixture"}}), WAIT)
-                .await
+            t.admin_shortcut(
+                "app.mcp.sidebarShortcut.add",
+                json!({"shortcut":{"app_id":"fixture"}}),
+                WAIT,
+            )
+            .await
         });
         let request = rx.recv().await.unwrap();
         assert_eq!(
@@ -694,7 +757,7 @@ mod tests {
             &request,
             &PipeIdentity {
                 nid: 9,
-                name: "app:code_te2".into(),
+                name: "app:sample_editor".into(),
             },
             json!({"ok":true}),
         );
@@ -702,26 +765,31 @@ mod tests {
         assert_eq!(task.await.unwrap().unwrap(), json!({"ok":true}));
         assert!(rx.try_recv().is_err());
         target.close();
-        assert!(target.admin_shortcut(json!({}), WAIT).await.is_err());
+        assert!(
+            target
+                .admin_shortcut("app.mcp.sidebarShortcut.add", json!({}), WAIT)
+                .await
+                .is_err()
+        );
     }
     #[tokio::test]
     async fn owned_identity_and_correlated_reply() {
-        let (source, _) = fixture("file_explorer");
-        let (target, mut rx) = fixture("code_te2");
+        let (source, _) = fixture("sample_browser");
+        let (target, mut rx) = fixture("sample_editor");
         let t = target.clone();
         let task = tokio::spawn(async move { t.deliver(&source, &request(), body(), WAIT).await });
         let forwarded = rx.recv().await.unwrap();
         assert_eq!(forwarded.origin_name, "framework.rust");
         assert_eq!(
             forwarded.params.as_ref().unwrap()["source"]["appId"],
-            "file_explorer"
+            "sample_browser"
         );
         assert_ne!(forwarded.id.as_deref(), Some("caller-id"));
         let reply = PipeEnvelope::success_response(
             &forwarded,
             &PipeIdentity {
                 nid: 9,
-                name: "code_te2".into(),
+                name: "sample_editor".into(),
             },
             json!({"ok":true}),
         );
@@ -738,8 +806,8 @@ mod tests {
     }
     #[tokio::test]
     async fn timeout_and_late_reply_cleanup() {
-        let (source, _) = fixture("file_explorer");
-        let (target, mut rx) = fixture("code_te2");
+        let (source, _) = fixture("sample_browser");
+        let (target, mut rx) = fixture("sample_editor");
         assert!(
             target
                 .deliver(&source, &request(), body(), Duration::from_millis(1))
@@ -759,8 +827,8 @@ mod tests {
     }
     #[tokio::test]
     async fn source_disconnect_clears_target_waiter() {
-        let (source, _) = fixture("file_explorer");
-        let (target, mut rx) = fixture("code_te2");
+        let (source, _) = fixture("sample_browser");
+        let (target, mut rx) = fixture("sample_editor");
         let s = source.clone();
         let t = target.clone();
         let task = tokio::spawn(async move { t.deliver(&s, &request(), body(), WAIT).await });
@@ -777,8 +845,8 @@ mod tests {
     }
     #[tokio::test]
     async fn target_disconnect_and_enqueue_failure_cleanup() {
-        let (source, _) = fixture("file_explorer");
-        let (target, mut rx) = fixture("code_te2");
+        let (source, _) = fixture("sample_browser");
+        let (target, mut rx) = fixture("sample_editor");
         let s = source.clone();
         let t = target.clone();
         let task = tokio::spawn(async move { t.deliver(&s, &request(), body(), WAIT).await });
@@ -786,7 +854,7 @@ mod tests {
         target.close();
         assert!(task.await.unwrap().is_err());
         assert!(target.pending.lock().unwrap().is_empty());
-        let (target, rx) = fixture("code_te2");
+        let (target, rx) = fixture("sample_editor");
         drop(rx);
         assert!(
             target
@@ -798,10 +866,10 @@ mod tests {
     }
     #[test]
     fn replacement_does_not_remove_new_registration() {
-        let (source, _) = fixture("file_explorer");
+        let (source, _) = fixture("sample_browser");
         let instance = crate::new_instance_id().unwrap();
-        let old = register(&instance, "code_te2", "old", source.sink.clone());
-        let new = register(&instance, "code_te2", "new", source.sink.clone());
+        let old = register(&instance, "sample_editor", "old", source.sink.clone());
+        let new = register(&instance, "sample_editor", "new", source.sink.clone());
         assert!(*old.route.closed.borrow());
         drop(old);
         assert!(Arc::ptr_eq(
@@ -810,7 +878,7 @@ mod tests {
                 .unwrap()
                 .lock()
                 .unwrap()
-                .get(&(instance.clone(), "code_te2".into()))
+                .get(&(instance.clone(), "sample_editor".into()))
                 .unwrap(),
             &new.route
         ));
@@ -821,19 +889,20 @@ mod tests {
                 .unwrap()
                 .lock()
                 .unwrap()
-                .contains_key(&(instance, "code_te2".into()))
+                .contains_key(&(instance, "sample_editor".into()))
         );
     }
     #[test]
     fn strict_allowlist_and_no_caller_fields() {
-        assert!(allowed("file_explorer", "code_te2", "document.open"));
-        assert!(!allowed("unknown", "code_te2", "document.open"));
-        assert!(!allowed("file_explorer", "terminal", "document.open"));
-        assert!(!allowed("file_explorer", "code_te2", "runtime.debug.eval"));
-        assert!(serde_json::from_value::<IntentRequest>(json!({"targetApp":"code_te2", "intent":"document.open", "context":{}, "source":{"appId":"forged"}})).is_err());
+        let policy: crate::app_policy::AppPolicy =
+            serde_json::from_value(json!({"intents":{"document.open":["sender"]}})).unwrap();
+        assert!(policy.permits("sender", "document.open"));
+        assert!(!policy.permits("unknown", "document.open"));
+        assert!(!policy.permits("sender", "runtime.debug.eval"));
+        assert!(serde_json::from_value::<IntentRequest>(json!({"targetApp":"sample_editor", "intent":"document.open", "context":{}, "source":{"appId":"forged"}})).is_err());
         assert!(
             serde_json::from_value::<OpenRequest>(
-                json!({"appId":"terminal", "callerApp":"forged"})
+                json!({"appId":"other-app", "callerApp":"forged"})
             )
             .is_err()
         );
@@ -842,28 +911,28 @@ mod tests {
     #[test]
     fn generic_service_exports_are_explicit_and_versioned() {
         let manifest = json!({"ipc":{"services":{"sidebar":{
-            "version":1,"callers":["file_explorer"],"methods":["cwd.get"]
+            "version":1,"callers":["sample_browser"],"methods":["cwd.get"]
         }}}});
         let mut body: AppRpcRequest = serde_json::from_value(json!({
-            "targetApp":"code_te2","service":"sidebar","version":1,
+            "targetApp":"sample_editor","service":"sidebar","version":1,
             "method":"cwd.get","payload":{}
         }))
         .unwrap();
         let policy = manifest.as_object().unwrap();
-        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_ok());
-        assert!(rpc_export_allowed(policy, "terminal", &body).is_err());
+        assert!(rpc_export_allowed(policy, "sample_browser", &body).is_ok());
+        assert!(rpc_export_allowed(policy, "other-app", &body).is_err());
         body.version = 2;
-        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_err());
+        assert!(rpc_export_allowed(policy, "sample_browser", &body).is_err());
         body.version = 1;
         body.method = "window.activate".into();
-        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_err());
+        assert!(rpc_export_allowed(policy, "sample_browser", &body).is_err());
         body.method = "cwd.get".into();
         body.service = "other".into();
-        assert!(rpc_export_allowed(policy, "file_explorer", &body).is_err());
-        assert!(rpc_export_allowed(&Map::new(), "file_explorer", &body).is_err());
+        assert!(rpc_export_allowed(policy, "sample_browser", &body).is_err());
+        assert!(rpc_export_allowed(&Map::new(), "sample_browser", &body).is_err());
         assert!(
             serde_json::from_value::<AppRpcRequest>(json!({
-                "targetApp":"code_te2","service":"sidebar","version":1,
+                "targetApp":"sample_editor","service":"sidebar","version":1,
                 "method":"cwd.get","payload":{},"source":{"appId":"forged"}
             }))
             .is_err()
@@ -872,8 +941,8 @@ mod tests {
 
     #[tokio::test]
     async fn generic_service_keeps_opaque_payload_and_correlated_errors() {
-        let (source, _) = fixture("file_explorer");
-        let (target, mut rx) = fixture("code_te2");
+        let (source, _) = fixture("sample_browser");
+        let (target, mut rx) = fixture("sample_editor");
         let t = target.clone();
         let params = json!({"service":"sample","version":3,"method":"custom",
             "context":{"clientId":"client"},"payload":{"nested":[1,"text",null]},
@@ -990,7 +1059,7 @@ mod tests {
     #[test]
     fn bulk_budget_counts_full_utf8_envelope_without_truncating_models() {
         let content = "😀".repeat(MAX_PARAMS / 4);
-        let params = json!({"targetApp":"code_te2", "service":"sample", "version":1,
+        let params = json!({"targetApp":"sample_editor", "service":"sample", "version":1,
             "method":"publish", "context":null, "payload":{"content":content}});
         let encoded = serde_json::to_vec(&params).unwrap();
         assert!(encoded.len() > MAX_PARAMS);
@@ -1006,8 +1075,8 @@ mod tests {
 
     #[test]
     fn unavailable_and_noncurrent_workers_are_rejected() {
-        let (route, _) = fixture("file_explorer");
-        assert!(resolve(&crate::new_instance_id().unwrap(), "code_te2").is_err());
+        let (route, _) = fixture("sample_browser");
+        assert!(resolve(&crate::new_instance_id().unwrap(), "sample_editor").is_err());
         assert!(validate_current(&route, None).is_err());
         assert!(validate_current(&route, Some("different-shell")).is_err());
         assert!(validate_current(&route, Some(&route.shell)).is_ok());
@@ -1015,7 +1084,7 @@ mod tests {
 
     #[test]
     fn route_query_only_selects_standalone_for_complete_managed_absence() {
-        let (route, _) = fixture("als-rs");
+        let (route, _) = fixture("sample-agent");
         assert!(!rpc_route_available(None, None).unwrap());
         assert!(rpc_route_available(Some(&route), Some(&route.shell)).unwrap());
         assert!(rpc_route_available(Some(&route), None).is_err());
@@ -1027,8 +1096,8 @@ mod tests {
 
     #[tokio::test]
     async fn bounded_pending_and_cancellation_cleanup() {
-        let (source, _) = fixture("file_explorer");
-        let (target, mut rx) = fixture("code_te2");
+        let (source, _) = fixture("sample_browser");
+        let (target, mut rx) = fixture("sample_editor");
         let mut tasks = Vec::new();
         for _ in 0..MAX_PENDING {
             let s = source.clone();

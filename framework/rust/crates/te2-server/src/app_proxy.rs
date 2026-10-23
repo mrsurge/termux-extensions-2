@@ -1,9 +1,10 @@
 use axum::{
     Json, Router,
-    body::{Body, Bytes},
+    body::{Body, Bytes, to_bytes},
     extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection},
-    extract::{OriginalUri, Path, State},
+    extract::{FromRequestParts, Path, Request, State},
     http::{HeaderMap, Method, StatusCode, Uri, header},
+    middleware::Next,
     response::{IntoResponse, Response},
     routing::{any, get},
 };
@@ -20,7 +21,7 @@ use crate::{
         bridge_websocket, proxy_http_request, should_forward_request_header,
         should_forward_response_header, upstream_url,
     },
-    sio_proxy::{MatchedSioRoute, SioRouteIndex, SioTarget, join_upstream_path},
+    sio_proxy::{MatchedSioRoute, SioTarget, join_upstream_path},
 };
 
 pub(crate) fn router() -> Router<AppState> {
@@ -37,22 +38,25 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/app/{app_id}/{*subpath}", any(proxy_app_request))
 }
 
-pub(crate) fn register_sio_proxy_routes(
-    mut router: Router<AppState>,
-    routes: &SioRouteIndex,
-) -> Router<AppState> {
-    // Manifest `sio_service` declarations are concrete physical Engine.IO
-    // routes. Register base and rest forms for each public path/alias.
-    for mount in routes.mount_paths() {
-        let normalized_mount = mount.trim_end_matches('/').to_owned();
-        let slash_mount = format!("{normalized_mount}/");
-        let rest_mount = format!("{normalized_mount}/{{*rest}}");
-        router = router
-            .route(&normalized_mount, any(sio_proxy_request))
-            .route(&slash_mount, any(sio_proxy_request))
-            .route(&rest_mount, any(sio_proxy_request));
-    }
-    router
+pub(crate) async fn dynamic_sio_proxy(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let catalog = state.catalog_snapshot();
+    let Some(matched) = catalog.routes.match_path(request.uri().path()) else {
+        return next.run(request).await;
+    };
+    let (mut parts, body) = request.into_parts();
+    let uri = parts.uri.clone();
+    let headers = parts.headers.clone();
+    let method = parts.method.clone();
+    let ws = WebSocketUpgrade::from_request_parts(&mut parts, &state).await;
+    let body = match to_bytes(body, 2 * 1024 * 1024).await {
+        Ok(body) => body,
+        Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+    };
+    sio_proxy_request(ws, State(state), method, uri, headers, body, matched).await
 }
 
 async fn proxy_shell_meta(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {
@@ -296,9 +300,11 @@ async fn proxy_app_request_inner(
     let Some(canonical_app_id) = registry.canonical_app_id(&app_id) else {
         return json_error(StatusCode::NOT_FOUND, &format!("App '{app_id}' not found"));
     };
-    // Preserve the existing Code TE2 agent bridge CORS exception while keeping
-    // general app proxy behavior same-origin.
-    let cors_headers = code_te2_agent_cors_headers(canonical_app_id, &subpath, &headers);
+    let cors_headers = app_cors_headers(
+        registry.get_app(canonical_app_id).unwrap(),
+        &subpath,
+        &headers,
+    );
     if method == Method::OPTIONS && !cors_headers.is_empty() {
         return response_with_extra_headers(StatusCode::NO_CONTENT, Body::empty(), &cors_headers);
     }
@@ -382,18 +388,12 @@ async fn proxy_app_request_inner(
 async fn sio_proxy_request(
     ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
     State(state): State<AppState>,
-    OriginalUri(original_uri): OriginalUri,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
+    matched: MatchedSioRoute,
 ) -> Response {
-    let Some(matched) = state.sio_routes().match_path(original_uri.path()) else {
-        return json_error(
-            StatusCode::NOT_FOUND,
-            "Socket.IO proxy route was not found.",
-        );
-    };
     // Separate arrival at the public WBA route from the upgraded bridge task.
     // This records neither the client query/identity nor forwarded credentials.
     static WBA_TRACE_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -444,14 +444,14 @@ fn resolve_sio_upstream(state: &AppState, matched: &MatchedSioRoute) -> Option<(
     match matched.route.target {
         SioTarget::Static => Some((matched.route.host.clone(), matched.route.port?)),
         SioTarget::AppWorker => {
-            let running = state.running_app_for_id(&matched.route.app_id)?;
+            let running = state.running_app_exact(&matched.route.app_id)?;
             Some(("127.0.0.1".to_owned(), running.port))
         }
     }
 }
 
-fn code_te2_agent_cors_headers(
-    app_id: &str,
+fn app_cors_headers(
+    app: &crate::registry::AppDefinition,
     subpath: &str,
     headers: &HeaderMap,
 ) -> Vec<(&'static str, String)> {
@@ -459,18 +459,19 @@ fn code_te2_agent_cors_headers(
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
-    let allowed_origin = matches!(origin, "http://127.0.0.1:12359" | "http://localhost:12359");
-    let agent_path = subpath == "agent/cwd" || subpath.starts_with("agent/");
-    if app_id == "code_te2" && allowed_origin && agent_path {
+    let Ok(policy) = crate::app_policy::AppPolicy::read(app) else {
+        return Vec::new();
+    };
+    if let Some(rule) = policy.proxy_cors.iter().find(|rule| {
+        subpath.starts_with(&rule.path_prefix)
+            && rule.origins.iter().any(|allowed| allowed == origin)
+    }) {
         vec![
             ("access-control-allow-origin", origin.to_owned()),
             ("vary", "Origin".to_owned()),
-            (
-                "access-control-allow-methods",
-                "GET, POST, OPTIONS".to_owned(),
-            ),
-            ("access-control-allow-headers", "Content-Type".to_owned()),
-            ("access-control-max-age", "600".to_owned()),
+            ("access-control-allow-methods", rule.methods.join(", ")),
+            ("access-control-allow-headers", rule.headers.join(", ")),
+            ("access-control-max-age", rule.max_age.to_string()),
         ]
     } else {
         Vec::new()
@@ -506,4 +507,43 @@ fn json_error_with_headers(
     builder
         .body(body)
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cors_is_owned_by_manifest_not_identity_or_origin_guessing() {
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("receiver");
+        std::fs::create_dir(&app).unwrap();
+        std::fs::write(app.join("manifest.json"), serde_json::json!({"id":"receiver", "name":"Receiver",
+            "framework_integration":{"proxyCors":[{"pathPrefix":"integration/", "origins":["http://localhost:12359"],
+                "methods":["GET","POST","OPTIONS"],"headers":["Content-Type"],"maxAge":600}]}}).to_string()).unwrap();
+        let registry = crate::registry::AppRegistry::load(&[crate::registry::AppRoot {
+            source_kind: "test".into(),
+            path: root.path().into(),
+        }]);
+        let app = registry.get_app("receiver").unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ORIGIN, "http://localhost:12359".parse().unwrap());
+        let response = app_cors_headers(app, "integration/cwd", &headers);
+        assert!(response.contains(&(
+            "access-control-allow-origin",
+            "http://localhost:12359".into()
+        )));
+        assert!(response.contains(&("access-control-max-age", "600".into())));
+        assert!(app_cors_headers(app, "other/cwd", &headers).is_empty());
+        headers.insert(header::ORIGIN, "http://localhost:12360".parse().unwrap());
+        assert!(app_cors_headers(app, "integration/cwd", &headers).is_empty());
+        let mut app = app.clone();
+        app.raw_manifest.remove("framework_integration");
+        assert!(app_cors_headers(&app, "integration/cwd", &headers).is_empty());
+        app.raw_manifest.insert(
+            "framework_integration".into(),
+            serde_json::json!({"proxyCors":"invalid"}),
+        );
+        assert!(app_cors_headers(&app, "integration/cwd", &headers).is_empty());
+    }
 }

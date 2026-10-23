@@ -5,6 +5,27 @@ import os
 from typing import cast
 
 from app.libs.runtime_debug_eval import DebugEvalError
+from app.libs.pipe_protocol import PipeEnvelope
+
+
+async def dispatch_workbench_debug(request: PipeEnvelope) -> object:
+    if not isinstance(request.params, dict):
+        raise DebugEvalError("runtimeDebug.invalidRequest", "Diagnostic parameters must be an object")
+    params = cast(dict[object, object], request.params)
+    if set(params) - {"operation", "shell_id", "instance_id", "code", "timeout_seconds"}:
+        raise DebugEvalError("runtimeDebug.invalidRequest", "Unknown diagnostic parameter")
+    operation = params.get("operation")
+    shell_id = params.get("shell_id")
+    instance_id = params.get("instance_id")
+    code = params.get("code")
+    timeout = params.get("timeout_seconds", 20)
+    if (not isinstance(operation, str) or type(timeout) is not int
+            or not isinstance(timeout, int)
+            or (shell_id is not None and not isinstance(shell_id, str))
+            or (instance_id is not None and not isinstance(instance_id, str))
+            or (code is not None and not isinstance(code, str))):
+        raise DebugEvalError("runtimeDebug.invalidRequest", "Invalid diagnostic parameter type")
+    return await request_wba(operation, shell_id, instance_id, code, timeout)
 
 
 async def request_wba(

@@ -150,8 +150,24 @@ feed_frames fail with rebuild guidance. Partial/EOF/batch-error/owner semantics,
 outbound encoding and direct WBA browser sockets are unchanged. This is not a
 new transport, zero-copy path or incremental-parser rewrite. Matching worker and
 Python/mypyc adoption is required, not frontend OTA/Node rebuilding. Surface audit,
-actual-PyO3 probe, binary-heavy regression caveat and separately planned network
+actual-PyO3 probe, binary-heavy regression caveat and network
 RPC seam are in `docs/apps/release_0_2_356/INGRESS_AUDIT.md`.
+
+The three frontend RPC request lanes now retain original guarded body bytes too:
+only `rpc` on `/rpc/editor`, `/rpc/explorer` and `/ui_ipc` uses `ValidatedRpc` plus
+native-owned SocketRef namespace/SID/event. `rpc_ingress.rs` passes these to
+`native_worker.submit_rpc`; cached msgspec decode feeds the same namespace adapter
+on its existing domain loop. The old wrapper's depth/node budget is retained by
+a borrowed native graph walk, without constructing its Python object graph.
+Parse versus backend errors, native admission, 120-second Future wait/cancel,
+ACK encoding/disconnect handling and outbound paths stay unchanged. Lifecycle,
+other socket events, HTTP helpers and direct WBA streams do not migrate.
+
+Startup also requires callable `submit_rpc`, rejecting stale domains explicitly.
+The helper is included in startup inventory; prepare a matching native worker and
+full domain/mypyc before separately approved adoption. No frontend/OTA/framework
+rebuild or wire negotiation change is needed. The small real-codegen fixture and
+actual-PyO3 probe verify isolated parity, not live network throughput or speedup.
 
 `fws_observer.rs` now owns the outbound FWS observer connection, distinct from
 Ferrous's publishing peer. The existing `/fws` JSON/ack protocol stays intact.

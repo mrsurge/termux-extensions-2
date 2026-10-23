@@ -84,9 +84,6 @@ struct AppsEventsQuery {
     app_id: Option<String>,
 }
 
-const CODE_TE2_APP_ID: &str = "code_te2";
-const LEGACY_CODE_TE2_APP_STATE_KEY: &str = "app_state:file_editor_cm6";
-
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
         // Apps extension/app registry read model.
@@ -155,7 +152,9 @@ pub(crate) async fn start_app_data(state: &AppState, app_id: &str) -> Result<Val
 }
 
 async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Value), Response> {
-    let registry = state.app_registry_snapshot();
+    let launch_guard = state.catalog_launch_gate.clone().read_owned().await;
+    let catalog = state.catalog_snapshot();
+    let registry = &catalog.registry;
     let Some(app) = registry.get_app(app_id).cloned() else {
         return Err(json_error(
             StatusCode::NOT_FOUND,
@@ -170,7 +169,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
         ));
     }
     ensure_starting_readiness_if_supported(state, &app).await;
-    if let Some(running) = state.running_app_for_id(&canonical_app_id) {
+    if let Some(running) = state.running_app_exact(&canonical_app_id) {
         ensure_pipe_bridge_for_running_app(state, &running);
         let readiness = state.readiness_store().read().await;
         return Ok((
@@ -199,7 +198,36 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
     let framework_port = state.framework_port();
     let framework_shells_env = state.fws_child_env().clone();
     let launch_store = state.launch_store().clone();
+    let initialization = catalog
+        .initialization
+        .get(&canonical_app_id)
+        .cloned()
+        .ok_or_else(|| {
+            json_error(
+                StatusCode::CONFLICT,
+                "App initialization is invalid; correct its manifest and refresh apps.",
+            )
+        })?;
+    let native = catalog
+        .native
+        .as_ref()
+        .and_then(|s| s.workers.iter().find(|w| w.app_id == canonical_app_id))
+        .cloned();
+    if initialization.native.is_some()
+        && catalog.native.is_some()
+        && native
+            .as_ref()
+            .is_none_or(|w| w.status != crate::native_selection::SelectionStatus::Ready)
+    {
+        return Err(json_error(
+            StatusCode::CONFLICT,
+            "Native worker build/preparation required; refresh never compiles or falls back to an old executable.",
+        ));
+    }
     let launch_result = match tokio::task::spawn_blocking(move || {
+        // Own admission in the blocking task: caller cancellation cannot let
+        // refresh publish while an old-generation physical spawn is still live.
+        let _launch_guard = launch_guard;
         launch_app(
             &launch_store,
             &app,
@@ -207,6 +235,8 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
             &framework_url,
             framework_port,
             &framework_shells_env,
+            &initialization,
+            native.as_ref(),
         )
     })
     .await
@@ -531,28 +561,150 @@ async fn get_app_readiness(State(state): State<AppState>, Path(app_id): Path<Str
     Json(ApiResponse { ok: true, data }).into_response()
 }
 
-async fn reload_apps(
-    State(state): State<AppState>,
-) -> Json<ApiResponse<serde_json::Map<String, Value>>> {
-    let data = reload_apps_data(&state).await;
-    Json(ApiResponse { ok: true, data })
+async fn reload_apps(State(state): State<AppState>) -> Response {
+    match reload_apps_data(&state).await {
+        Ok(data) => Json(ApiResponse { ok: true, data }).into_response(),
+        Err(error) => json_error(StatusCode::CONFLICT, &error),
+    }
 }
 
-pub(crate) async fn reload_apps_data(state: &AppState) -> serde_json::Map<String, Value> {
-    let registry = AppRegistry::load(state.app_roots());
-    state.replace_app_registry(registry.clone());
-    state.replace_running_apps(discover_running_apps(&registry));
+pub(crate) async fn reload_apps_data(
+    state: &AppState,
+) -> Result<serde_json::Map<String, Value>, String> {
+    let _reload = state
+        .catalog_reload_gate
+        .clone()
+        .try_lock_owned()
+        .map_err(|_| "App refresh is already in progress".to_owned())?;
+    let previous = state.catalog_snapshot();
+    let roots = state.app_roots().to_vec();
+    let generation = previous
+        .generation
+        .checked_add(1)
+        .ok_or("App catalog generation exhausted")?;
+    let (candidate, _reload) = tokio::task::spawn_blocking(move || {
+        let candidate = crate::app_catalog::AppCatalog::load(&roots, generation)?;
+        Ok::<_, anyhow::Error>((candidate, _reload))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("App refresh rejected: {e:#}"))?;
+    let client = state
+        .native_selector
+        .as_ref()
+        .ok_or("Native selection owner is unavailable; previous catalog retained")?;
+    let selected = client
+        .select()
+        .await
+        .map_err(|e| format!("Native selection failed; previous catalog retained: {e:#}"))?;
+    for worker in &selected.workers {
+        let init = candidate
+            .initialization
+            .get(&worker.app_id)
+            .ok_or("Native selector/catalog owner mismatch")?;
+        if init.native.as_ref() != Some(&worker.declaration) {
+            return Err(
+                "Native declaration changed between catalog and selector; retry refresh".into(),
+            );
+        }
+    }
+    for (id, init) in &candidate.initialization {
+        if init.native.is_some() && !selected.workers.iter().any(|worker| &worker.app_id == id) {
+            return Err(format!(
+                "Native selector omitted declared app {id}; previous catalog retained"
+            ));
+        }
+    }
+    let _launch = state.catalog_launch_gate.clone().write_owned().await;
+    let confirmed = client
+        .select()
+        .await
+        .map_err(|e| format!("Native selection recheck failed: {e:#}"))?;
+    if selected.generation != confirmed.generation
+        || selected.profile != confirmed.profile
+        || selected.packaged != confirmed.packaged
+    {
+        return Err("Native selection changed; retry refresh".into());
+    }
+    let roots = state.app_roots().to_vec();
+    let (mut candidate, _reload, _launch) = tokio::task::spawn_blocking(move || {
+        candidate.unchanged(&roots)?;
+        Ok::<_, anyhow::Error>((candidate, _reload, _launch))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    if state.catalog_snapshot().generation != previous.generation {
+        return Err("App catalog changed; retry refresh".into());
+    }
+    let mut restart_required = Vec::new();
+    let mut changed = Vec::new();
+    let mut native_status = Vec::new();
+    for worker in &selected.workers {
+        native_status.push(json!({"app_id":worker.app_id,"status":worker.status}));
+        let old = previous
+            .native
+            .as_ref()
+            .and_then(|s| s.workers.iter().find(|w| w.app_id == worker.app_id))
+            .and_then(|w| w.executable.clone())
+            .or_else(|| std::env::var(&worker.environment_key).ok());
+        if old != worker.executable && previous.registry.get_app(&worker.app_id).is_some() {
+            changed.push(worker.app_id.clone());
+            if state.running_app_exact(&worker.app_id).is_some() {
+                restart_required.push(worker.app_id.clone());
+            }
+        }
+    }
+    for app in candidate.registry.apps() {
+        if previous.registry.get_app(&app.app_id).is_some_and(|old| {
+            old.raw_manifest != app.raw_manifest
+                || old.root_dir != app.root_dir
+                || previous.initialization.get(&app.app_id)
+                    != candidate.initialization.get(&app.app_id)
+        }) {
+            if !changed.contains(&app.app_id) {
+                changed.push(app.app_id.clone());
+            }
+            if state.running_app_exact(&app.app_id).is_some()
+                && !restart_required.contains(&app.app_id)
+            {
+                restart_required.push(app.app_id.clone());
+            }
+        }
+    }
+    let removed: Vec<_> = previous
+        .registry
+        .apps()
+        .iter()
+        .filter(|app| candidate.registry.get_app(&app.app_id).is_none())
+        .map(|app| app.app_id.clone())
+        .collect();
+    let count = candidate.registry.list_payloads().len();
+    let added: Vec<_> = candidate
+        .registry
+        .apps()
+        .iter()
+        .filter(|app| previous.registry.get_app(&app.app_id).is_none())
+        .map(|app| app.app_id.clone())
+        .collect();
+    candidate.native = Some(selected);
+    state.publish_catalog(candidate);
+    // Do not rediscover/replace running owners here. Refresh is configuration,
+    // never permission to adopt, terminate or lose active processes/connections.
     let mut data = serde_json::Map::new();
-    data.insert(
-        "count".to_owned(),
-        Value::from(registry.list_payloads().len()),
-    );
+    data.insert("count".to_owned(), Value::from(count));
+    data.insert("generation".into(), Value::from(generation));
+    data.insert("restart_required".into(), json!(restart_required));
+    data.insert("removed".into(), json!(removed));
+    data.insert("added".into(), json!(added));
+    data.insert("changed".into(), json!(changed));
+    data.insert("native_status".into(), json!(native_status));
     publish_apps_event(
         state,
         AppsEvent::new("registry_reloaded", Value::Object(data.clone())),
     );
     publish_catalog_snapshot(state).await;
-    data
+    Ok(data)
 }
 
 async fn apps_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
@@ -692,7 +844,12 @@ async fn apps_snapshot_payload(state: &AppState, app_id: Option<&str>) -> Value 
             .app_payload(app_id)
             .map(|app| (app_id.to_owned(), app))
     }) {
-        payload["app_bootstrap"] = app_bootstrap_payload(app_id, app).await;
+        let migration = registry
+            .get_app(&app_id)
+            .and_then(|definition| crate::app_policy::AppPolicy::read(definition).ok())
+            .and_then(|policy| policy.state_migration_from)
+            .filter(|alias| registry.canonical_app_id(alias) == Some(app_id.as_str()));
+        payload["app_bootstrap"] = app_bootstrap_payload(app_id, app, migration).await;
     }
     payload
 }
@@ -703,14 +860,14 @@ fn normalized_app_id(app_id: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-async fn app_bootstrap_payload(app_id: String, app: Value) -> Value {
+async fn app_bootstrap_payload(app_id: String, app: Value, migration: Option<String>) -> Value {
     let fallback_app_id = app_id.clone();
     let fallback_app = app.clone();
     match tokio::task::spawn_blocking(move || {
         let state_key = format!("app_state:{app_id}");
         let store = StateStore::default();
-        let state = if app_id == CODE_TE2_APP_ID {
-            state_ops::move_state_key_if_present(&store, LEGACY_CODE_TE2_APP_STATE_KEY, &state_key)
+        let state = if let Some(alias) = migration {
+            state_ops::move_state_key_if_present(&store, &format!("app_state:{alias}"), &state_key)
                 .unwrap_or_else(|_| {
                     state_ops::get_state(
                         &store,
@@ -1179,8 +1336,8 @@ mod tests {
     #[test]
     fn apps_events_app_id_is_trimmed_and_empty_values_are_ignored() {
         assert_eq!(
-            normalized_app_id(Some("  code_te2  ".to_owned())),
-            Some("code_te2".to_owned())
+            normalized_app_id(Some("  sample_editor  ".to_owned())),
+            Some("sample_editor".to_owned())
         );
         assert_eq!(normalized_app_id(Some("   ".to_owned())), None);
         assert_eq!(normalized_app_id(None), None);
@@ -1189,9 +1346,9 @@ mod tests {
     #[test]
     fn app_bootstrap_snapshot_carries_state_and_debug_contract() {
         let payload = build_app_bootstrap_payload(
-            "code_te2",
+            "sample_editor",
             json!({
-                "id": "code_te2",
+                "id": "sample_editor",
                 "entrypoints": { "frontend_template": "template.html" },
                 "frontend_preparation": true,
             }),
@@ -1199,12 +1356,12 @@ mod tests {
             true,
         );
 
-        assert_eq!(payload["app_id"], "code_te2");
+        assert_eq!(payload["app_id"], "sample_editor");
         assert_eq!(
             payload["app"]["entrypoints"]["frontend_template"],
             "template.html"
         );
-        assert_eq!(payload["state_key"], "app_state:code_te2");
+        assert_eq!(payload["state_key"], "app_state:sample_editor");
         assert_eq!(payload["app"]["frontend_preparation"], true);
         assert_eq!(payload["state"]["activeProject"], "/workspace");
         assert_eq!(payload["debug_full_stack"], true);

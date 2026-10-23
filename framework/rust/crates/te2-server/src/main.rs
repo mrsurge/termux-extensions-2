@@ -1,5 +1,7 @@
 mod android_assets;
+mod app_catalog;
 mod app_intent_pipe;
+mod app_policy;
 mod app_proxy;
 mod app_worker_pipe_bridge;
 mod apps_lifecycle;
@@ -10,7 +12,6 @@ mod frontend_assets;
 mod launcher;
 #[cfg(feature = "native-mcp")]
 mod native_mcp;
-mod native_selection;
 #[cfg(feature = "native-mcp")]
 mod native_mcp_console;
 #[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
@@ -23,6 +24,7 @@ mod native_mcp_live_console;
 mod native_mcp_scaffold;
 #[cfg(all(feature = "native-mcp", feature = "ferrous-framework-native"))]
 mod native_mcp_sidebar;
+mod native_selection;
 mod network_exposure;
 mod proxy_shell;
 mod proxy_transport;
@@ -53,7 +55,6 @@ use network_exposure::{NetworkConnectionInfo, NetworkExposurePolicy};
 use registry::{AppRegistry, AppRoot};
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value, json};
-use sio_proxy::SioRouteIndex;
 use socket2::{Domain, Protocol, Socket, Type};
 use socketioxide::SocketIo;
 use std::{
@@ -91,8 +92,10 @@ pub(crate) struct AppState {
     config: Arc<ServerConfig>,
     instance_id: Arc<str>,
     http_client: reqwest::Client,
-    sio_routes: Arc<SioRouteIndex>,
-    app_registry: Arc<StdRwLock<AppRegistry>>,
+    catalog: Arc<StdRwLock<Arc<app_catalog::AppCatalog>>>,
+    catalog_launch_gate: Arc<AsyncRwLock<()>>,
+    catalog_reload_gate: Arc<tokio::sync::Mutex<()>>,
+    native_selector: Option<Arc<native_selection::NativeSelectionClient>>,
     running_apps: Arc<StdRwLock<HashMap<String, runtime::RunningApp>>>,
     launch_store: Arc<LaunchStore>,
     #[cfg_attr(not(feature = "ferrous-framework-native"), allow(dead_code))]
@@ -128,22 +131,19 @@ impl AppState {
         &self.http_client
     }
 
-    pub(crate) fn sio_routes(&self) -> &SioRouteIndex {
-        &self.sio_routes
-    }
-
-    pub(crate) fn app_registry_snapshot(&self) -> AppRegistry {
-        self.app_registry
+    pub(crate) fn catalog_snapshot(&self) -> Arc<app_catalog::AppCatalog> {
+        self.catalog
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
 
-    pub(crate) fn replace_app_registry(&self, registry: AppRegistry) {
-        *self
-            .app_registry
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = registry;
+    pub(crate) fn app_registry_snapshot(&self) -> AppRegistry {
+        self.catalog_snapshot().registry.clone()
+    }
+
+    pub(crate) fn publish_catalog(&self, catalog: app_catalog::AppCatalog) {
+        *self.catalog.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(catalog);
     }
 
     pub(crate) fn running_apps_snapshot(&self) -> Vec<runtime::RunningApp> {
@@ -161,22 +161,23 @@ impl AppState {
     pub(crate) fn running_app_for_id(&self, app_id: &str) -> Option<runtime::RunningApp> {
         let registry = self.app_registry_snapshot();
         let canonical_app_id = registry.canonical_app_id(app_id.trim())?;
+        self.running_app_exact(canonical_app_id)
+    }
+
+    pub(crate) fn running_app_exact(&self, app_id: &str) -> Option<runtime::RunningApp> {
         self.running_apps
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(canonical_app_id)
+            .get(app_id)
             .cloned()
     }
 
+    #[cfg(feature = "ferrous-framework-native")]
     pub(crate) fn replace_running_apps(&self, apps: Vec<runtime::RunningApp>) {
-        let next = apps
+        *self.running_apps.write().unwrap_or_else(|e| e.into_inner()) = apps
             .into_iter()
             .map(|app| (app.app_id.clone(), app))
-            .collect::<HashMap<_, _>>();
-        *self
-            .running_apps
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+            .collect();
     }
 
     #[cfg(feature = "ferrous-framework-native")]
@@ -355,9 +356,9 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_secs(30))
         .build()
         .context("failed to build HTTP proxy client")?;
-    let bootstrap_registry = AppRegistry::load(&config.app_roots);
-    let bootstrap_running_apps = apps_lifecycle::discover_running_apps(&bootstrap_registry);
-    let sio_routes = Arc::new(SioRouteIndex::from_registry(&bootstrap_registry));
+    let bootstrap_catalog = app_catalog::AppCatalog::bootstrap(&config.app_roots);
+    let bootstrap_running_apps = apps_lifecycle::discover_running_apps(&bootstrap_catalog.registry);
+    let sio_routes = &bootstrap_catalog.routes;
     let sio_mounts = sio_routes.mount_paths();
     let (apps_events, _) = broadcast::channel(APPS_EVENT_CHANNEL_CAPACITY);
     info!(
@@ -376,12 +377,21 @@ async fn main() -> Result<()> {
     ));
     #[cfg(not(feature = "ferrous-framework-native"))]
     let launch_store = Arc::new(LaunchStore::default());
+    let te2_runtime_bridge = load_te2_runtime_bridge_config();
+    let native_selector = native_selection::NativeSelectionClient::new(
+        &te2_runtime_bridge.upstream_base_url,
+        &env::var("TE2_RUNTIME_OWNER_KEY").unwrap_or_default(),
+    )
+    .ok()
+    .map(Arc::new);
     let state = AppState {
         config,
         instance_id: Arc::from(new_instance_id()?),
         http_client,
-        sio_routes,
-        app_registry: Arc::new(StdRwLock::new(bootstrap_registry)),
+        catalog: Arc::new(StdRwLock::new(Arc::new(bootstrap_catalog))),
+        catalog_launch_gate: Arc::new(AsyncRwLock::new(())),
+        catalog_reload_gate: Arc::new(tokio::sync::Mutex::new(())),
+        native_selector,
         running_apps: Arc::new(StdRwLock::new(
             bootstrap_running_apps
                 .into_iter()
@@ -393,7 +403,7 @@ async fn main() -> Result<()> {
         readiness_store: Arc::new(AsyncRwLock::new(HashMap::new())),
         apps_events,
         fws_bridge: Arc::new(fws_bridge_config.clone()),
-        te2_runtime_bridge: Arc::new(load_te2_runtime_bridge_config()),
+        te2_runtime_bridge: Arc::new(te2_runtime_bridge),
     };
     #[cfg(feature = "ferrous-framework-native")]
     apps_lifecycle::start_fws_lifecycle_app_bridge(
@@ -519,7 +529,11 @@ fn build_router_base_with_mcp(
     let router = router.merge(runtime_debug_http::router());
     #[cfg(feature = "native-mcp")]
     let router = router.merge(native_mcp::router(state.clone(), cancellation));
-    app_proxy::register_sio_proxy_routes(router, state.sio_routes())
+    router
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            app_proxy::dynamic_sio_proxy,
+        ))
         .with_state(state)
         .layer(socket_layer)
         .layer(middleware::from_fn_with_state(
@@ -894,7 +908,7 @@ mod tests {
 
     fn running(shell_id: &str, updated_at: f64) -> RunningApp {
         RunningApp {
-            app_id: "code_te2".to_owned(),
+            app_id: "sample_editor".to_owned(),
             port: 8100,
             shell_id: shell_id.to_owned(),
             label: None,
@@ -912,19 +926,23 @@ mod tests {
     #[test]
     fn running_app_index_keeps_newest_shell_and_ignores_stale_exit() {
         let mut apps = HashMap::new();
-        upsert_running_app_entry(&mut apps, "code_te2", running("old", 10.0));
-        upsert_running_app_entry(&mut apps, "code_te2", running("new", 20.0));
-        upsert_running_app_entry(&mut apps, "code_te2", running("stale", 15.0));
+        upsert_running_app_entry(&mut apps, "sample_editor", running("old", 10.0));
+        upsert_running_app_entry(&mut apps, "sample_editor", running("new", 20.0));
+        upsert_running_app_entry(&mut apps, "sample_editor", running("stale", 15.0));
 
-        assert_eq!(apps.get("code_te2").unwrap().shell_id, "new");
+        assert_eq!(apps.get("sample_editor").unwrap().shell_id, "new");
         assert!(!remove_running_app_entry(
             &mut apps,
-            "code_te2",
+            "sample_editor",
             Some("old")
         ));
-        assert_eq!(apps.get("code_te2").unwrap().shell_id, "new");
-        assert!(remove_running_app_entry(&mut apps, "code_te2", Some("new")));
-        assert!(!apps.contains_key("code_te2"));
+        assert_eq!(apps.get("sample_editor").unwrap().shell_id, "new");
+        assert!(remove_running_app_entry(
+            &mut apps,
+            "sample_editor",
+            Some("new")
+        ));
+        assert!(!apps.contains_key("sample_editor"));
     }
 
     #[test]

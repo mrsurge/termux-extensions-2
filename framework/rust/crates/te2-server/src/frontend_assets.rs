@@ -177,17 +177,8 @@ async fn service_worker(State(state): State<AppState>) -> Response {
     let sw_path = framework_static_root(state.project_root())
         .join("js")
         .join("sw.js");
-    let version_path = PathBuf::from(state.project_root())
-        .join("app")
-        .join("apps")
-        .join("code_te2")
-        .join("static")
-        .join("version.txt");
-    let version = fs::read_to_string(version_path)
-        .ok()
-        .map(|raw| raw.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "0".to_owned());
+    let version = crate::android_assets::read_editor_version(StdPath::new(state.project_root()))
+        .unwrap_or_else(|_| "0".to_owned());
     match fs::read_to_string(&sw_path) {
         Ok(content) => javascript_response(content.replace("__ASSET_VERSION__", &version)),
         Err(_) => StatusCode::NOT_FOUND.into_response(),

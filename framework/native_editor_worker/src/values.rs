@@ -6,6 +6,24 @@ use rmpv::Value;
 const MAX_DEPTH: usize = 64;
 const MAX_NODES: usize = 1_000_000;
 
+/// Preserve the former socket-event wrapper's conversion budget without Python
+/// allocations. Root + three transport strings consume four nodes; data is at
+/// depth one. Native wire guards already checked types, map keys and duplicates.
+pub fn socket_payload_fits(value: &Value) -> bool {
+    fn fits(value: &Value, depth: usize, left: &mut usize) -> bool {
+        if depth > MAX_DEPTH || *left == 0 {
+            return false;
+        }
+        *left -= 1;
+        match value {
+            Value::Array(values) => values.iter().all(|v| fits(v, depth + 1, left)),
+            Value::Map(values) => values.iter().all(|(_, v)| fits(v, depth + 1, left)),
+            _ => true,
+        }
+    }
+    fits(value, 1, &mut (MAX_NODES - 4))
+}
+
 pub fn to_python(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
     let mut remaining = MAX_NODES;
     convert_to(py, value, 0, &mut remaining)
@@ -132,6 +150,18 @@ fn convert_from(value: &Bound<'_, PyAny>, depth: usize, left: &mut usize) -> PyR
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn socket_conversion_reserves_wrapper_nodes() {
+        assert!(socket_payload_fits(&Value::Array(vec![
+            Value::Nil;
+            MAX_NODES - 5
+        ])));
+        assert!(!socket_payload_fits(&Value::Array(vec![
+            Value::Nil;
+            MAX_NODES - 4
+        ])));
+    }
 
     #[test]
     fn nested_tuples_are_arrays_not_arbitrary_iterables() {

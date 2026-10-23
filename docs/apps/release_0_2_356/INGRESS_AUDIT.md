@@ -129,7 +129,7 @@ An initial single-module mypyc fixture hit a generated-header naming mismatch;
 the normal grouped three-module build passes. This was probe construction, not
 evidence that the full accepted domain build or runtime was broken.
 
-## Network RPC follow-up — planned, not implemented
+## Network RPC follow-up — approved source implementation
 
 The three MessagePack RPC lanes already have native binary/size/duplicate-key/
 depth/node validation; compressed-mode requests still use their existing guarded
@@ -147,5 +147,83 @@ operations unless separately measured; do not apply the WBA result to all APIs.
 Outbound ACK/emits stay unchanged until independently qualified. Test actual
 dispatch with fragmented/binary/null data and stale/disconnected client contexts.
 
-Network edits require a concrete follow-up approval; no source/network/runtime
-change is authorized by this audit's placement in the plan.
+User subsequently approves exactly this three-lane inbound slice, native/Python
+regressions, strict typing and isolated source/compiled parity. No full domain or
+production-worker build, activation, restart, OTA, version bump or commit is
+included. This supersedes the original audit-only status above.
+
+### Production handoff
+
+`rpc_codec::validate_for` applies the existing single-frame native guards and
+raw/framed codec rules, retains original body bytes, and returns an opaque
+ValidatedRpc. No decoded-body re-encoding or serialized socket wrapper is added.
+`web.rs` selects this only for the rpc event on /rpc/editor, /rpc/explorer and
+/ui_ipc. Namespace, SID and event come from native SocketRef/Event state, never
+the body. Parse errors keep editor event versus Explorer/host ACK routing.
+
+BackendInput shares the old admission/spawn_blocking/Future.result(120)/cancel/
+return-conversion code for graph and byte calls. Other events, connect/disconnect,
+native HTTP helpers, control admission and outbound ACK/emits stay graph-based.
+Disconnected sockets still suppress the completed ACK; uncertain execution is
+not retried. This does not add stronger cancellation or revoke already accepted
+mutations when a client disappears.
+
+`rpc_ingress::submit` passes PyBytes and separate context to native_worker.submit_rpc.
+The existing owning loop schedules network_rpc_ingress.deliver_rpc, whose cached
+msgspec Decoder(object) reconstructs the body before the same NativeSocketServer
+deliver/namespace handler. Scalars/invalid domain envelopes still reach their
+existing validator; this is not a stricter JSON-RPC schema. Context fields in the
+body cannot replace the transport tuple. A startup callable check rejects stale
+domains without submit_rpc. Top-level adapter import makes the new module part
+of the existing startup inventory/explicit mypyc build graph.
+
+One compatibility subtlety is preserved: the former wrapper added one nesting
+level and four conversion nodes (root plus three transport strings) before its
+data. A native-only borrowed graph walk retains that budget without PyObject
+allocation. A violation still fails in backend submission with native value
+budget exceeded, not as a wire parse error. This is not zero-copy or allocation-
+free: native value validation still builds a graph, the budget walk remains,
+framed requests retain their body copy, PyBytes copies and Python allocates the
+decoded body. No measured speedup/RSS/network-latency claim is made.
+
+### Isolated qualification
+
+`tests/test_network_rpc_ingress.py` builds a small three-module mypyc fixture
+(native_worker, native_socketio, network_rpc_ingress) without altering the active
+selector. Both source and compiled modes run the actual submit/Future and
+NativeSocketServer adapter against a synthetic namespace owner on an isolated
+loop. It verifies all lanes, null/scalar/array/Unicode/binary/nested bodies,
+forged transport fields, stale-client errors and invalid transport tuples.
+
+`examples/network_rpc_boundary_probe.rs` adds the real production native codec,
+value converter and rpc_ingress PyO3 submission. It compares old graph versus
+new bytes across 24 cases in source and compiled mode, including framed editor
+requests. This is not a live authenticated Socket.IO session, full admission-
+queue load test, page reload or measured benchmark. Existing namespace contract
+regressions separately exercise real editor/UI RPC validators.
+
+```bash
+env CARGO_TARGET_DIR="$HOME/.cache/te2/code_te2/build/cargo-target" \
+  PYO3_PYTHON="$PWD/.jitenv/bin/python" \
+  cargo build --release --locked \
+  --manifest-path framework/native_editor_worker/Cargo.toml \
+  --example network_rpc_boundary_probe -j 2
+```
+
+Run the probe independently, with disposable audit-guarded roots:
+
+```bash
+"$HOME/.cache/te2/code_te2/build/cargo-target/release/examples/network_rpc_boundary_probe"
+```
+
+```bash
+env BOUNDARY_PROBE_MYPYC_DIR="$PROBE_SNAPSHOT" \
+  "$HOME/.cache/te2/code_te2/build/cargo-target/release/examples/network_rpc_boundary_probe"
+```
+
+The compiled run must report .so paths for both domain and adapter. The current
+qualified local fixture is .codex-scratch/pytest-of-mrsurge/pytest-31/
+test_real_domain_submit_rpc_pr1 (temporary test output, not a durable deployment
+or activation selector). Actual live acceptance needs the matching native worker
+and full domain/mypyc adoption; existing client assets and wire contracts stay
+unchanged. No frontend/OTA/framework rebuild is required by this slice itself.

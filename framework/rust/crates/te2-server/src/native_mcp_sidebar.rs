@@ -45,10 +45,11 @@ mod tests {
     use super::*;
     #[test]
     fn defaults_label_and_load_match_legacy_without_starting() {
-        let input: ShortcutInput = serde_json::from_value(json!({"app_id":" terminal "})).unwrap();
-        let value = project(input, "Terminal");
-        assert_eq!(value["shortcut"]["id"], "framework_app::terminal");
-        assert_eq!(value["shortcut"]["label"], "Terminal");
+        let input: ShortcutInput =
+            serde_json::from_value(json!({"app_id":" sample-app "})).unwrap();
+        let value = project(input, "Sample App");
+        assert_eq!(value["shortcut"]["id"], "framework_app::sample-app");
+        assert_eq!(value["shortcut"]["label"], "Sample App");
         assert_eq!(value["shortcut"]["load"], "lazy");
         assert_eq!(value["shortcut"]["header"], true);
         assert!(

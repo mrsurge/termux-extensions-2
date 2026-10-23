@@ -120,7 +120,7 @@ fn default_required() -> bool {
     true
 }
 
-fn read_editor_version(project_root: &Path) -> Result<String> {
+pub(crate) fn read_editor_version(project_root: &Path) -> Result<String> {
     let manifest = load_manifest(project_root)?;
     let version_path = project_relative_path(project_root, &manifest.version_file)?;
     if !version_path.is_file() {
@@ -510,7 +510,8 @@ mod tests {
     fn bundle_manifest_builds_expected_zip_entries() {
         let temp = temp_project();
         write_file(
-            temp.path().join("app/apps/code_te2/static/version.txt"),
+            temp.path()
+                .join("app/apps/sample_editor/static/version.txt"),
             "9.8.7\n",
         );
         write_file(temp.path().join("app/static/file.js"), "file body");
@@ -529,7 +530,7 @@ mod tests {
         write_file(
             temp.path().join(BUNDLE_MANIFEST_REL_PATH),
             r#"{
-              "version_file": "app/apps/code_te2/static/version.txt",
+              "version_file": "app/apps/sample_editor/static/version.txt",
               "exclude_extensions": [".map"],
               "exclude_dirs": ["node_modules"],
               "entries": [
@@ -589,14 +590,16 @@ mod tests {
     #[test]
     fn same_version_bundle_rebuild_reads_current_source_bytes() {
         let temp = temp_project();
-        let version_path = temp.path().join("app/apps/code_te2/static/version.txt");
+        let version_path = temp
+            .path()
+            .join("app/apps/sample_editor/static/version.txt");
         let source_path = temp.path().join("app/static/touch.js");
         write_file(version_path, "3.2.1\n");
         write_file(source_path.clone(), "old touch bundle");
         write_file(
             temp.path().join(BUNDLE_MANIFEST_REL_PATH),
             r#"{
-              "version_file": "app/apps/code_te2/static/version.txt",
+              "version_file": "app/apps/sample_editor/static/version.txt",
               "entries": [
                 { "kind": "file", "src": "app/static/touch.js", "dest": "static/touch.js" },
                 { "kind": "version", "dest": "version.txt" }

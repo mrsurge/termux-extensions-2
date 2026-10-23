@@ -284,6 +284,25 @@ pub(crate) async fn evaluate(
         .await
 }
 
+/// Structured app-owned operation on the same exact authenticated debug route.
+pub(crate) async fn operation(
+    target: &DebugTarget,
+    method: &str,
+    params: serde_json::Value,
+    wait: Duration,
+) -> anyhow::Result<PipeEnvelope> {
+    anyhow::ensure!(
+        method.starts_with("runtime.debug.") && serde_json::to_vec(&params)?.len() <= 64 * 1024,
+        "runtimeDebug.invalidOperation"
+    );
+    ROUTES
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("runtimeDebug.unavailable"))?
+        .resolve(target)?
+        .request(method, Some(params), wait)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,6 +350,26 @@ mod tests {
             },
             serde_json::json!({"enabled": true}),
         )
+    }
+
+    #[tokio::test]
+    async fn structured_operation_uses_same_correlated_route_without_evaluation() {
+        let (route, mut receiver) = fixture(false);
+        let cloned = route.clone();
+        let params = serde_json::json!({"operation":"eval","code":"quotes '\"\n é", "shell_id":"child", "instance_id":"child-generation"});
+        let expected = params.clone();
+        let task = tokio::spawn(async move {
+            cloned
+                .request("runtime.debug.sample", Some(params), Duration::from_secs(2))
+                .await
+        });
+        let request = receiver.recv().await.unwrap();
+        assert_eq!(request.method.as_deref(), Some("runtime.debug.sample"));
+        assert_eq!(request.params.as_ref(), Some(&expected));
+        assert_eq!(request.id, request.correlation_id);
+        assert!(route.accept(response(&request)));
+        assert!(task.await.unwrap().is_ok());
+        assert!(receiver.try_recv().is_err());
     }
 
     #[tokio::test]

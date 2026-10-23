@@ -24,6 +24,26 @@
   },
   "sio_service": "sio_service.json",
   "readiness_support": "pipe",
+  "framework_integration": {
+    "intents": {
+      "sidebar.openApp": ["code_te2", "file_explorer", "file_editor", "terminal"],
+      "terminal.createSession": ["code_te2", "file_explorer", "file_editor", "terminal"],
+      "project.openDirectory": ["file_explorer", "file_editor"],
+      "document.open": ["file_explorer", "file_editor"]
+    },
+    "capabilities": {
+      "sidebarShortcut.add": "app.mcp.sidebarShortcut.add",
+      "workbench.debug": "runtime.debug.workbench"
+    },
+    "proxyCors": [{
+      "pathPrefix": "agent/",
+      "origins": ["http://127.0.0.1:12359", "http://localhost:12359"],
+      "methods": ["GET", "POST", "OPTIONS"],
+      "headers": ["Content-Type"],
+      "maxAge": 600
+    }],
+    "stateMigrationFrom": "file_editor_cm6"
+  },
   "ipc": {
     "services": {
       "sidebar": {

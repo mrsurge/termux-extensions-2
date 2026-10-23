@@ -62,8 +62,38 @@ pub fn decode_for(
     lane: &str,
     gzip: bool,
 ) -> std::result::Result<Value, &'static str> {
+    decode_with_frame(payload, lane, gzip).map(|(value, _)| value)
+}
+
+/// Opaque proof that native framing/value guards accepted exactly this body.
+pub struct ValidatedRpc(Vec<u8>, bool);
+impl ValidatedRpc {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+    pub fn conversion_fits(&self) -> bool {
+        self.1
+    }
+}
+
+pub fn validate_for(
+    payload: Value,
+    lane: &str,
+    gzip: bool,
+) -> std::result::Result<ValidatedRpc, &'static str> {
+    decode_with_frame(payload, lane, gzip).map(|(value, bytes)| {
+        let fits = crate::values::socket_payload_fits(&value);
+        ValidatedRpc(bytes, fits)
+    })
+}
+
+fn decode_with_frame(
+    payload: Value,
+    lane: &str,
+    gzip: bool,
+) -> std::result::Result<(Value, Vec<u8>), &'static str> {
     if !gzip {
-        return decode(payload, lane);
+        return decode_raw(payload, lane);
     }
     let Value::Binary(bytes) = payload else {
         return Err("binary_rpc_payload_required");
@@ -83,7 +113,7 @@ pub fn decode_for(
     if length == 0 || length > PAYLOAD_LIMIT - HEADER || bytes.len() - HEADER != length {
         return Err("invalid_rpc_frame");
     }
-    decode(Value::Binary(bytes[HEADER..].to_vec()), lane)
+    decode_raw(Value::Binary(bytes[HEADER..].to_vec()), lane)
 }
 
 pub fn lane(namespace: &str) -> Option<&'static str> {
@@ -133,6 +163,10 @@ fn metrics(start: Option<Instant>, direction: &str, lane: &str, value: &Value, b
 }
 
 pub fn decode(payload: Value, lane: &str) -> std::result::Result<Value, &'static str> {
+    decode_raw(payload, lane).map(|(value, _)| value)
+}
+
+fn decode_raw(payload: Value, lane: &str) -> std::result::Result<(Value, Vec<u8>), &'static str> {
     let Value::Binary(bytes) = payload else {
         return Err("binary_rpc_payload_required");
     };
@@ -147,7 +181,7 @@ pub fn decode(payload: Value, lane: &str) -> std::result::Result<Value, &'static
         return Err("invalid_msgpack_payload");
     }
     metrics(start, "decode", lane, &value, bytes.len());
-    Ok(value)
+    Ok((value, bytes))
 }
 
 struct Buffer(Vec<u8>);
@@ -189,6 +223,48 @@ pub fn parse_error(message: &str) -> Value {
 mod tests {
     use super::*;
     use std::io::Read;
+
+    #[test]
+    fn original_body_handoff_retains_native_guards_for_both_codecs() {
+        let raw = vec![0x81, 0xa1, b'x', 0xcc, 1];
+        for gzip in [false, true] {
+            let payload = if gzip {
+                frame(&raw, false).unwrap()
+            } else {
+                raw.clone()
+            };
+            assert_eq!(
+                validate_for(Value::Binary(payload), "editor", gzip)
+                    .unwrap()
+                    .as_bytes(),
+                raw
+            );
+            for bad in [
+                vec![],
+                vec![0xc1],
+                vec![0xc7, 0, 0],
+                vec![0xa1, 0xff],
+                vec![0xc0, 0xc0],
+                vec![0x82, 0xa1, b'x', 1, 0xa1, b'x', 2],
+            ] {
+                let payload = if gzip && !bad.is_empty() {
+                    frame(&bad, false).unwrap()
+                } else {
+                    bad
+                };
+                assert!(validate_for(Value::Binary(payload), "editor", gzip).is_err());
+            }
+        }
+        assert!(validate_for(Value::Nil, "editor", false).is_err());
+        assert!(
+            validate_for(
+                Value::Binary(frame(&vec![b'x'; 2048], true).unwrap()),
+                "editor",
+                true
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn gzip_is_explicit_and_editor_only() {

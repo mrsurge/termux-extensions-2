@@ -2,7 +2,6 @@ use crate::registry::{AppDefinition, AppRegistry};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::{collections::HashSet, fs};
-use tracing::warn;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SioTarget {
@@ -35,31 +34,40 @@ pub struct SioRouteIndex {
 }
 
 impl SioRouteIndex {
-    pub fn from_registry(registry: &AppRegistry) -> Self {
+    pub fn try_from_registry(registry: &AppRegistry) -> Result<Self> {
         let mut routes = Vec::new();
         for app in registry.apps() {
-            match parse_app_routes(app) {
-                Ok(app_routes) => routes.extend(app_routes),
-                Err(error) => {
-                    warn!(app_id = %app.app_id, %error, "failed to parse sio_service config")
-                }
-            }
+            routes.extend(parse_app_routes(app)?);
         }
-
-        // Manifest aliases are concrete physical routes. Sorting longest-first
-        // lets one handler recover route/rest without relying on Axum route data.
         let mut seen = HashSet::new();
         let mut mounts = Vec::new();
         for (index, route) in routes.iter().enumerate() {
+            let app = registry
+                .get_app(&route.app_id)
+                .context("socket route owner is missing")?;
             for mount in route.mount_paths() {
-                if seen.insert(mount.clone()) {
-                    mounts.push((mount, index));
-                }
+                validate_mount(&mount, app)?;
+                anyhow::ensure!(
+                    seen.insert(mount.clone()),
+                    "duplicate socket route: {mount}"
+                );
+                mounts.push((mount, index));
             }
         }
-        mounts.sort_by(|(left, _), (right, _)| right.len().cmp(&left.len()).then(left.cmp(right)));
-
-        Self { routes, mounts }
+        mounts.sort_by(|(a, _), (b, _)| b.len().cmp(&a.len()).then(a.cmp(b)));
+        // Nested declarations have deterministic longest-prefix semantics only
+        // within one app. Cross-owner overlap must never steal a subtree.
+        for (i, (left, a)) in mounts.iter().enumerate() {
+            for (right, b) in &mounts[i + 1..] {
+                anyhow::ensure!(
+                    !(left.starts_with(&format!("{right}/"))
+                        || right.starts_with(&format!("{left}/")))
+                        || routes[*a].app_id == routes[*b].app_id,
+                    "overlapping socket owners"
+                );
+            }
+        }
+        Ok(Self { routes, mounts })
     }
 
     pub fn mount_paths(&self) -> Vec<String> {
@@ -88,6 +96,39 @@ impl SioRouteIndex {
         }
         None
     }
+}
+
+fn validate_mount(path: &str, app: &AppDefinition) -> Result<()> {
+    anyhow::ensure!(
+        !path.contains(['%', '?', '#', '{', '}', '\\'])
+            && !path.contains("//")
+            && !path.split('/').any(|part| part == "." || part == ".."),
+        "invalid socket mount: {path}"
+    );
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() >= 5 && parts[1] == "api" && parts[2] == "app" {
+        anyhow::ensure!(
+            parts[3] == app.app_id || app.id_aliases.iter().any(|id| id == parts[3]),
+            "socket mount belongs to another app"
+        );
+        anyhow::ensure!(
+            parts[4] != "proxy",
+            "socket mount conflicts with proxy-shell surface"
+        );
+        return Ok(());
+    }
+    // Retained legacy root aliases, not arbitrary framework route overrides.
+    anyhow::ensure!(
+        parts.len() == 3
+            && parts[2] == "socket.io"
+            && parts[1].ends_with("_ws")
+            && parts[1]
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            && !matches!(parts[1], "fws_ws" | "te2_console_ws"),
+        "socket mount conflicts with framework surface: {path}"
+    );
+    Ok(())
 }
 
 impl SioProxyRoute {
@@ -278,10 +319,10 @@ mod tests {
 
     fn webview_route_index() -> SioRouteIndex {
         let route = SioProxyRoute {
-            app_id: "code_te2".to_owned(),
+            app_id: "sample_editor".to_owned(),
             route_id: "wba_webview".to_owned(),
             target: SioTarget::Static,
-            public_path: "/api/app/code_te2/services/wba/webview".to_owned(),
+            public_path: "/api/app/sample_editor/services/wba/webview".to_owned(),
             upstream_path: "/webview".to_owned(),
             aliases: Vec::new(),
             host: "127.0.0.1".to_owned(),
@@ -289,7 +330,7 @@ mod tests {
         };
         SioRouteIndex {
             routes: vec![route],
-            mounts: vec![("/api/app/code_te2/services/wba/webview".to_owned(), 0)],
+            mounts: vec![("/api/app/sample_editor/services/wba/webview".to_owned(), 0)],
         }
     }
 
@@ -306,7 +347,7 @@ mod tests {
         ];
 
         for (rest, expected_upstream) in cases {
-            let public = format!("/api/app/code_te2/services/wba/webview/{rest}");
+            let public = format!("/api/app/sample_editor/services/wba/webview/{rest}");
             let matched = routes.match_path(&public).expect("webview route");
             assert_eq!(matched.route.route_id, "wba_webview");
             assert_eq!(matched.rest, rest);
@@ -318,7 +359,7 @@ mod tests {
 
         assert!(
             routes
-                .match_path("/api/app/code_te2/services/wba/webviews/vsix:surface")
+                .match_path("/api/app/sample_editor/services/wba/webviews/vsix:surface")
                 .is_none()
         );
     }
