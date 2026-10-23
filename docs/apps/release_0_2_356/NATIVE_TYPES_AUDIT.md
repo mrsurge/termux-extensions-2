@@ -25,8 +25,8 @@ already have native fields. Runtime-inspected msgspec/Protocol islands stay inta
 | Order / surface | Source targets | Qualification |
 |---|---|---|
 | N1 WBA inbound queue | workbench_adapter_shell_manager.PendingPush | Six private fields; measured reused coalescing/drain record. Source implemented, no wire change. |
-| N2 network delivery/request metadata | network_rpc_ingress → NativeSocketServer.deliver_rpc; socketio_jsonrpc.JsonRpcEnvelope; parsed editor/Explorer/host records | N2a direct delivery source implemented; N2b parsed metadata remains isolated. Preserve lane validation/IDs/notifications/errors. |
-| N3 pipe-derived events/diagnostics | worker_services.event_bus.WorkerEvent; diagnostics_bridge entries; file_tabs_projection.FileTabDiagnostics | Shared event headers, owner/path/timestamp/counts are candidates. Payloads stay opaque; broad callback migration needs matched owners and project/owner barriers. |
+| N2 network delivery/request metadata | network_rpc_ingress → NativeSocketServer.deliver_rpc; socketio_jsonrpc.JsonRpcEnvelope; parsed editor/Explorer/host records | N2a direct delivery and N2b validated-schema reuse implemented/live accepted. Lane validation/IDs/notifications/errors preserved. |
+| N3 pipe-derived events/diagnostics | worker_services.event_bus.WorkerEvent; diagnostics_bridge entries; file_tabs_projection.FileTabDiagnostics | Qualified. Approved diagnostics TypedDict/safe-copy slice avoids redundant normalization; broad event/native-record conversion deferred on small/mixed gains. Wire and barriers unchanged. |
 | N4 retained UI/data caches | explorer.services.file_ops.DraftCacheEntry; diff_helper/draft_diff_helper cache entries; Git snapshot-backed state | Measure repeated access/allocation; response dictionaries remain at encoding edges. Existing dataclasses may already be native. |
 | N5 conditional coverage/terminal | explorer.services.search_sessions cached records; terminal checkpoint/delta records | Search module absent from inspected startup snapshot: investigate compile coverage without eager imports. Drawer reader/registry classes already native; other terminal app backends remain independently owned. |
 
@@ -176,3 +176,21 @@ production's shared-library layout; common schema and other lanes stay Python.
 This is not a full-domain build or activation. Full-domain adoption/live checks
 remain separately gated; no Rust rebuild, frontend assets or OTA are needed for
 this Python-only change. Comparisons/limits: COMMON_RPC_PROBE.md.
+
+## N3 measured diagnostics slice, not a blanket native conversion
+
+EVENT_DIAGNOSTICS_PROBE.md records source/native event-bus and six diagnostics
+variants, real-codegen output/ownership parity, timing and limitations. Native
+headers/cache records do not justify a broad migration in this comparison.
+The approved source-visible win removes repeated normalization of trusted cached
+marker maps while preserving detached outer/shared nested ownership. DiagEntry
+now explicitly types the existing dictionary; no new record allocation is added.
+Timestamp, accepted-marker counts and log paths use trusted fields directly.
+
+Whole-module codegen also required the separately approved unused async-argument
+del→assignment correction. Actual diagnostics+metrics source/compiled tests and
+existing storm/metrics/projection regressions pass (16 tests); the stronger
+249-file audit passes. Lazy diagnostics compile coverage is unchanged, so this
+is not selected-domain activation or a claim that full-domain code now compiles
+this module. Runtime adoption and live checks remain separate; no Rust/client
+asset publication is needed. Next candidate is N4 retained caches.

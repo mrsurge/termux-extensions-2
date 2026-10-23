@@ -428,8 +428,11 @@ Validation belongs within each work phase, never a replacement for actual work.
 - [x] N2b common parsed metadata allocation reduction: qualified and separately
   approved frozen-schema reuse, without a new native intermediate/schema split.
   Source implementation is complete; full-domain adoption/live gates stay below.
-- [ ] N3 shared pipe-derived event/diagnostic records, then N4 retained caches;
-  N5 search compile coverage/terminal follow-up only when justified.
+- [x] N3 qualification and separately approved diagnostics safe-copy/type slice
+  implemented. Broader event-header conversion deferred on measured evidence;
+  source qualification is not runtime adoption. See the comparison below.
+- [ ] N4 retained caches; N5 search compile coverage/terminal follow-up only
+  when justified.
 - [x] N1/N2a user-built full-domain activation and live acceptance. User reports
   hot reload working, then confirms normal behavior and requests commit/push.
   Read-only verification: live worker PID 3590304 maps the compiled group plus
@@ -474,6 +477,46 @@ Validation belongs within each work phase, never a replacement for actual work.
 - [x] User reports everything working normally and requests a local commit.
   Functional live acceptance is recorded; no additional build/restart or
   independent compiled-provenance inspection was performed by the agent.
+
+## N3 event headers and diagnostics qualification — 2026-10-23
+
+- [x] User approves isolated source/mypyc comparisons for both targets, parity
+  tests and plan/tracker updates only. No production change/full-domain build,
+  activation/restart/commit. Preserve the three user-owned untracked files.
+- [x] Trace event dictionary fan-out across 17 modules including its owner;
+  inspect diagnostics normalization, bounded cache, owner-clear and aggregate
+  projection, plus FileTabDiagnostics. Existing domain manifest includes bus/tab
+  projection, not lazy-loaded diagnostics_bridge; no build coverage change made.
+- [x] Generate real bus variants and extracted diagnostics processing/cache/
+  aggregate variants; source parity includes metrics/queue drain/shutdown and
+  generation rejection with synthetic consumers, owner clear, resource clearing,
+  malformed marker filtering, project pruning and cache cap/tie ordering.
+- [x] Explicit ownership counterexample rejects wholesale marker-copy removal:
+  published marker mutation would reach the retained cache. Qualify dict.copy
+  over normalized cache markers as the behavior-preserving alternative, keeping
+  nested-value sharing unchanged. See EVENT_DIAGNOSTICS_PROBE.md.
+- [x] Two complete timing runs plus a final source/actual-codegen parity rerun;
+  final run also checks payload-map isolation/nested sharing. Isolated source
+  regression and probe strict mypy pass; git diff --check passes. Evidence is
+  retained under .codex-scratch/n3-events-diagnostics[-v2/-v3]-20261023*.
+  Safe dict.copy reduces interpreted aggregation cost ~13–32% in the local
+  fixtures; native record alone is mixed. Event-header gains are small/mixed
+  relative to the broad consumer migration. No live speedup/activation claim.
+- [x] User separately approves diagnostics-only production change: retain
+  dictionary-backed internal TypedDict record, direct trusted fields, detached
+  shallow marker copies and unchanged ingestion/wire/owner/project behavior.
+- [x] Full-module codegen exposes pre-existing del project_root in an async
+  function; user explicitly approves replacing it with _ = project_root. No
+  production inventory expansion/eager import or runtime policy change.
+- [x] Actual diagnostics+metrics two-module codegen and source tests exercise
+  real debounce and bus publication (no patched compiled-local callbacks),
+  marker/input ownership, malformed filtering, clear/resource/project behavior,
+  metrics enabled and 500-entry eviction. All 16 focused tests pass, including
+  existing storm/latency/projection scheduling tests. Stronger 249-file audit
+  and probe strict mypy pass. No new Any or unchecked production casts.
+- [x] User reports the resulting code working normally and approves commit/push.
+  Functional live acceptance recorded; no additional agent-led build, selector
+  change, restart, OTA or compiled-provenance inspection was performed.
 
 ## After the cutover — Code TE2 Any audit
 

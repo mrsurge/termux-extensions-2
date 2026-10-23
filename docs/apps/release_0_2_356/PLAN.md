@@ -516,6 +516,29 @@ event/diagnostic records and selected caches. Do not clone already-structured
 msgspec envelopes or arbitrary extension payloads; preserve schema islands and
 verify actual compiled coverage.
 
+N3 (7e214f4d, 2026-10-23): user approves isolated qualification of both event
+headers and diagnostics cache/copy reuse, plus tests and docs only. WorkerEvent
+has 17 module consumers including its owner; broad conversion is not assumed
+worthwhile. diagnostics_bridge normalizes markers on intake then repeats that
+work during aggregation; native cache records and shallow-copy alternatives
+must preserve owner/project eviction and outgoing copy ownership. In particular,
+dropping copies entirely aliases retained markers into published projections and
+is not a semantics-preserving shortcut. Inspect actual compiled inventory:
+diagnostics_bridge is absent/lazy-loaded while event_bus and file_tabs_projection
+are present. Compare source and speculative compiled costs separately; no eager
+imports or inventory expansion are authorized. Evidence and bounded follow-up:
+EVENT_DIAGNOSTICS_PROBE.md. No production/full-domain build/activation/restart or
+commit is included in this qualification approval.
+
+Subsequent N3 approval implements the measured diagnostics safe-copy slice:
+explicit internal TypedDict/direct field reads and shallow marker copies from
+the already-normalized cache, without changing ingress or wire ownership. Native
+records/event headers do not earn a broad migration from this comparison and
+remain deferred. User separately approves replacing the pre-existing unsupported
+async del project_root with _ = project_root for actual-module codegen parity.
+Production compiler inventory is unchanged; fresh worker import/adoption is a
+separate gate. N4 retained caches is the next candidate after live validation.
+
 N2b comparison (dc66b255, 2026-10-23): shared parsing also serves Sidebar. User
 approves isolated four-lane native-intermediate versus schema-reuse qualification
 and docs only. Preserving real editor-only contract compilation, both candidates

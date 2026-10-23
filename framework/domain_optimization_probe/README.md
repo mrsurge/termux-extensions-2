@@ -104,3 +104,27 @@ After N2b adoption, generation explicitly reconstructs the old dataclass baselin
 before deriving candidates. Real production consumers are separately covered by
 tests/test_socketio_jsonrpc_reuse.py in source and actual-editor-codegen modes;
 benchmark copies alone are not production regression evidence.
+
+## N3 event headers and diagnostics allocation
+
+```bash
+python framework/domain_optimization_probe/events_probe.py .codex-scratch/n3-comparison
+```
+
+The complete event-bus module is copied from source, with dictionary/native
+header variants. Existing dispatch, queue shutdown, metrics, payload helpers and
+generation methods run against explicitly synthetic equivalent subscribers.
+These are not whole-application subscribers or network benchmarks. Path/project
+normalization remains in timing, rather than hiding its dominant real cost.
+
+Diagnostics variants extract actual normalization, cache update/pruning,
+aggregation and valid-owner clear code. Compare dictionary/native cache records,
+unsafe copy elimination (ownership counterexample), and shallow dict.copy on
+already-normalized marker maps. The latter keeps detached outer maps/shared
+nested values. Default source and compiled qualification compare all variants;
+--check-only skips timing. Never adopt a faster candidate that fails ownership.
+
+Current diagnostics_bridge is lazy-loaded and absent from the inspected domain
+manifest: compiling its probe does not establish production compile coverage.
+No production owner is imported or changed; no selector/activation is performed.
+Findings and implementation gates: release_0_2_356/EVENT_DIAGNOSTICS_PROBE.md.

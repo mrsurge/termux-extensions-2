@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 from urllib.parse import urlparse
 
 from .diagnostics_latency_metrics import (
@@ -29,8 +29,17 @@ DIAG_CACHE_MAX = 500
 
 JsonObject = dict[str, object]
 Marker = JsonObject
-DiagEntry = JsonObject
 DiagCacheKey = tuple[str, str]
+
+
+class DiagEntry(TypedDict):
+    """Internal cache record constructed only after marker normalization."""
+
+    type: str
+    ts_ms: int
+    owner: str
+    path: str
+    markers: list[Marker]
 
 
 def _json_object(value: object) -> JsonObject:
@@ -221,7 +230,7 @@ def _process_diagnostics_update(
 
     # Evict oldest if cache too large
     def timestamp(key: DiagCacheKey) -> int:
-        return _int_value(_diag_cache[key].get("ts_ms"))
+        return _diag_cache[key]["ts_ms"]
 
     while len(_diag_cache) > DIAG_CACHE_MAX:
         oldest_key = min(_diag_cache, key=timestamp)
@@ -243,7 +252,7 @@ _DIAG_EMIT_DEBOUNCE_S = 0.3
 async def _emit_diagnostics_to_explorer_and_ui(project_root: str) -> None:
     """Debounced: aggregate full _diag_cache and emit to Explorer/problems."""
     global _diag_emit_task, _diag_emit_dirty
-    del project_root
+    _ = project_root
     _diag_emit_dirty = True
     # If a timer is already running, let it fire — it will see dirty and re-loop.
     if _diag_emit_task and not _diag_emit_task.done():
@@ -279,7 +288,9 @@ async def _emit_diagnostics_debounced() -> None:
     detail_abs: dict[str, list[object]] = {}      # abs_path -> [marker, ...]
 
     for (abs_path, _owner), entry in _diag_cache.items():
-        markers = _marker_list(entry.get("markers", []))
+        # Intake already normalized these maps. Preserve detached outer marker
+        # dictionaries/shared nested values without repeating ingress work.
+        markers = [marker.copy() for marker in entry["markers"]]
         if not markers:
             continue
 
@@ -362,10 +373,7 @@ async def handle_wba_diagnostics_update(ev: JsonObject) -> None:
     entries, ignored = _process_diagnostics_update(ev, project_root=project_root)
     process_ms = elapsed_ms(process_started_ns)
     if metrics_enabled:
-        accepted_markers = sum(
-            len(_marker_list(entry.get("markers", [])))
-            for entry in entries
-        )
+        accepted_markers = sum(len(entry["markers"]) for entry in entries)
         record_latency_event(
             "diagnostics_update",
             {
@@ -381,7 +389,7 @@ async def handle_wba_diagnostics_update(ev: JsonObject) -> None:
             },
         )
     print(
-        f"[diag_bridge] diagnostics/update rx accepted={len(entries)} ignored={ignored} project={project_root} paths={[entry.get('path', '?') for entry in entries]}",
+        f"[diag_bridge] diagnostics/update rx accepted={len(entries)} ignored={ignored} project={project_root} paths={[entry['path'] for entry in entries]}",
         flush=True,
     )
     try:

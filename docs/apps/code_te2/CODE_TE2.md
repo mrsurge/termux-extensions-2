@@ -3061,6 +3061,8 @@ Key files: editor_workbench_runtime.ts, src/server/event-bridge.ts,
 src/extensions/intelligence/diagnostics-snapshot.mjs,
 wba_event_bridge.py, and diagnostics_bridge.py.
 
+The private diagnostics cache uses an explicitly typed dictionary record built only after intake normalizes marker maps/keys. Aggregation shallow-copies each cached marker dictionary without repeating ingress normalization; published outer marker maps cannot mutate the cache, while nested extension values retain their existing shared identity. Timestamp, accepted-marker counts and log paths read the trusted internal fields directly. Owner/project eviction, debounce, wire dictionaries and direct editor diagnostics are unchanged. This does not expand the startup compile inventory: lazy-loaded diagnostics_bridge was absent from the inspected selected domain; isolated actual-module mypyc parity is qualification, not runtime activation. Source/measurement details: docs/apps/release_0_2_356/EVENT_DIAGNOSTICS_PROBE.md.
+
 ## 34) Multi-provider language features
 
 Provider registration is WBA-driven and generic. The registry matches the exact
