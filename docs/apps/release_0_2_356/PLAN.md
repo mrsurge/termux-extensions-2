@@ -516,6 +516,27 @@ event/diagnostic records and selected caches. Do not clone already-structured
 msgspec envelopes or arbitrary extension payloads; preserve schema islands and
 verify actual compiled coverage.
 
+N2b comparison (dc66b255, 2026-10-23): shared parsing also serves Sidebar. User
+approves isolated four-lane native-intermediate versus schema-reuse qualification
+and docs only. Preserving real editor-only contract compilation, both candidates
+pass 136 cases per source/compiled-editor mode; ordinary native metadata helps
+less than reusing the validated msgspec schema. Reuse removes the intermediate
+allocation, with 20–28% small-parser reductions including decode in local samples;
+wide-message decode dominates. Exact frozen-dataclass relocation fails import on
+the installed toolchain and is not an adoption path. Prefer the refined reuse
+variant preserving original private wire fields and legacy public constructor,
+but explicitly changing the coercer's concrete return annotation; lane policies/
+projections stay unchanged. Evidence/gates: COMMON_RPC_PROBE.md. No production
+edit or runtime transition is authorized by that probe approval.
+
+Subsequent concrete approval adopts the refined schema-reuse source change in
+socketio_jsonrpc.py, with actual four-lane output/error parity and real editor
+contract codegen. Keep the schema interpreted and legacy constructor available;
+return the accurately annotated frozen schema, replacing only whitespace-bearing
+methods. No lane dictionary, validation, transport or dispatcher changes. Probe
+generation reconstructs the pre-change baseline so future comparisons remain
+meaningful. Full-domain build/adoption/restart/commit remain outside this scope.
+
 2026-10-23: user subsequently approves **both isolated probes**, plus findings in
 this plan/tracker, without production cutover/restart. Source and actual mypyc
 queue comparison find an 8.5–12.1% local queue/drain reduction for a native
@@ -526,7 +547,8 @@ inseparable production rewrite. Source/measurements/limits and remaining gates:
 `DOMAIN_OPTIMIZATION_PROBE.md`; reproducible isolated tooling:
 `framework/domain_optimization_probe/README.md`. That initial comparison did not
 approve production edits; subsequent N1 and N2a approvals above are the bounded
-production exceptions. Full domain build, activation and async adoption remain
+production exceptions, now joined by the separately approved N2b source reuse.
+Full domain build, activation and async adoption remain
 unapproved.
 
 User explicitly schedules this after the boundary-conversion work (2026-10-21).

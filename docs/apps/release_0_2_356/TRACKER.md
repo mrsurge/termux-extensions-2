@@ -425,8 +425,9 @@ Validation belongs within each work phase, never a replacement for actual work.
   actual three-module mypyc submit/Future/adapter and error/cancellation parity;
   stronger audit passes 249 files. Updated production-AST microprobe passes 16
   cases per source/compiled mode, not a live network benchmark.
-- [ ] N2b common/lane parsed metadata allocation reduction/schema-module split
-  requires separate qualification and concrete production approval.
+- [x] N2b common parsed metadata allocation reduction: qualified and separately
+  approved frozen-schema reuse, without a new native intermediate/schema split.
+  Source implementation is complete; full-domain adoption/live gates stay below.
 - [ ] N3 shared pipe-derived event/diagnostic records, then N4 retained caches;
   N5 search compile coverage/terminal follow-up only when justified.
 - [x] N1/N2a user-built full-domain activation and live acceptance. User reports
@@ -436,6 +437,43 @@ Validation belongs within each work phase, never a replacement for actual work.
   selector integrity/source fingerprint reports current, FORCE_INTERPRETED=0.
   Reflection is disabled; no eval, additional build or runtime restart performed.
   This proves compiled activation, not a measured end-to-end performance gain.
+
+## N2b complete common-parser comparison — 2026-10-23
+
+- [x] Initial approval covers isolated comparison/test/docs only; subsequent
+  approval covers the bounded source change below. Running worker is untouched.
+- [x] Trace shared helper into editor/Explorer/host AND Sidebar; preserve actual
+  editor-only compiled contract coverage plus interpreted schema/error islands.
+- [x] Initial frozen metadata dataclass relocation compiles but fails import
+  (KeyError: object); preserve evidence and do not adopt an annotation workaround.
+- [x] Ordinary public-read-only native record and refined validated-schema reuse
+  pass 34 output/error cases per lane: 136 per source and compiled-editor mode.
+  Whitespace, frozen attributes, spoof fields, original input and ID distinctions
+  are checked; final lane projections/policy remain unchanged.
+- [x] Nine-sample complete-parser comparison: refined reuse gives ~20–28% lower
+  small-request parser cost with decode; native intermediate gains smaller.
+  Wide decode dominates and results are not a live network/app speedup claim.
+  Probe strict mypy passes. Tool/evidence/limits: COMMON_RPC_PROBE.md.
+- [x] Approve bounded production schema reuse/common-helper edit and real lane
+  regressions/codegen. No full-domain build/activation/restart/commit included.
+- [x] Reuse validated frozen schema with read-only request_id/has_id; retain
+  private wire fields and legacy dataclass constructor. Whitespace normalization
+  alone replaces the frozen instance; all validation and lane policy is unchanged.
+- [x] 28 focused tests plus three subtests pass, including actual two-module
+  editor-contract codegen and the existing three-module submit/Future fixture.
+  Real production lane comparison covers 136 outcomes per source/compiled-editor
+  mode against the explicitly reconstructed pre-N2b baseline, including errors.
+  Stronger strict/extra/all-Any mypy passes 249 files; probe strict mypy and
+  git diff --check pass. Initial fixture failures were isolation ordering and
+  single-module codegen/helper layout, corrected in test setup without product
+  fallbacks or schema changes. No live runtime was touched.
+- [x] Rerun the complete three-way probe after production adoption: all four
+  lanes pass 34 cases in each source/compiled-editor mode, retaining the old
+  dataclass baseline. Evidence: ignored
+  .codex-scratch/common-rpc-parser-production-20261023.log and generated sources.
+- [x] User reports everything working normally and requests a local commit.
+  Functional live acceptance is recorded; no additional build/restart or
+  independent compiled-provenance inspection was performed by the agent.
 
 ## After the cutover — Code TE2 Any audit
 

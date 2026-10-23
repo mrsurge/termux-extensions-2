@@ -157,3 +157,22 @@ metadata allocation reduction; async adoption remains separate.
 Evidence: ignored .codex-scratch/domain-native-queue-production-20261023.log,
 domain-rpc-records-v2-20261023.log and domain-rpc-delivery-20261023.log, plus their
 generated source/compiler directories. No live resources or selectors are touched.
+
+## N2b common-schema reuse — approved source implementation
+
+The common socketio_jsonrpc coercer now returns its validated frozen msgspec
+envelope directly, with read-only request_id/has_id properties over the unchanged
+id wire field. A whitespace-normalized method alone uses structs.replace; the
+ordinary path avoids a separate metadata dataclass allocation. The legacy public
+JsonRpcEnvelope constructor remains available, but returned values are explicitly
+annotated as the private schema, not disguised dataclass instances. Schema/error
+modules stay interpreted; lane policies and final dictionaries remain unchanged.
+
+The stronger strict/extra/all-Any audit passes all 249 Code TE2 files. Actual
+production editor/Explorer/host/Sidebar consumers match the reconstructed old
+baseline across 34 cases each, in source and actual compiled-editor modes. The
+codegen fixture uses a small multi-module group with network_rpc_ingress to match
+production's shared-library layout; common schema and other lanes stay Python.
+This is not a full-domain build or activation. Full-domain adoption/live checks
+remain separately gated; no Rust rebuild, frontend assets or OTA are needed for
+this Python-only change. Comparisons/limits: COMMON_RPC_PROBE.md.

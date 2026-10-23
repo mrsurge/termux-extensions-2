@@ -20,6 +20,14 @@ class _IncomingJsonRpcEnvelope(msgspec.Struct, frozen=True):
     params: object = None
     id: object = msgspec.UNSET
 
+    @property
+    def request_id(self) -> object:
+        return self.id
+
+    @property
+    def has_id(self) -> bool:
+        return self.id is not msgspec.UNSET
+
 
 @dataclass(frozen=True)
 class JsonRpcEnvelope:
@@ -62,7 +70,7 @@ def coerce_error_request_id(value: object) -> object | None:
     return value if is_jsonrpc_id(value) else None
 
 
-def coerce_jsonrpc_envelope(payload: object) -> JsonRpcEnvelope:
+def coerce_jsonrpc_envelope(payload: object) -> _IncomingJsonRpcEnvelope:
     try:
         incoming = msgspec.convert(payload, _IncomingJsonRpcEnvelope, str_keys=True)
     except msgspec.ValidationError as exc:
@@ -87,9 +95,7 @@ def coerce_jsonrpc_envelope(payload: object) -> JsonRpcEnvelope:
             JSONRPC_INVALID_REQUEST,
             "method is required",
         )
-    return JsonRpcEnvelope(
-        method=method,
-        params=incoming.params,
-        request_id=request_id,
-        has_id=request_id is not msgspec.UNSET,
-    )
+    # Reuse the validated frozen schema; only method normalization needs a copy.
+    if method == incoming.method:
+        return incoming
+    return msgspec.structs.replace(incoming, method=method)

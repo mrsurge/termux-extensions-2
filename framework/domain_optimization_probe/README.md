@@ -74,3 +74,33 @@ evidence; use a new scratch directory for current-source qualification.
 Queue generation handles either the old TypedDict or current native-class source,
 using independent AST copies. Staged findings/production and activation gates:
 `docs/apps/release_0_2_356/NATIVE_TYPES_AUDIT.md`.
+
+## Complete common/lane parser comparison
+
+```bash
+python framework/domain_optimization_probe/common_rpc_probe.py .codex-scratch/common-parser-comparison
+```
+
+Compare the original intermediate dataclass, a plain native public-read-only
+record, and direct reuse of the validated frozen msgspec schema. Preserve actual
+coverage: only editor contracts and candidate metadata compile; Explorer/host/
+Sidebar contracts and msgspec/error support stay interpreted. All four lane
+validators are copied unchanged except import routing; notification processing
+follows the real request-then-notification path. Source/compiled parity includes
+complete error details, ID/params edges, normalization, frozen public fields and
+unknown-field spoofing. Timing includes complete lane parsing and optionally
+MessagePack decoding, not synthetic repeated field access.
+
+The exact frozen-dataclass relocation initially failed native import on installed
+mypyc 2.3/CPython 3.14 (KeyError: object). The ordinary native comparison avoids
+that failure but does not promise dataclass equality/introspection compatibility.
+The reuse candidate keeps the original private schema and public legacy
+constructor; the coercer returns the schema's attribute-compatible concrete type
+instead. Surrounding method whitespace uses frozen structs.replace, without
+mutating input or adding an object on the ordinary already-trimmed path.
+See release_0_2_356/COMMON_RPC_PROBE.md for evidence and production decision gates.
+
+After N2b adoption, generation explicitly reconstructs the old dataclass baseline
+before deriving candidates. Real production consumers are separately covered by
+tests/test_socketio_jsonrpc_reuse.py in source and actual-editor-codegen modes;
+benchmark copies alone are not production regression evidence.
