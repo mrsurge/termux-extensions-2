@@ -6278,6 +6278,13 @@ For frontend network ingress, only `rpc` on `/rpc/editor`, `/rpc/explorer` and
 Event values provide namespace/SID/event separately. The shared Backend admission,
 blocking Future wait/cancel and result encoding are unchanged; Python
 `submit_rpc` schedules the cached msgspec decode and same namespace dispatcher.
+Python then passes namespace/SID/data directly to NativeSocketServer.deliver_rpc,
+which calls the registered namespace's trigger_event("rpc", sid, data). There is
+no temporary transport-context dictionary on this admitted RPC path; the general
+deliver method retains lifecycle/non-RPC behavior and session cleanup. Handler
+lookup/cancellation and lane validation remain with the namespace owners. This
+direct-delivery follow-up requires matching Python/mypyc adoption only, not a new
+Rust worker, frontend publication or async bridge. Parsed schema DTOs stay as-is.
 Payload fields cannot override the transport identity. Native guards and the
 former wrapper's effective depth/node budget remain, including their distinct
 parse-error versus backend-failure behavior. Startup rejects old domains without

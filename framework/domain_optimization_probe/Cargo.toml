@@ -1,0 +1,17 @@
+[package]
+name = "te2-domain-optimization-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+pyo3 = { version = "=0.28.3", features = ["auto-initialize"] }
+pyo3-async-runtimes = { version = "=0.28.0", features = ["tokio-runtime"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+serde_json = "1"
+
+[profile.dev]
+debug = 0

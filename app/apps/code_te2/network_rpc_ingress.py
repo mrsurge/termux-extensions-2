@@ -12,7 +12,7 @@ _decoder = msgspec.msgpack.Decoder(object)
 
 
 class RpcDelivery(Protocol):
-    async def deliver(self, event: dict[str, object]) -> object: ...
+    async def deliver_rpc(self, namespace: str, sid: str, data: object) -> object: ...
 
 
 async def deliver_rpc(
@@ -23,4 +23,4 @@ async def deliver_rpc(
     data = _decoder.decode(payload)
     # Payload fields cannot override transport identity, even on scalar/invalid
     # domain envelopes. Their rejection belongs to the unchanged namespace owner.
-    return await server.deliver({"namespace": namespace, "sid": sid, "event": event, "data": data})
+    return await server.deliver_rpc(namespace, sid, data)

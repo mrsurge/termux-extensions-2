@@ -2,7 +2,7 @@ import hashlib
 from collections import deque
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Optional, TypedDict, cast
+from typing import Optional, cast
 import asyncio
 import logging
 import os
@@ -44,13 +44,20 @@ _rpc_write_lock: Optional[asyncio.Lock] = None
 _push_drain_task: asyncio.Task[None] | None = None
 
 
-class PendingPush(TypedDict):
-    obj: JsonObject
-    diagnostics_owner: str | None
-    items_by_uri: dict[str, JsonObject]
-    event_count: int
-    payload_bytes: int
-    queued_ns: int | None
+class PendingPush:
+    """Private queue record: native fields under mypyc, never a wire DTO."""
+
+    def __init__(
+        self, *, obj: JsonObject, diagnostics_owner: str | None,
+        items_by_uri: dict[str, JsonObject], event_count: int,
+        payload_bytes: int, queued_ns: int | None,
+    ) -> None:
+        self.obj = obj
+        self.diagnostics_owner = diagnostics_owner
+        self.items_by_uri = items_by_uri
+        self.event_count = event_count
+        self.payload_bytes = payload_bytes
+        self.queued_ns = queued_ns
 
 
 _pending_pushes: deque[PendingPush] = deque()
@@ -427,7 +434,7 @@ def _queue_push(obj: JsonObject, *, payload_bytes: int) -> None:
     if (
         owner is not None
         and _pending_pushes
-        and _pending_pushes[-1]["diagnostics_owner"] == owner
+        and _pending_pushes[-1].diagnostics_owner == owner
     ):
         batch = _pending_pushes[-1]
     if batch is None:
@@ -445,14 +452,14 @@ def _queue_push(obj: JsonObject, *, payload_bytes: int) -> None:
         )
         _pending_pushes.append(batch)
 
-    batch["event_count"] += 1
-    batch["payload_bytes"] += payload_bytes
+    batch.event_count += 1
+    batch.payload_bytes += payload_bytes
     if owner is not None and event is not None:
         queued_obj: JsonObject = {
             "event": "te2.event",
             "params": dict(event),
         }
-        batch["obj"] = queued_obj
+        batch.obj = queued_obj
         raw_items = event.get("items")
         if isinstance(raw_items, list):
             items = cast(list[object], raw_items)
@@ -461,8 +468,8 @@ def _queue_push(obj: JsonObject, *, payload_bytes: int) -> None:
                 if not item:
                     continue
                 uri = str(item.get("uri") or "")
-                item_key = uri or f"__missing_uri__:{batch['event_count']}:{index}"
-                batch["items_by_uri"][item_key] = item
+                item_key = uri or f"__missing_uri__:{batch.event_count}:{index}"
+                batch.items_by_uri[item_key] = item
 
     if _push_drain_task is None or _push_drain_task.done():
         _push_drain_task = asyncio.create_task(
@@ -480,20 +487,20 @@ async def _drain_pushes() -> None:
         await wait_for_application()
         while _pending_pushes:
             batch = _pending_pushes.popleft()
-            obj: JsonObject = batch["obj"]
-            if batch["diagnostics_owner"] is not None:
+            obj: JsonObject = batch.obj
+            if batch.diagnostics_owner is not None:
                 event = _te2_push_event(obj)
                 if event is None:
                     continue
-                event["items"] = list(batch["items_by_uri"].values())
+                event["items"] = list(batch.items_by_uri.values())
                 obj = {"event": "te2.event", "params": event}
             await _handle_push_event(
                 obj,
-                queued_ns=batch["queued_ns"],
-                payload_bytes=batch["payload_bytes"],
-                backlog_at_schedule=batch["event_count"],
-                coalesced_events=batch["event_count"],
-                coalesced_items=len(batch["items_by_uri"]),
+                queued_ns=batch.queued_ns,
+                payload_bytes=batch.payload_bytes,
+                backlog_at_schedule=batch.event_count,
+                coalesced_events=batch.event_count,
+                coalesced_items=len(batch.items_by_uri),
             )
     except asyncio.CancelledError:
         pass

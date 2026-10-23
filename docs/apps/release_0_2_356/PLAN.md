@@ -454,7 +454,80 @@ behavior remain; no other events/HTTP helpers/outbound/direct-WBA paths migrate.
 No runtime transition, OTA, version or commit is included. Targeted mypyc-native-type review remains after the
 selected PyO3 conversion work, without broadening into a zero-PyObject goal.
 
+#### Async bridge feasibility — uvloop and pyo3-async-runtimes
+
+2026-10-23: user requests investigation alongside the native-type audit, then
+approves recording findings only. No new crate, lockfile, prototype, production
+change, build or activation is authorized by this entry. This candidate does not
+silently replace or reorder the targeted native-type pass.
+
+Upstream pyo3-async-runtimes is the successor for modern PyO3 (the old
+pyo3-asyncio release targets PyO3 0.20). Its 0.28.0 manifest requires PyO3 0.28,
+matching this worker's pinned 0.28.3, and lists both single-/multi-thread Tokio
+uvloop tests. Its README explicitly describes uvloop use. This establishes an
+upstream-supported compatibility candidate, not a test of TE2's CPython 3.14,
+Termux uvloop-te2 wheel or current worker lifecycle.
+
+Source-backed opportunity: Backend.call_input currently holds an owned admission
+permit in spawn_blocking while the Python concurrent Future's result(120.0)
+waits. The Python task already runs on the dedicated domain loop created by
+app.libs.asyncio_runtime.new_event_loop (optional uvloop, explicit asyncio
+fallback). An awaitable bridge could let Tokio await completion without parking
+one blocking-pool thread per in-flight Python operation. This is a potential
+thread/concurrency benefit, not a measured request-latency/RSS win. It does not
+merge Tokio and uvloop, remove the GIL, make synchronous Python nonblocking or
+eliminate serialization and cross-thread scheduling.
+
+A separately approved isolated probe should compare the existing path with
+into_future_with_locals/explicit TaskLocals bound to the actual domain loop.
+Do not adopt an event-loop-owning main macro or globally install a new loop policy
+over the current worker. Our submit returns concurrent.futures.Future, not a
+Python asyncio awaitable: qualify the minimal safe adaptation or coroutine entry
+point, retain the byte/DTO boundaries and avoid duplicate scheduling. Submission
+and result conversion may still need bounded blocking work; do not move costly
+Python attachment/marshalling blindly onto Tokio executor threads.
+
+Gates: default asyncio and uvloop, real owning-thread loop identity, contextvars,
+source/mypyc parity, simultaneous calls, exception/result propagation, timeout,
+caller cancellation, accepted-work admission lifetime, shutdown and stale-loop
+invalidation. Preserve count/byte limits and no uncertain execution replay;
+dropping a Rust waiter must not silently change Python task cancellation or
+release admission while accepted work is still running. Qualify private Linux
+Python and Termux separately before dependency/adoption decisions. Measure parked
+threads, throughput/tail latency and bridge overhead under bounded concurrency.
+
+Primary evidence (checked 2026-10-23):
+
+- [Upstream project and uvloop example](https://github.com/PyO3/pyo3-async-runtimes).
+- [0.28 event-loop/TaskLocals contract](https://docs.rs/pyo3-async-runtimes/0.28.0/pyo3_async_runtimes/).
+- [0.28 manifest: PyO3 dependency and Tokio uvloop tests](https://docs.rs/crate/pyo3-async-runtimes/0.28.0/source/Cargo.toml).
+- [Original pyo3-asyncio release](https://docs.rs/crate/pyo3-asyncio/0.20.0).
+
 #### Follow-up after PyO3 optimization — targeted mypyc native types
+
+User expands this to a staged cross-surface pass: **pipe/network first, retained
+UI caches also included**. Source inventory, N1–N5 order, measurements and gates:
+`NATIVE_TYPES_AUDIT.md`. Subsequent concrete approval permits N1 PendingPush native
+fields and isolated RPC metadata/direct-delivery probes. Subsequent N2a approval
+implements direct typed network delivery without its temporary context map,
+with source/real-codegen namespace/cancellation parity; no full-domain build/
+activation/restart. Next proposal is common/lane metadata, then shared
+event/diagnostic records and selected caches. Do not clone already-structured
+msgspec envelopes or arbitrary extension payloads; preserve schema islands and
+verify actual compiled coverage.
+
+2026-10-23: user subsequently approves **both isolated probes**, plus findings in
+this plan/tracker, without production cutover/restart. Source and actual mypyc
+queue comparison find an 8.5–12.1% local queue/drain reduction for a native
+PendingPush record; async source/compiled × asyncio/uvloop qualification frees
+blocking sections during awaits but has mixed latency. Recommend the native
+record first and a separately gated capacity-oriented async cutover, not one
+inseparable production rewrite. Source/measurements/limits and remaining gates:
+`DOMAIN_OPTIMIZATION_PROBE.md`; reproducible isolated tooling:
+`framework/domain_optimization_probe/README.md`. That initial comparison did not
+approve production edits; subsequent N1 and N2a approvals above are the bounded
+production exceptions. Full domain build, activation and async adoption remain
+unapproved.
 
 User explicitly schedules this after the boundary-conversion work (2026-10-21).
 Audit hot, frequently reused domain records, numeric loops and repeated dictionary

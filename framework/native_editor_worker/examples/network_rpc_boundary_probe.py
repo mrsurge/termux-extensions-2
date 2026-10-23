@@ -18,6 +18,10 @@ _thread: threading.Thread | None = None
 _previous: ModuleType | None = None
 _server = NativeSocketServer()
 _live = True
+_behavior = "normal"
+_calls = 0
+_request_started = threading.Event()
+_request_cancelled = threading.Event()
 
 
 class Gateway(ModuleType):
@@ -32,9 +36,21 @@ class Namespace:
         assert server is _server
 
     async def trigger_event(self, event: str, *args: object) -> object:
+        global _calls
         if not _live or args[0] != "owned-sid":
             raise RuntimeError("stale client")
         assert event == "rpc"
+        _calls += 1
+        if _behavior == "error":
+            raise TypeError("handler failure; no replay")
+        if _behavior == "cancel":
+            raise asyncio.CancelledError
+        if _behavior == "wait":
+            _request_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                _request_cancelled.set()
         await asyncio.sleep(0)
         return {"namespace":self.namespace,"sid":args[0],"data":args[1]}
 
@@ -92,7 +108,7 @@ def graph(namespace: str, data: object) -> concurrent.futures.Future[object]:
 
 
 def check_python() -> None:
-    global _live
+    global _live, _behavior
     for namespace in ("/rpc/editor", "/rpc/explorer", "/ui_ipc"):
         for index in range(6):
             wire = fixture(index)
@@ -117,3 +133,42 @@ def check_python() -> None:
             pass
         else:
             raise AssertionError("invalid transport context accepted")
+    before = _calls
+    try:
+        native_worker.submit_rpc("/ui_ipc", "owned-sid", "rpc", b"\xc1").result(2)
+    except msgspec.DecodeError:
+        pass
+    else:
+        raise AssertionError("malformed frame dispatched")
+    assert _calls == before
+    for direct in (False, True):
+        def submit() -> concurrent.futures.Future[object]:
+            if direct:
+                return native_worker.submit_rpc("/rpc/editor", "owned-sid", "rpc", b"\xc0")
+            return graph("/rpc/editor", None)
+        try:
+            _behavior = "error"
+            before = _calls
+            try:
+                submit().result(2)
+            except TypeError as error:
+                assert str(error) == "handler failure; no replay"
+            else:
+                raise AssertionError("handler failure lost")
+            assert _calls == before + 1
+            _behavior = "cancel"
+            try:
+                submit().result(2)
+            except concurrent.futures.CancelledError:
+                pass
+            else:
+                raise AssertionError("handler cancellation lost")
+            _behavior = "wait"
+            _request_started.clear()
+            _request_cancelled.clear()
+            future = submit()
+            assert _request_started.wait(2)
+            assert future.cancel()
+            assert _request_cancelled.wait(2)
+        finally:
+            _behavior = "normal"

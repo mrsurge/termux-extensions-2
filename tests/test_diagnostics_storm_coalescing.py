@@ -37,6 +37,31 @@ class DiagnosticsStormCoalescingTests(unittest.IsolatedAsyncioTestCase):
         await adapter_manager._clear_pending_pushes()
         diagnostics_bridge.reset_diagnostics_projection()
 
+    async def test_native_record_retains_counters_and_missing_uri_items(self) -> None:
+        dispatch = AsyncMock()
+        with patch.object(wba_event_bridge, "dispatch_wba_pipe_event", dispatch):
+            for message in ("first", "second"):
+                adapter_manager._queue_push(
+                    _push({"type": "diagnostics/update", "owner": "test",
+                           "items": [{"markers": [{"message": message}]}]}),
+                    payload_bytes=7,
+                )
+            self.assertEqual(len(adapter_manager._pending_pushes), 1)
+            record = adapter_manager._pending_pushes[0]
+            self.assertIsInstance(record, adapter_manager.PendingPush)
+            self.assertEqual(record.event_count, 2)
+            self.assertEqual(record.payload_bytes, 14)
+            self.assertEqual(record.diagnostics_owner, "test")
+            self.assertEqual(len(record.items_by_uri), 2)
+            task = adapter_manager._push_drain_task
+            assert task is not None
+            await task
+        dispatch.assert_awaited_once()
+        self.assertEqual(
+            [item["markers"][0]["message"] for item in dispatch.await_args.args[0]["items"]],
+            ["first", "second"],
+        )
+
     async def test_push_drain_coalesces_latest_uri_without_crossing_lifecycle_barrier(
         self,
     ) -> None:

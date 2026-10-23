@@ -137,6 +137,16 @@ class NativeSocketServer:
             return await target(*args, **kwargs)
         return asyncio.create_task(run())
 
+    async def deliver_rpc(self, namespace: str, sid: str, data: object) -> object:
+        """Deliver an admitted RPC without allocating a transport-context map.
+
+        Native ingress owns namespace/SID/event validation. Keep the namespace
+        trigger as the owner of handler lookup, cancellation and domain policy.
+        Lifecycle and non-RPC events retain the general deliver path below.
+        """
+        handler = self.namespace_handlers[namespace]
+        return await handler.trigger_event("rpc", sid, data)
+
     async def deliver(self, event: dict[str, object]) -> object:
         namespace = str(event["namespace"])
         sid = str(event["sid"])

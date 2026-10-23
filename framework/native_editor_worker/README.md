@@ -163,6 +163,14 @@ Parse versus backend errors, native admission, 120-second Future wait/cancel,
 ACK encoding/disconnect handling and outbound paths stay unchanged. Lifecycle,
 other socket events, HTTP helpers and direct WBA streams do not migrate.
 
+The direct-delivery follow-up keeps that Rust/PyO3 contract intact: after the
+existing context guard/decode, Python calls NativeSocketServer.deliver_rpc with
+typed namespace/SID/data, without constructing a temporary context dictionary.
+It still uses the registered namespace's trigger_event; general lifecycle
+delivery is unchanged. This follow-up needs matching Python/mypyc adoption only,
+not another native build or client update. Qualification: NATIVE_TYPES_AUDIT.md
+in the .356 workstream; parsed RPC schema/metadata conversion remains separate.
+
 Startup also requires callable `submit_rpc`, rejecting stale domains explicitly.
 The helper is included in startup inventory; prepare a matching native worker and
 full domain/mypyc before separately approved adoption. No frontend/OTA/framework

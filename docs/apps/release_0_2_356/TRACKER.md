@@ -362,9 +362,80 @@ Validation belongs within each work phase, never a replacement for actual work.
 - [x] Record user-requested mypyc-native-type pass immediately after PyO3
   optimization: hot reusable records, numeric loops and repeated dictionary
   accesses with clear benefits, not eliminating all PyObjects.
-- [ ] After boundary measurements, identify/approve bounded native-type candidates
+- [x] After boundary measurements, identify/approve bounded native-type candidates
   and verify compiled/interpreted behavior plus actual cost reduction. Keep
   runtime-inspected DTO/Protocol contracts compatible; no blanket rewrite.
+
+### Async bridge feasibility — 2026-10-23
+
+- [x] User requests pyo3-asyncio/uvloop usefulness investigation, then chooses
+  Record findings only. Runtime and dependencies remain unchanged.
+- [x] Upstream docs/0.28 manifest support uvloop and explicit loop/context binding;
+  pyo3-async-runtimes 0.28 is the candidate matching the worker's PyO3 0.28.3.
+  This is upstream evidence, not TE2/private-runtime/Android qualification.
+- [x] Identify actual candidate: replace the parked spawn_blocking Future.result
+  wait with awaitable completion while retaining existing domain-loop ownership,
+  typed byte boundaries and accepted-work admission. Concurrent Future adaptation
+  needs qualification; no proven speedup or shared-loop/GIL-removal claim.
+- [x] Separately approve an isolated existing-path versus async-bridge probe on
+  asyncio and uvloop, including cancellation/timeout/shutdown/context/codegen and
+  bounded-concurrency costs, before choosing production dependency/runtime edits.
+  Full design/evidence is in PLAN.md, Async bridge feasibility. Native-type audit
+  remains scheduled; no automatic reprioritization by this research entry.
+
+### Native-record and async-completion probes — 2026-10-23
+
+- [x] User chooses Probe both; isolated crate/fixtures and documentation only.
+  No production edits/dependency changes, runtime restart or activation.
+- [x] Inspect actual generated C: PendingPush counters still use dictionary/
+  generic integer operations; NativeSocketServer already has native fields.
+- [x] Extract real queue AST, change only its private record representation;
+  compare full outputs/coalescing barriers and cancellation/clear/reuse in source
+  and real mypyc. Final compiled reductions 8.5–12.1% for queue-only fixtures;
+  traced allocation peak ~64 KiB lower, not a process-memory/speedup claim.
+- [x] Async source/mypyc × asyncio/uvloop: owning loop/context, result/error,
+  deadlines, caller-drop permit retention and overload pass; bridge pending
+  shutdown/stale-loop rejection passes. Occupancy during wait falls 1/16/64→0;
+  latency mixed and short-call overhead remains, not a demonstrated global win.
+- [x] Strict mypy for three probe Python files; isolated Rust release builds and
+  formatting; production source/dependencies and user files preserved.
+- [x] User subsequently approves N1 native queue record plus isolated RPC probes;
+  see expanded stages below. Async bridge production adoption remains separate.
+  Full domain/Android/private-runtime adoption and real lifecycle/transport
+  parity are still gates.
+  See DOMAIN_OPTIMIZATION_PROBE.md for exact methodology, evidence and limits.
+
+## Expanded native-type stages — 2026-10-23
+
+- [x] User requests cross-surface audit; clarifies traffic priority and UI-cache
+  inclusion. Record N1–N5 inventory/order in NATIVE_TYPES_AUDIT.md.
+- [x] Concrete approval: implement measured private WBA record; isolated editor/
+  Explorer/host RPC metadata and direct-delivery comparisons; update docs only
+  beyond N1. No runtime transition/full build/other production cutover.
+- [x] N1 source native fields, missing-URI/counter regression; diagnostics/WBA/
+  bootstrap tests 17 passed plus 2 subtests; stronger all-Any audit 249 files.
+  Actual current queue-class/function AST passes source and real mypyc parity.
+- [x] RPC metadata: 51 cases per source/compiled mode; direct delivery: 16 per
+  mode. Small-message metadata gains modest/mixed; eliminating the temporary
+  context map has the stronger local signal, but wide-decode cases are mixed.
+  No whole-network/application performance claim. Probe Python strict checks pass.
+- [x] N2a approved/implemented direct typed delivery through existing registered
+  namespace trigger, retaining guard/decode and general lifecycle delivery.
+  No Rust/queue/Future/wire/outbound/client changes. Thirteen tests pass including
+  actual three-module mypyc submit/Future/adapter and error/cancellation parity;
+  stronger audit passes 249 files. Updated production-AST microprobe passes 16
+  cases per source/compiled mode, not a live network benchmark.
+- [ ] N2b common/lane parsed metadata allocation reduction/schema-module split
+  requires separate qualification and concrete production approval.
+- [ ] N3 shared pipe-derived event/diagnostic records, then N4 retained caches;
+  N5 search compile coverage/terminal follow-up only when justified.
+- [x] N1/N2a user-built full-domain activation and live acceptance. User reports
+  hot reload working, then confirms normal behavior and requests commit/push.
+  Read-only verification: live worker PID 3590304 maps the compiled group plus
+  native_worker/WBA modules from domain-35fb05ee0e41585e84d9ab34d34babbd7c7faa99bd128c29521447b90a1e7d18;
+  selector integrity/source fingerprint reports current, FORCE_INTERPRETED=0.
+  Reflection is disabled; no eval, additional build or runtime restart performed.
+  This proves compiled activation, not a measured end-to-end performance gain.
 
 ## After the cutover — Code TE2 Any audit
 
