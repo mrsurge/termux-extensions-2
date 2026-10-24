@@ -539,6 +539,15 @@ async del project_root with _ = project_root for actual-module codegen parity.
 Production compiler inventory is unchanged; fresh worker import/adoption is a
 separate gate. N4 retained caches is the next candidate after live validation.
 
+N3 user live acceptance closes that gate. User subsequently approves bounded N4:
+compare caches, remove unused diff payload size/stringification, return detached
+Git status dictionaries through builtin copying, and keep draft-index native
+conversion probe-only. Existing diff/draft/Git cache dataclasses are already
+native. Qualified draft-index field conversion brings no convincing hit-path
+gain, so retain it. Exact source/codegen tests, synthetic timing/memory scopes and
+activation gates: RETAINED_CACHE_PROBE.md. No cache lifetime/ownership/wire change,
+full-domain build/activation/restart or commit is authorized by this slice.
+
 N2b comparison (dc66b255, 2026-10-23): shared parsing also serves Sidebar. User
 approves isolated four-lane native-intermediate versus schema-reuse qualification
 and docs only. Preserving real editor-only contract compilation, both candidates

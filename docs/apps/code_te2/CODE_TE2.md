@@ -6200,6 +6200,18 @@ delivery is unchanged. Deploy/load the rebuilt host frontend with this removal:
 older already-loaded clients retry the missing route and produce 403 warnings.
 Do not restore that redundant subscription or mask proxy errors.
 
+Retained Git/diff cache optimizations preserve existing ownership: diff cache
+keys remain normalized root/relative path/base with the same TTL/invalidation,
+and hits return the same payload object. Removed DiffCacheEntry.size was unused
+metadata, not a size-admission guard; misses no longer stringify the whole payload
+just to populate it. Cached and freshly fetched Git status projections return a
+new builtin dictionary over the validated status map, never the retained map
+itself. Dirty/unknown cached reads still return no statuses without provider I/O.
+Existing diff/draft/Git cache dataclasses already have native mypyc types; no
+replacement wrapper or draft-index native conversion is needed. Compilation,
+source/codegen qualification and runtime adoption remain distinct. Evidence and
+activation gates: docs/apps/release_0_2_356/RETAINED_CACHE_PROBE.md.
+
 ### Production Projects Modal
 
 `projects-debug-modal.ts` retains its legacy internal/CSS names but is production

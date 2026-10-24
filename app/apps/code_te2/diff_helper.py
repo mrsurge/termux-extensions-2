@@ -34,7 +34,6 @@ MAX_DIFF_BYTES = 512 * 1024  # 512 KiB safety cap
 class DiffCacheEntry:
     timestamp: float
     value: JsonObject
-    size: int
 
 
 _DIFF_CACHE: dict[tuple[str, str, str], DiffCacheEntry] = {}
@@ -125,5 +124,5 @@ def collect_diff(project_root: Path, rel_path: str, base_ref: str | None = None)
         error=error,
     )
 
-    _DIFF_CACHE[cache_key] = DiffCacheEntry(timestamp=now, value=payload, size=len(str(payload)))
+    _DIFF_CACHE[cache_key] = DiffCacheEntry(timestamp=now, value=payload)
     return payload

@@ -27,7 +27,7 @@ already have native fields. Runtime-inspected msgspec/Protocol islands stay inta
 | N1 WBA inbound queue | workbench_adapter_shell_manager.PendingPush | Six private fields; measured reused coalescing/drain record. Source implemented, no wire change. |
 | N2 network delivery/request metadata | network_rpc_ingress → NativeSocketServer.deliver_rpc; socketio_jsonrpc.JsonRpcEnvelope; parsed editor/Explorer/host records | N2a direct delivery and N2b validated-schema reuse implemented/live accepted. Lane validation/IDs/notifications/errors preserved. |
 | N3 pipe-derived events/diagnostics | worker_services.event_bus.WorkerEvent; diagnostics_bridge entries; file_tabs_projection.FileTabDiagnostics | Qualified. Approved diagnostics TypedDict/safe-copy slice avoids redundant normalization; broad event/native-record conversion deferred on small/mixed gains. Wire and barriers unchanged. |
-| N4 retained UI/data caches | explorer.services.file_ops.DraftCacheEntry; diff_helper/draft_diff_helper cache entries; Git snapshot-backed state | Measure repeated access/allocation; response dictionaries remain at encoding edges. Existing dataclasses may already be native. |
+| N4 retained UI/data caches | explorer.services.file_ops.DraftCacheEntry; diff_helper/draft_diff_helper cache entries; Git snapshot-backed state | Qualified and user live accepted: existing diff/Git dataclasses are native. Unused stringify removed and detached builtin status copying adopted; draft-index native conversion not justified by hit-path timing. |
 | N5 conditional coverage/terminal | explorer.services.search_sessions cached records; terminal checkpoint/delta records | Search module absent from inspected startup snapshot: investigate compile coverage without eager imports. Drawer reader/registry classes already native; other terminal app backends remain independently owned. |
 
 Each row is a candidate stage, not a promise every listed class needs edits. N2
@@ -194,3 +194,18 @@ existing storm/metrics/projection regressions pass (16 tests); the stronger
 is not selected-domain activation or a claim that full-domain code now compiles
 this module. Runtime adoption and live checks remain separate; no Rust/client
 asset publication is needed. Next candidate is N4 retained caches.
+
+## N4 retained-cache source implementation
+
+RETAINED_CACHE_PROBE.md records the inventory, source/codegen comparison and
+actual three-module behavior checks. Existing DiffCacheEntry, DraftDiffCacheEntry
+and GitSnapshotCacheEntry have native types in the selected library; retain them.
+The approved win removes unused DiffCacheEntry.size/len(str(payload)) and uses
+builtin dict copies for already-validated Git status projections, without losing
+detached-map ownership or changing cache keys, lifetimes, locks and invalidation.
+DraftCacheEntry field conversion is not adopted after negligible/mixed hit gains.
+
+Actual source/compiled tests and historical/project regressions pass; stronger
+typing passes 249 files. These are not full-domain activation or end-to-end
+performance results. Matching compiled-domain build/adoption/live validation
+remain separate; no Rust/client asset change is needed.

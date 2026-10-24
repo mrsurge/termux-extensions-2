@@ -431,8 +431,8 @@ Validation belongs within each work phase, never a replacement for actual work.
 - [x] N3 qualification and separately approved diagnostics safe-copy/type slice
   implemented. Broader event-header conversion deferred on measured evidence;
   source qualification is not runtime adoption. See the comparison below.
-- [ ] N4 retained caches; N5 search compile coverage/terminal follow-up only
-  when justified.
+- [x] N4 retained-cache source slice qualified/implemented; live gate below.
+- [ ] N5 search compile coverage/terminal follow-up only when justified.
 - [x] N1/N2a user-built full-domain activation and live acceptance. User reports
   hot reload working, then confirms normal behavior and requests commit/push.
   Read-only verification: live worker PID 3590304 maps the compiled group plus
@@ -517,6 +517,40 @@ Validation belongs within each work phase, never a replacement for actual work.
 - [x] User reports the resulting code working normally and approves commit/push.
   Functional live acceptance recorded; no additional agent-led build, selector
   change, restart, OTA or compiled-provenance inspection was performed.
+
+## N4 retained-cache qualification and source slice — 2026-10-23
+
+- [x] User approves comparisons, unused diff size/stringification removal,
+  detached Git status-copy optimization, draft-index metadata probe and tests/
+  docs. No full-domain build, activation/restart, commit or push included.
+- [x] Selected manifest and native CPyType/CPyDef symbols confirm existing diff,
+  draft-diff and Git snapshot dataclasses already compile natively. Preserve
+  them; do not add wrapper allocations. User drafts check reports zero.
+- [x] Remove only unused DiffCacheEntry.size and its full payload repr. Status
+  projections use dict(...) to preserve detached maps and existing dict[str,str]
+  contract over Literal-valued cached maps without an invariance cast.
+- [x] Source/compiled isolated comparisons preserve keys/TTL/dirty/invalidation
+  and copy ownership. Large synthetic miss avoids ~3.35 MB temporary formatting;
+  6,000-path status copies improve local lookup samples. Exact timings and scope
+  limits: RETAINED_CACHE_PROBE.md, ignored n4-caches[-v2]-20261023 evidence.
+- [x] Draft-index dict/native hit comparison shows negligible/mixed gain;
+  retain the existing TypedDict, locks, TTL, sidecar and set-sharing behavior.
+- [x] Two actual production-module source/codegen tests pass, using a three-
+  module group and only external pipe stubs. Regressions cover exact expiry,
+  base/root/path keys, invalidation, Unicode, no unused repr, provider failure,
+  detached cached/fresh maps, dirty cache and unchanged draft diff guards.
+  Eighteen grouped historical/project/probe tests plus five subtests pass;
+  stronger strict/extra/all-Any audit passes 249 files; probe strict mypy passes.
+- [x] User reports the local build passing live validation and approves commit/
+  push. No agent-led full-domain build, selector change, runtime restart, OTA
+  or independent compiled-provenance inspection was performed.
+- [x] Termux build tooling seam isolated by user outputs: Python 3.14.8,
+  mypy 2.4.0/ast_serialize 0.13.1; extension NEEDED entries omit libpython while
+  libpython3.14.so exports PyExc_TypeError. User confirms import and resumed
+  build work after a backed-up patchelf --add-needed libpython3.14.so repair.
+  No compiler-cache deletion, Rust/Python downgrade or TE2 source workaround.
+  Original build-linkage omission remains unexplained; reinstall may overwrite
+  the local repair. Troubleshooting: framework/native_editor_worker/README.md.
 
 ## After the cutover — Code TE2 Any audit
 

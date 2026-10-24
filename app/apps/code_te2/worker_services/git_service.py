@@ -293,12 +293,12 @@ def get_cached_statuses(project_root: Path) -> dict[str, str]:
     snapshot = get_cached_snapshot(project_root)
     if snapshot is None:
         return {}
-    return {path: status for path, status in snapshot["statuses"].items()}
+    return dict(snapshot["statuses"])
 
 
 def get_status_snapshot(project_root: Path) -> dict[str, str]:
     """Return git decorations from framework service.git, or raise on transport failure."""
-    return {path: status for path, status in get_snapshot(project_root)["statuses"].items()}
+    return dict(get_snapshot(project_root)["statuses"])
 
 
 def refresh_status_snapshot(project_root: Path) -> dict[str, str]:

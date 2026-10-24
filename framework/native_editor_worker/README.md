@@ -542,6 +542,27 @@ editor RPC coroutine avoid a compiled error-path type mismatch. Live acceptance
 remains a separate gate; the matching Pixel group also passed all 20 isolated
 native-worker tests.
 
+### Termux ast_serialize loader failure during mypyc parsing
+
+An observed Python 3.14.8/mypy 2.4.0/ast_serialize 0.13.1 installation failed
+before C generation with `cannot locate symbol "PyExc_TypeError"`. Standalone
+`python -c 'import ast_serialize'` reproduced it. ELF inspection showed the
+extension depended only on libdl/libc, while Termux libpython3.14.so exported
+the missing symbol: an extension linkage problem, not a TE2 type error or a
+compiler-cache failure. The reason its build omitted linkage is not established.
+
+For that exact diagnosis, the user backed up the installed extension and added
+`libpython3.14.so` with `patchelf --add-needed`; import and the resumed mypyc
+build then worked. This is a local repair, not automated package policy or proof
+that every loader error has the same cause. Reinstalling ast_serialize can
+overwrite it; a durable wheel must carry appropriate Android Python linkage.
+Do not delete compiler caches or downgrade Python/Rust based on this trace alone.
+
+Pip build isolation may separately provision Maturin in a temporary environment.
+`--no-build-isolation` needs an importable backend in the invoking Python; a
+system Maturin CLI alone is not that backend. Neither isolated Maturin nor Rust
+nightly was established as the cause of this extension's missing dependency.
+
 ### Framework bootstrap-managed native executable (source installs)
 
 Normal source/editable `te2` startup and `te2 --build-only` use one native Cargo

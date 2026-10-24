@@ -128,3 +128,20 @@ Current diagnostics_bridge is lazy-loaded and absent from the inspected domain
 manifest: compiling its probe does not establish production compile coverage.
 No production owner is imported or changed; no selector/activation is performed.
 Findings and implementation gates: release_0_2_356/EVENT_DIAGNOSTICS_PROBE.md.
+
+## N4 retained caches
+
+```bash
+python framework/domain_optimization_probe/cache_probe.py .codex-scratch/n4-comparison
+```
+
+Extract the actual diff cache and cache-hit/dirty/invalidation methods; compare
+unused stringify removal, detached status-map copies, and dictionary/native
+draft-index metadata. Typed provider/sidecar fixtures avoid production owners,
+pipe calls and user data. Already-native diff/Git dataclasses are not rewritten.
+Reconstruct historical stringify/comprehension baselines after source adoption.
+Source and actual generated-code parity precede seven rotated timing samples;
+--check-only skips timing. Retained payloads/provider computation/transport are
+outside the measured allocation and latency scopes. Actual production-module
+qualification lives in tests/test_retained_cache_optimizations.py.
+Evidence/limits/gates: release_0_2_356/RETAINED_CACHE_PROBE.md.
