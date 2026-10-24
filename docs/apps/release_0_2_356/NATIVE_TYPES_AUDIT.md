@@ -28,7 +28,7 @@ already have native fields. Runtime-inspected msgspec/Protocol islands stay inta
 | N2 network delivery/request metadata | network_rpc_ingress → NativeSocketServer.deliver_rpc; socketio_jsonrpc.JsonRpcEnvelope; parsed editor/Explorer/host records | N2a direct delivery and N2b validated-schema reuse implemented/live accepted. Lane validation/IDs/notifications/errors preserved. |
 | N3 pipe-derived events/diagnostics | worker_services.event_bus.WorkerEvent; diagnostics_bridge entries; file_tabs_projection.FileTabDiagnostics | Qualified. Approved diagnostics TypedDict/safe-copy slice avoids redundant normalization; broad event/native-record conversion deferred on small/mixed gains. Wire and barriers unchanged. |
 | N4 retained UI/data caches | explorer.services.file_ops.DraftCacheEntry; diff_helper/draft_diff_helper cache entries; Git snapshot-backed state | Qualified and user live accepted: existing diff/Git dataclasses are native. Unused stringify removed and detached builtin status copying adopted; draft-index native conversion not justified by hit-path timing. |
-| N5 conditional coverage/terminal | explorer.services.search_sessions cached records; terminal checkpoint/delta records | Search module absent from inspected startup snapshot: investigate compile coverage without eager imports. Drawer reader/registry classes already native; other terminal app backends remain independently owned. |
+| N5 conditional coverage/terminal | explorer.services.search_sessions cached records; terminal checkpoint/delta records | Search coverage qualified; build-only inventory roots preserve lazy runtime imports and interpreted schemas. Full-domain adoption/live acceptance pending. Drawer reader/registry classes already native; other terminal app backends remain independently owned/deferred. |
 
 Each row is a candidate stage, not a promise every listed class needs edits. N2
 precedes cache expansion because traffic is the main target. Async completion
@@ -209,3 +209,29 @@ Actual source/compiled tests and historical/project regressions pass; stronger
 typing passes 249 files. These are not full-domain activation or end-to-end
 performance results. Matching compiled-domain build/adoption/live validation
 remain separate; no Rust/client asset change is needed.
+
+## N5 lazy search compile coverage
+
+User approves actual-module qualification, then build-only inventory inclusion
+if parity passes. Baseline inventory has 175 modules; importing the qualified
+search owner adds exactly three: `explorer.services.search_sessions`,
+`explorer.search`, and interpreted `explorer.contracts.search_review` (178 total).
+Only the first two enter compilation. This covers existing typed session/file/
+match/event records without replacing them or inventing another schema/codec.
+
+`tests/test_search_mypyc_coverage.py` builds the actual two-module group and
+compares source/compiled lifecycle behavior via shared `encode_frame`,
+`decode_envelope_bytes`, `PipeEnvelope` and real notification listener/pump.
+Only the external provider call is stubbed. It covers early-before-ACK ordering,
+identity/generation filtering, incremental per-file append/cached identity,
+Unicode/multiline/source-byte edit metadata, pagination, done/error, cancellation
+and listener disposal; name/changes branches and project-switch invalidation
+also use those existing owners. Inventory regression proves ordinary startup
+imports remain lazy and schema/pipe-runtime islands remain interpreted.
+
+No runtime search implementation, protocol, frontend, queue policy or native
+worker changes are made. Existing fingerprint/source inventory machinery includes
+the new roots and retains previous snapshots/caches. A complete matching mypyc
+build and adoption/live validation remain pending; isolated codegen establishes
+compatibility, not a measured application speedup. Standalone Terminal projection
+remains a separate deferred investigation.

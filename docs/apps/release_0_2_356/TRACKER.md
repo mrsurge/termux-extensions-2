@@ -258,11 +258,11 @@ policy; the separately approved Stage C source migration is recorded below.
 1. Startup/HTTP initialization: user live accepted 2026-10-20, complete.
 2. Framework-pipe intents and Embedded App Presentation State (O1): user reports
    working; Any cleanup and app-agnostic refresh follow-up are source-complete.
-3. O2 current: network RPC original-byte handoff is source-implemented after the
-   framework/WBA inbound slices. Finish isolated qualification, then separately
-   prepare matching worker/domain adoption. Targeted native-type review follows;
-   queue/concurrency changes are not silently included.
-4. Native debug/internal console-bridge retirement: deferred behind both.
+3. O2 byte-ingress/native-type slices N1–N5: source complete and user live
+   accepted, including N5 search coverage on 2026-10-24. Async bridge production
+   adoption and broader queue/concurrency changes remain separately gated.
+4. Native debug/internal console-bridge retirement: next scheduled investigation;
+   concrete implementation/cutover still requires approval.
 5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
 
 Validation belongs within each work phase, never a replacement for actual work.
@@ -432,7 +432,11 @@ Validation belongs within each work phase, never a replacement for actual work.
   implemented. Broader event-header conversion deferred on measured evidence;
   source qualification is not runtime adoption. See the comparison below.
 - [x] N4 retained-cache source slice qualified/implemented; live gate below.
-- [ ] N5 search compile coverage/terminal follow-up only when justified.
+- [x] N5 search source/codegen qualification and build-only inventory coverage;
+  preserve shared DTO/codec owners and runtime lazy loading. Adoption gates below.
+- [x] N5 user reports the resulting build working normally on 2026-10-24 and
+  requests commit/push. No independent compiled-provenance inspection performed.
+  Standalone Terminal projection remains independently deferred.
 - [x] N1/N2a user-built full-domain activation and live acceptance. User reports
   hot reload working, then confirms normal behavior and requests commit/push.
   Read-only verification: live worker PID 3590304 maps the compiled group plus
@@ -944,6 +948,37 @@ User authorizes checkpoint/push of accepted startup/DevTools work and planning/
 release receipts. Preserve research_handoff.md and ty.toml unstaged. WBA remains
 unchanged/deferred. Next: deepen the Sidebar/pipeline contract audit and propose
 bounded implementation; no migration implementation or shared restart yet.
+
+## N5 search build coverage — 2026-10-23
+
+- [x] User approves actual-module codegen/lifecycle qualification followed by
+  build-only inventory inclusion if parity passes; no full-domain build,
+  activation, restart, commit, frontend or Terminal implementation changes.
+- [x] Read-only inventory comparison: 175 startup modules become 178 with the
+  search owner. Exactly two added modules compile (search_sessions and search);
+  the third is the existing interpreted search_review schema contract.
+- [x] Reuse existing typed session/cache records, PipeEnvelope, MessagePack
+  encoder/decoder, pipe_runtime listener/pump and provider/RPC owners. No new
+  DTO/schema/codec, eager runtime import or search behavior change.
+- [x] Inventory and isolated snapshot validation both import the qualified
+  build-only root; regression proves ordinary startup still omits the lazy
+  modules and DTO/pipe runtime islands remain interpreted. Existing fingerprint,
+  snapshot publication and cache policy are reused, not duplicated.
+- [x] Source/actual two-module codegen qualification covers early-before-ACK
+  ordering, wrong-root/generation/unknown-search filtering, incremental per-file
+  append identity, Unicode/multiline/editTarget metadata, pagination, completion,
+  error/cancel/disposal and name/changes/project-switch paths.
+- [x] Focused grouped regressions: 80 passed, 1 skipped, 7 subtests passed.
+  Final expanded N5 rerun: 3 passed, including fresh-process validation of the
+  actual two-module compiled fixture through the production snapshot validator.
+  Stronger strict/extra/all-Any audit passes 249 source files. Additional direct
+  build-script mypy check reports only pre-existing missing setuptools stubs
+  (import-untyped); no stub installation or policy suppression performed.
+- [x] User reports the resulting build working normally on 2026-10-24 and
+  requests commit/push. Record user-run live acceptance, not independently
+  inspected compiled provenance or measured application speedup. The agent did
+  not change selectors/workers/framework/clients. Terminal projection remains
+  deferred below. Preserve all three user-owned untracked files.
 
 ## Deferred — standalone Terminal headless projection
 

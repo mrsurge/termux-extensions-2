@@ -963,6 +963,16 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 
 ## 6.6) Search system (progressive Rust pipe provider)
 
+`explorer.services.search_sessions` owns the retained typed session/file/match
+records and subscribes through the existing `pipe_runtime` listener. It consumes
+the shared `PipeEnvelope` and projects through the normal Explorer RPC owner;
+there is no search-specific wire codec. Mypyc's build-only inventory includes
+this lazy owner and `explorer.search`, while runtime schema contracts stay
+interpreted and Explorer initialization retains its lazy import. Build inventory
+coverage does not prove an existing selected snapshot contains these modules;
+matching domain build/adoption is separate. See the native worker README and
+`tests/test_search_mypyc_coverage.py` for coverage/activation contracts.
+
 Content results use bounded UTF-8 display previews, not full source lines per
 occurrence. `lineText`, `snippet` and `matchText` are display data capped at
 4096 bytes each; `lineRanges`/`snippetRanges` address those previews. Original

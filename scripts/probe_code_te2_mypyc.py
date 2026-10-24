@@ -1,4 +1,4 @@
-"""Build and import-check Code TE2's startup Python graph with mypyc.
+"""Build and import-check Code TE2's startup and qualified lazy graph with mypyc.
 
 This is a developer workflow, not a wheel build or automatic runtime switch.
 Build intermediates are cached; fingerprinted snapshots can reuse verified output.
@@ -42,6 +42,12 @@ STARTUP_IMPORTS = (
     "app.apps.code_te2.intelligence_bootstrap",
     "app.apps.code_te2.main",
     "app.apps.code_te2.socketio_gateway",
+)
+
+# Inventory-only roots: preserve lazy imports in the live domain. These owners
+# must pass actual-module codegen/lifecycle tests before expanding this list.
+BUILD_ONLY_IMPORTS = (
+    "app.apps.code_te2.explorer.services.search_sessions",
 )
 
 
@@ -137,7 +143,7 @@ def inventory(output: Path) -> None:
         root = Path(temporary)
         guarded = _isolate(root)
         try:
-            for name in STARTUP_IMPORTS:
+            for name in (*STARTUP_IMPORTS, *BUILD_ONLY_IMPORTS):
                 importlib.import_module(name)
             modules: dict[str, str] = {}
             for name, module in sys.modules.items():
@@ -149,7 +155,7 @@ def inventory(output: Path) -> None:
         finally:
             guarded[0] = False
         output.write_text(json.dumps({"count": len(modules), "modules": modules}, indent=2))
-        print(f"Inventoried {len(modules)} local startup modules: {output}")
+        print(f"Inventoried {len(modules)} local startup/build-only modules: {output}")
 
 
 def build(output: Path, cache_root: Path, *, fingerprinted: bool = False) -> Path:
@@ -240,7 +246,7 @@ def validate(manifest_path: Path, lib: Path | None) -> None:
                 sys.path.append(str(lib))
                 sys.meta_path.insert(0, CompiledFinder(lib, names))
             started = time.perf_counter_ns()
-            for name in STARTUP_IMPORTS:
+            for name in (*STARTUP_IMPORTS, *BUILD_ONLY_IMPORTS):
                 importlib.import_module(name)
             elapsed_ms = (time.perf_counter_ns() - started) / 1e6
             loaded = {name: str(getattr(sys.modules.get(name), "__file__", ""))

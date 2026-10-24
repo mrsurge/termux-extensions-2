@@ -298,9 +298,20 @@ python -B scripts/probe_code_te2_mypyc.py validate --manifest "$MYPYC_OUT/manife
 python -B scripts/probe_code_te2_mypyc.py activate --snapshot "$MYPYC_OUT"
 ```
 
-The build inventories the startup-loaded local modules, compiles one shared
-group, and records its interpreted islands in `manifest.json`. It does not copy
-extensions into the source tree or change the running TE2 worker. Build output
+The build inventories startup-loaded local modules plus explicitly qualified
+`BUILD_ONLY_IMPORTS` in `scripts/probe_code_te2_mypyc.py`, compiles one shared
+group, and records its interpreted islands in `manifest.json`. Search sessions
+and their provider helper are build-only coverage roots: Explorer still imports
+them lazily during initialization. Their existing typed cache records become
+compiled without a second DTO/codec or eager domain startup import. Runtime
+msgspec schemas (`pipe_dto`, `search_review`) and `pipe_runtime` remain interpreted.
+The expanded source inventory participates in the existing snapshot fingerprint;
+old snapshots/caches are retained, not silently rewritten or activated. Actual
+two-module source/codegen pipe lifecycle checks live in
+`tests/test_search_mypyc_coverage.py`; they are not a full-domain build or speedup
+benchmark. Snapshot validation imports the same qualified roots in its isolated
+process; ordinary domain startup does not. The workflow does not copy extensions
+into the source tree or change the running TE2 worker. Build output
 is a validated runtime snapshot (libraries, manifest, resource symlinks, provenance
 and log), not another copy of all generated C/object intermediates. The desktop
 preflight compiled and imported 135 modules; compiled-overlay tests exposed

@@ -548,6 +548,15 @@ gain, so retain it. Exact source/codegen tests, synthetic timing/memory scopes a
 activation gates: RETAINED_CACHE_PROBE.md. No cache lifetime/ownership/wire change,
 full-domain build/activation/restart or commit is authorized by this slice.
 
+Subsequent N5 approval qualifies actual search sessions/provider modules with
+the shared pipe schema/MessagePack codec and existing lifecycle, then includes
+the search owner as an explicit build-only inventory root. Runtime lazy imports
+and interpreted DTO/pipe islands stay unchanged; no parallel typing or codec
+implementation. The existing snapshot fingerprint picks up the expanded graph.
+Qualification/inventory tests and documentation are in scope; full-domain build,
+activation, restart, commit and Terminal projection changes are not. See
+NATIVE_TYPES_AUDIT.md, N5 lazy search compile coverage, for evidence and gates.
+
 N2b comparison (dc66b255, 2026-10-23): shared parsing also serves Sidebar. User
 approves isolated four-lane native-intermediate versus schema-reuse qualification
 and docs only. Preserving real editor-only contract compilation, both candidates
