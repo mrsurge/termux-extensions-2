@@ -261,8 +261,8 @@ policy; the separately approved Stage C source migration is recorded below.
 3. O2 byte-ingress/native-type slices N1–N5: source complete and user live
    accepted, including N5 search coverage on 2026-10-24. Async bridge production
    adoption and broader queue/concurrency changes remain separately gated.
-4. Native debug/internal console-bridge retirement: next scheduled investigation;
-   concrete implementation/cutover still requires approval.
+4. Explorer Git-init footer repair: current user-prioritized bug fix; native
+   debug/internal console-bridge work is explicitly deferred again (2026-10-24).
 5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
 
 Validation belongs within each work phase, never a replacement for actual work.
@@ -850,6 +850,8 @@ warnings remain visible, without suppression. Preserve unrelated reports/dist.
 
 ## Phase 4 — native debug / internal bridge retirement (documentation only)
 
+- [x] User explicitly defers this again on 2026-10-24 in favor of the Explorer
+  Git-init affordance bug; do not automatically resume after its acceptance.
 - [x] User approves read-only investigation; confirms implementation is NOT now.
   Initial placement immediately after startup was superseded: user requires two
   actual work phases first (intents, then concurrency/queuing).
@@ -948,6 +950,28 @@ User authorizes checkpoint/push of accepted startup/DevTools work and planning/
 release receipts. Preserve research_handoff.md and ty.toml unstaged. WBA remains
 unchanged/deferred. Next: deepen the Sidebar/pipeline contract audit and propose
 bounded implementation; no migration implementation or shared restart yet.
+
+## Explorer Git-init footer repair — 2026-10-24
+
+- [x] User approves read-only investigation, then frontend fix, ordering and
+  transition regressions, typecheck/build and plan/tracker changes. No backend,
+  restart, OTA or commit is authorized.
+- [x] Source confirms backend status publishes isRepository correctly. Diff-base
+  hydration shows Init for mode none, but the status notification unconditionally
+  overwrote it with showInit=false, even immediately after applying its own
+  embedded diff-base snapshot. Later independent hydration could restore it.
+- [x] Status handler now passes status.isRepository === false to the existing
+  footer controls helper. Retain repository detection, mutation ownership,
+  confirmation, init RPC and existing project-path admission unchanged.
+- [x] Four new actual-controller/DOM regressions fail before the source fix and
+  pass after: base-first/status-first/embedded-base ordering, repeated snapshots,
+  initialization to an empty repo, committed repo, foreign-project rejection,
+  and confirmation/cancel through existing init RPC. Related grouped tests:
+  19 passed. npm run typecheck and node build.mjs pass; existing module-type
+  warning remains visible. No new dependencies or Any types.
+- [x] User reports the fix working live and requests commit/push (2026-10-24).
+  Record user acceptance, not independently inspected native asset provenance.
+  No Rust/mypyc build is required; the agent performed no runtime transitions.
 
 ## N5 search build coverage — 2026-10-23
 

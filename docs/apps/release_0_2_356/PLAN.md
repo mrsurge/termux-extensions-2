@@ -9,6 +9,17 @@ user-provided optimization items will be integrated here, not in a competing pla
 
 ## Actual work order — corrected by user 2026-10-20
 
+2026-10-24 user reprioritization: defer native-debug/console-bridge work again
+and repair the Explorer Git-init footer first. Detection is already backend-owned
+and correct. The frontend status handler applied a non-repository diff-base
+snapshot, then unconditionally hid Init with setGitControlsEnabled(true, false).
+An independent later hydration could restore it, explaining the intermittent
+visibility. Approved fix projects the backend isRepository === false flag in
+that status update, preserving the existing confirmation/RPC/init path, project
+guards and empty-but-initialized repository handling. Include actual-controller
+DOM ordering/transition regressions, typecheck and host build. No backend/mypyc,
+runtime restart, OTA, Android, commit or publication is included in this slice.
+
 2026-10-22 scope correction: before further network-RPC optimization or restoring
 Refresh, address the user's app-agnostic framework invariant. Approved audit and
 staged proposal: FRAMEWORK_AGNOSTIC_AUDIT.md. Existing Cargo selection core is

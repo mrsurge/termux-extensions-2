@@ -6179,6 +6179,14 @@ worker and regenerated frontend together. Static/theme/grammar HTTP is unchanged
 
 ### Git And Project Transport Ownership
 
+Explorer's Git-init affordance projects the backend `isRepository === false`
+fact, not `hasHead` (an initialized empty repository is still a repository).
+Status notifications must preserve that Init visibility after applying their
+embedded diff-base snapshot; unconditionally projecting normal controls here
+overwrites correct hydration and makes visibility depend on arrival order.
+The existing footer confirmation sends `explorer.git.init`; detection and the
+mutation remain backend-owned. Regression: `explorer_git_init_footer.test.mjs`.
+
 The former `main_page/backend/git_routes.py` and `project_routes.py` HTTP routers
 are removed along with their route-only assembly in `main.py`. Host branch and
 remote actions use `ui.host.git.*`; Explorer Git/project actions use

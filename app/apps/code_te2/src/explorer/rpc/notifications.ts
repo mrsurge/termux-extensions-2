@@ -550,7 +550,9 @@ export function createExplorerNotificationHandler(
         }
         deps.renderBranchLabel();
         deps.renderGitSummary();
-        deps.setGitControlsEnabled(true, false);
+        // Project the backend repository fact, not notification arrival order:
+        // this runs after diff-base hydration, which may have just shown Init.
+        deps.setGitControlsEnabled(true, status.isRepository === false);
         if (!headChanged && deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') deps.renderSearchOverlay();
         break;
       }
