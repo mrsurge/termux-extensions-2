@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 interface LanguageAssociation {
   id: string;
   filenames: Set<string>;
@@ -7,11 +8,11 @@ interface LanguageAssociation {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
+  return isUnknownArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
 }
@@ -74,7 +75,7 @@ function languageContributions(extensions: unknown[]): unknown[] {
   for (const extension of extensions) {
     if (!isRecord(extension) || !isRecord(extension.contributes)) continue;
     const languages = extension.contributes.languages;
-    if (Array.isArray(languages)) out.push(...languages);
+    if (isUnknownArray(languages)) out.push(...languages);
   }
   return out;
 }

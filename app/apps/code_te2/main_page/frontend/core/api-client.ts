@@ -1,10 +1,11 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 interface HostApiSurface {
   get: (path: string) => Promise<unknown>;
   post: (path: string, body: unknown) => Promise<unknown>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+  return !!value && typeof value === 'object' && !isUnknownArray(value);
 }
 
 export function createApiClient(api: HostApiSurface) {

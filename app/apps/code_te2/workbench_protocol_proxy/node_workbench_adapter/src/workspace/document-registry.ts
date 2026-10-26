@@ -1,7 +1,8 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import * as nodePath from "node:path";
 import { createHash } from "node:crypto";
 
-import { semanticTextFingerprint } from "../extensions/intelligence/semantic-token-projections.mjs";
+import { semanticTextFingerprint } from "../extensions/intelligence/semantic-token-projections.ts";
 
 export interface WorkbenchDocumentEntry {
   path: string;
@@ -182,7 +183,7 @@ function hasOwn(object: object, key: PropertyKey): boolean {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function requiredString(value: unknown): string | null {
@@ -275,7 +276,7 @@ export class WorkbenchDocumentRegistry {
     const revision = requiredInteger(params.openStateRevision);
     const documents = params.documents;
     if (!project || project !== this.runtime.workspacePath() || generation === null ||
-        revision === null || !Array.isArray(documents) || documents.length > 12) {
+        revision === null || !isUnknownArray(documents) || documents.length > 12) {
       throw new Error("invalid_initial_documents");
     }
     if (generation < this._initializationGeneration ||
@@ -540,7 +541,7 @@ export class WorkbenchDocumentRegistry {
     if (rawActivePath != null && !activePath) {
       return { ok: false, error: "invalid_active_path" };
     }
-    if (!Array.isArray(params.background)) {
+    if (!isUnknownArray(params.background)) {
       return { ok: false, error: "invalid_background_list" };
     }
     if (activePath && !isPathWithin(activePath, projectPath)) {
@@ -574,7 +575,7 @@ export class WorkbenchDocumentRegistry {
     const desired = new Map<string, LogicalDocumentDescriptor>();
     const protectedPaths = new Set<string>();
     const rawClientForegroundPaths = params.clientForegroundPaths;
-    if (!Array.isArray(rawClientForegroundPaths)) {
+    if (!isUnknownArray(rawClientForegroundPaths)) {
       return { ok: false, error: "invalid_client_foreground_paths" };
     }
     for (const rawPath of rawClientForegroundPaths) {

@@ -1,10 +1,11 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 export interface DraftDiffPayloadLike {
   path?: string;
   requestId?: string;
 }
 
 function asDraftDiffPayloadLike(value: unknown): DraftDiffPayloadLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as DraftDiffPayloadLike
     : null;
 }

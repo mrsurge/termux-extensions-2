@@ -1,13 +1,12 @@
+import { objectValue } from './settings-contracts.ts';
 
-/**
- * @param {{
- *   getCurrentPath: () => string | null,
- *   getProjectRoot: () => string | null,
- *   requestBackendEditorFind: (payload: Record<string, unknown>) => Promise<any>,
- *   toast: (msg: string) => void
- * }} deps
- */
-export function createSearchPanelController(deps: any) {
+interface Dependencies {  getCurrentPath: () => string | null,
+  getProjectRoot: () => string | null,
+  requestBackendEditorFind: (payload: Record<string, unknown>) => Promise<unknown>,
+  toast: (msg: string) => void
+}
+
+export function createSearchPanelController(deps: Dependencies) {
   async function triggerEditorSearchPanel(reason = 'menu', opts: { replace?: boolean } = {}) {
     const action = opts.replace ? 'replace' : 'find';
     const payload = {
@@ -17,9 +16,9 @@ export function createSearchPanelController(deps: any) {
       reason,
     };
     try {
-      const result = await deps.requestBackendEditorFind(payload);
+      const result = objectValue(await deps.requestBackendEditorFind(payload));
       if (result?.ok === false) {
-        const message = result?.error || 'Search unavailable';
+        const message = typeof result.error === 'string' ? result.error : 'Search unavailable';
         deps.toast(message);
       }
     } catch (error) {

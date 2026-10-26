@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 type JsonTextmateValue =
   | string
   | number
@@ -151,7 +152,7 @@ const scriptPromises = new Map<string, Promise<void>>();
 let tokenStyleCss = "";
 
 function isRecord(value: unknown): value is UnknownRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !isUnknownArray(value);
 }
 
 function asString(value: unknown): string {
@@ -159,7 +160,7 @@ function asString(value: unknown): string {
 }
 
 function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
+  return isUnknownArray(value) ? value : [];
 }
 
 function coerceEditorText(value: unknown): string {
@@ -340,7 +341,7 @@ function parseThemeRules(theme: UnknownRecord): ThemeRule[] {
             .split(",")
             .map((scope) => scope.trim())
             .filter(Boolean)
-        : Array.isArray(rawScope)
+        : isUnknownArray(rawScope)
           ? rawScope.map((scope) => String(scope).trim()).filter(Boolean)
           : [];
     if (!scopes.length) return;

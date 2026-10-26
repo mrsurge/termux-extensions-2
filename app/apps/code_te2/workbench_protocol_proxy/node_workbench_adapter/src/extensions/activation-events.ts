@@ -1,11 +1,12 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 type ExtensionRecord = Record<string, unknown>;
 
 type ActivationEventGenerator = (
   contributions: readonly unknown[],
-) => Iterable<string>;
+) => Iterable<string, unknown, unknown>;
 
 function isRecord(value: unknown): value is ExtensionRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringField(value: unknown, key: string): string | null {
@@ -16,7 +17,7 @@ function stringField(value: unknown, key: string): string | null {
 
 function contributionArray(value: unknown): unknown[] {
   if (value === undefined || value === null) return [];
-  return Array.isArray(value) ? value : [value];
+  return isUnknownArray(value) ? value : [value];
 }
 
 function identifierValue(extension: ExtensionRecord): string {
@@ -33,7 +34,7 @@ function* fieldEvents(
   contributions: readonly unknown[],
   field: string,
   prefix: string,
-): Iterable<string> {
+): Iterable<string, void, unknown> {
   for (const contribution of contributions) {
     const value = stringField(contribution, field);
     if (value) yield `${prefix}${value}`;
@@ -86,7 +87,7 @@ const IMPLICIT_ACTIVATION_GENERATORS: Readonly<
     for (const contribution of contributions) {
       if (!isRecord(contribution)) continue;
       const profiles = contribution.profiles;
-      if (!Array.isArray(profiles)) continue;
+      if (!isUnknownArray(profiles)) continue;
       for (const profile of profiles) {
         const id = stringField(profile, "id");
         if (id) yield `onTerminalProfile:${id}`;
@@ -144,7 +145,7 @@ export function activationEventsForExtension(
     events.push(normalized);
   };
 
-  if (Array.isArray(extension.activationEvents)) {
+  if (isUnknownArray(extension.activationEvents)) {
     for (const event of extension.activationEvents) add(event);
   }
 

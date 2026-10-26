@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../../src/rpc/value-types.ts';
 import type { ComponentOwner } from "./owner.ts";
 
 export type JsxChild =
@@ -38,7 +39,7 @@ function isNode(value: unknown): value is Node {
 }
 
 function appendChild(parent: Node, child: JsxChild): void {
-  if (Array.isArray(child)) {
+  if (isUnknownArray(child)) {
     child.forEach((item) => appendChild(parent, item));
     return;
   }
@@ -154,7 +155,7 @@ export function jsx(
 ): Node {
   const props = rawProps || {};
   const allChildren = [
-    ...(Array.isArray(props.children) ? props.children as JsxChild[] : []),
+    ...(isUnknownArray(props.children) ? props.children as JsxChild[] : []),
     ...children,
   ];
   if (typeof tag === "function") {

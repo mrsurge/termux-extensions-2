@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import type { DecodedExtHostRpc } from "../protocol/wire-encoding";
 
 export type DecodedExtMessage = DecodedExtHostRpc;
@@ -63,6 +64,7 @@ export interface ExtensionHostRuntime {
   connectionTypes: {
     ExtensionHost: unknown;
     ExtHostConfiguration: number;
+    ExtHostCommands: number;
     ExtHostFileSystemInfo: number;
     ExtHostLanguageFeatures: number;
     ExtHostLanguages: number;
@@ -151,8 +153,8 @@ function logHandshakeReady(runtime: ExtensionHostRuntime, startMs: number, extIn
       env: runtime.jsonSizeOrSkip((extInitData as { environment?: unknown })?.environment, runtime.initSizeMaxItems),
       workspace: runtime.jsonSizeOrSkip((extInitData as { workspace?: unknown })?.workspace, runtime.initSizeMaxItems),
       extensions: {
-        all_len: Array.isArray((extSnap as { allExtensions?: unknown[] }).allExtensions) ? (extSnap as { allExtensions?: unknown[] }).allExtensions!.length : 0,
-        my_len: Array.isArray((extSnap as { myExtensions?: unknown[] }).myExtensions) ? (extSnap as { myExtensions?: unknown[] }).myExtensions!.length : 0,
+        all_len: isUnknownArray((extSnap as { allExtensions?: unknown[] }).allExtensions) ? (extSnap as { allExtensions?: unknown[] }).allExtensions!.length : 0,
+        my_len: isUnknownArray((extSnap as { myExtensions?: unknown[] }).myExtensions) ? (extSnap as { myExtensions?: unknown[] }).myExtensions!.length : 0,
         activation_keys: (extSnap as { activationEvents?: Record<string, unknown> }).activationEvents ? Object.keys((extSnap as { activationEvents?: Record<string, unknown> }).activationEvents!).length : 0,
         size: runtime.jsonSizeOrSkip(extSnap, runtime.initSizeMaxItems),
       },
@@ -274,7 +276,7 @@ function bootstrapConfiguration(runtime: ExtensionHostRuntime, context: Extensio
     const defaults = (configInit as { defaults?: { keys?: unknown[] } }).defaults?.keys ?? [];
     const userRemote = (configInit as { userRemote?: { keys?: unknown[] } }).userRemote?.keys ?? [];
     const workspace = (configInit as { workspace?: { keys?: unknown[] } }).workspace?.keys ?? [];
-    const allChangedKeys = [...new Set([...(Array.isArray(defaults) ? defaults : []), ...(Array.isArray(userRemote) ? userRemote : []), ...(Array.isArray(workspace) ? workspace : [])])];
+    const allChangedKeys = [...new Set([...(isUnknownArray(defaults) ? defaults : []), ...(isUnknownArray(userRemote) ? userRemote : []), ...(isUnknownArray(workspace) ? workspace : [])])];
     runtime.sendExt(runtime.connectionTypes.ExtHostConfiguration, "$acceptConfigurationChanged", [configInit, { keys: allChangedKeys, overrides: [] }], false);
   } catch {
     // preserve current best-effort behavior

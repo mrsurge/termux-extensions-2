@@ -1,3 +1,4 @@
+import { isUnknownArray, recordValue } from '../src/rpc/value-types.ts';
 import { toMonacoColorHex } from './editor_parse_utils.ts';
 
 export interface SemanticTokenStyle {
@@ -13,14 +14,14 @@ export type SemanticTokenColor = string | SemanticTokenStyle;
 
 export function parseSemanticTokenColors(value: unknown): Record<string, SemanticTokenColor> {
   const result: Record<string, SemanticTokenColor> = Object.create(null);
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
-  for (const [selector, raw] of Object.entries(value)) {
+  if (!value || typeof value !== 'object' || isUnknownArray(value)) return result;
+  for (const [selector, raw] of Object.entries(recordValue(value))) {
     if (typeof raw === 'string') {
       const foreground = toMonacoColorHex(raw);
       if (foreground && (foreground.length === 6 || foreground.length === 8)) result[selector] = `#${foreground}`;
       continue;
     }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    if (!raw || typeof raw !== 'object' || isUnknownArray(raw)) continue;
     const settings = raw as Record<string, unknown>;
     const style: SemanticTokenStyle = {};
     const foreground = typeof settings.foreground === 'string' ? toMonacoColorHex(settings.foreground) : null;

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import {
   EXPLORER_RPC_METHODS,
   type ExplorerRpcMethod,
@@ -401,12 +402,12 @@ function buildRunPayload(
     suiteId,
   };
   if (options.outputPath) payload.outputPath = options.outputPath;
-  if (Array.isArray(options.lanes) && options.lanes.length > 0) {
+  if (isUnknownArray(options.lanes) && options.lanes.length > 0) {
     payload.lanes = options.lanes;
   }
   const searchThreads = normalizedPositiveInteger(options.searchThreads);
   if (searchThreads !== null) payload.searchThreads = searchThreads;
-  if (Array.isArray(options.cases) && options.cases.length > 0) {
+  if (isUnknownArray(options.cases) && options.cases.length > 0) {
     payload.cases = options.cases.map((case_) =>
       normalizeCase(case_, searchThreads),
     );
@@ -416,7 +417,7 @@ function buildRunPayload(
 
 function payloadHasFullStackLane(payload: JsonObject): boolean {
   const lanes = payload.lanes;
-  if (!Array.isArray(lanes) || lanes.length === 0) return true;
+  if (!isUnknownArray(lanes) || lanes.length === 0) return true;
   return lanes.includes("fullStack");
 }
 
@@ -425,7 +426,7 @@ function normalizedCasesForRun(
   options: SearchBenchmarkRunOptions,
 ): JsonObject[] {
   const searchThreads = normalizedPositiveInteger(options.searchThreads);
-  if (Array.isArray(options.cases) && options.cases.length > 0) {
+  if (isUnknownArray(options.cases) && options.cases.length > 0) {
     return options.cases.map((case_) => normalizeCase(case_, searchThreads));
   }
   if (mode === "oneShot") {
@@ -544,7 +545,7 @@ async function runActualFullStackCase(
 function normalizeOneShot(
   options: SearchBenchmarkOneShotOptions,
 ): SearchBenchmarkRunOptions {
-  if (Array.isArray(options.cases) && options.cases.length > 0) {
+  if (isUnknownArray(options.cases) && options.cases.length > 0) {
     return options;
   }
   return {
@@ -576,10 +577,10 @@ function normalizeCase(
     isRegex: value.isRegex === true,
     isCaseSensitive: value.isCaseSensitive === true,
     isWholeWords: value.isWholeWords === true,
-    includePatterns: Array.isArray(value.includePatterns)
+    includePatterns: isUnknownArray(value.includePatterns)
       ? value.includePatterns
       : [],
-    excludePatterns: Array.isArray(value.excludePatterns)
+    excludePatterns: isUnknownArray(value.excludePatterns)
       ? value.excludePatterns
       : [],
     useIgnoreFiles: value.useIgnoreFiles !== false,
@@ -865,7 +866,7 @@ function buildVisibleWindowMetrics(
 }
 
 function objectValue(value: unknown): JsonObject {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  return value !== null && typeof value === "object" && !isUnknownArray(value)
     ? (value as JsonObject)
     : {};
 }
@@ -885,19 +886,19 @@ function normalizedPositiveInteger(value: unknown): number | null {
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
+  return isUnknownArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
 }
 
 function countResultFiles(result: JsonObject): number {
   const files = result.files;
-  return Array.isArray(files) ? files.length : 0;
+  return isUnknownArray(files) ? files.length : 0;
 }
 
 function countVisibleResultFiles(result: JsonObject): number {
   const results = result.results;
-  if (Array.isArray(results)) return results.length;
+  if (isUnknownArray(results)) return results.length;
   return countResultFiles(result);
 }
 
@@ -906,11 +907,11 @@ function countVisibleResultMatches(result: JsonObject): number {
     numberValue(result.match_count) ?? numberValue(result.matchCount);
   if (typeof matchCount === "number") return matchCount;
   const results = result.results;
-  if (!Array.isArray(results)) return countResultMatches(result);
-  return results.reduce((total, file) => {
+  if (!isUnknownArray(results)) return countResultMatches(result);
+  return results.reduce<number>((total, file) => {
     const rawFile = objectValue(file);
     const matches = rawFile.matches;
-    return total + (Array.isArray(matches) ? matches.length : 0);
+    return total + (isUnknownArray(matches) ? matches.length : 0);
   }, 0);
 }
 
@@ -919,11 +920,11 @@ function countResultMatches(result: JsonObject): number {
     numberValue(result.matchCount) ?? numberValue(result.match_count);
   if (typeof matchCount === "number") return matchCount;
   const files = result.files;
-  if (!Array.isArray(files)) return 0;
-  return files.reduce((total, file) => {
+  if (!isUnknownArray(files)) return 0;
+  return files.reduce<number>((total, file) => {
     const rawFile = objectValue(file);
     const matches = rawFile.matches;
-    return total + (Array.isArray(matches) ? matches.length : 0);
+    return total + (isUnknownArray(matches) ? matches.length : 0);
   }, 0);
 }
 

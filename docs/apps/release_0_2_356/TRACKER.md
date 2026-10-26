@@ -1,5 +1,76 @@
 # 0.2.356 maintenance tracker
 
+## Owned frontend/WBA no-Any cleanup — 2026-10-25
+
+- [x] User approves compiler-backed explicit/inferred audit, owned-source cleanup,
+  WBA resolution/diagnostic fixes, enforcement, AGENTS rules and bundle validation.
+- [x] Replace 81 explicit Any type nodes in host controllers/globals; fix inferred
+  propagation from JSON, Array.isArray, DOM callbacks, IDB, dynamic imports and
+  Socket.IO defaults. Host console bridge is now TypeScript.
+- [x] WBA source imports actual TS implementations; AST-based build rewrite emits
+  .mjs runtime module specifiers without rewriting webview document strings.
+  Fix all 106 former WBA diagnostics; missing MainThreadLanguageFeatures pin 26
+  verified against local pinned Code OSS actor order (Console 13/Diagnostics 16).
+- [x] npm run typecheck gates both projects: zero owned-source explicit/inferred
+  Any findings and zero compiler diagnostics. Negative fixtures cover nested
+  aliases, arrays/maps, parameters, class members/returns, assertions and inferred
+  JSON/untyped-call results; checked unknown remains allowed.
+- [x] Copied upstream/adapted internals unchanged; owned consumed values remain
+  audited. SCM source-integrity and isolated installed WBA fixture pass.
+- [x] Focused checker/console/SCM/isolated-WBA run: 29 pass. Settings/quick-fix/
+  webview/multi-client/run-profile run: 35 pass. Production bundles rebuilt.
+- [x] Broad initial sweep: 866 pass, 20 fail, one skipped. Two cleanup-related
+  fixture/integrity issues repaired; other 18 failures reproduced against HEAD
+  in .codex-scratch/typing-baseline.ky91yu. Baseline startup-preparation fixture
+  additionally needs app/android_editor_assets_bundle.json for exact assertion;
+  its fixed import-count assertion now includes the typed value helper.
+- [x] Final broad sweep after rebuild: 889 tests, 871 pass, 17 baseline failures,
+  one skipped. No newly failing tests remain. Python webview/sidebar regressions:
+  14 pass. Baseline failures remain test debt, not a whole-suite green claim.
+- [x] User reports all tested working and approves commit/push (2026-10-25).
+  Live acceptance covers the resulting cleanup and accumulated extension fixes.
+  Agent did not restart the shared runtime or publish Android assets.
+
+## Restored extension surface readiness — 2026-10-25
+
+- [x] JSON Crack cold-open fix accepted live by user.
+- [x] Saved extension URL slots are eager but previously bypassed app readiness.
+  Preserve their presentation state; admission now comes from process-local,
+  per-project/per-host WBA surface confirmation, never persisted readiness.
+- [x] Gate embedded, native Electron and detached surface mounting; reset
+  admission on adapter reset/non-authoritative disconnect snapshots and publish
+  readiness changes even when disk membership is unchanged.
+- [x] Initial WBA snapshots cannot prune restored slots before primary activation
+  completes. Partial activation admits available views without waiting for others.
+- [x] 33 focused Node tests and 14 Python tests pass; frontend typecheck/build
+  and strict typing of both changed Python owners pass.
+- [x] User accepts the tested snapshot and approves commit/push (2026-10-25).
+  Agent did not restart the shared runtime or publish Android assets.
+
+## Webview startup, file links and icons — 2026-10-25
+
+- [x] User approves read-only source/Electron inspection, then all three fixes.
+- [x] Confirm premature unfenced head-bridge ready and missing generic link-click
+  forwarding against local Code OSS. JSON Crack has its own React-ready handshake;
+  do not claim its partial-layout cause is established from this source alone.
+- [x] Live image checks: Markdown Sidebar fetches nonexistent $(markdown), and
+  Code Visualizer fetches absent media/icon.png; both return HTTP 500.
+- [x] User reports warm JSON Crack window refresh fixes rendering; cold creation
+  versus warm refresh is the live comparison, not yet acceptance of this patch.
+- [x] Implement document-load readiness, bidirectional incarnation fences,
+  bootstrap HTML-revision admission and loading overlay handoff. Preserve startup
+  journal/reconnect behavior without arbitrary timers or extension-source patches.
+- [x] Implement guarded file-link navigation through exact-client existing owner;
+  extension-handled links/fragments remain untouched, commands require policy.
+- [x] Implement ThemeIcon projection and missing-image package-icon fallback;
+  retain package icon through existing management manifest merge/sanitization.
+- [x] Frontend typing/build pass; 61 focused Node regressions and 13 Python tests
+  pass. Strict mypy passes both changed Python owners. Whole-WBA typecheck
+  retains the same 106 pre-existing diagnostics versus an in-memory HEAD-source
+  comparison (no new diagnostics), not a clean whole-WBA typing claim.
+- [x] User reports tested working and approves the resulting snapshot for
+  commit/push (2026-10-25); JSON Crack cold-open success was separately confirmed.
+
 ## Editor properties / Markdown preview sync — 2026-10-25
 
 - [x] Read-only Electron inspection confirms registered bridge/eval with forwarding

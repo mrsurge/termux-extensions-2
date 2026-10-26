@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import type * as Monaco from '../../../static/vendor/monaco-editor-core/esm/vs/editor/editor.api';
 
 type Context = {uri:string; path:string; languageId:string; version:number};
@@ -11,7 +12,7 @@ interface Deps {
   call(method:string, params:Record<string,unknown>): Promise<unknown>;
   notify(message:string): void;
 }
-const record = (v:unknown): v is Record<string,unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const record = (v:unknown): v is Record<string,unknown> => !!v && typeof v === 'object' && !isUnknownArray(v);
 const GATEWAY = 'te2.quickFix.apply';
 interface Target {raw:Record<string,unknown>; context:Context; generation:number; model:Monaco.editor.ITextModel; disposed:boolean; resolved?:Record<string,unknown>}
 
@@ -23,7 +24,7 @@ export function quickFixEdits(action:Record<string,unknown>, context:Context, mo
     return [];
   }
   if (action.command !== undefined) throw Error('Combined edit-and-command Quick Fixes are not supported yet');
-  if (!record(action.edit) || !Array.isArray(action.edit.edits) || action.edit.edits.length > 1000) throw Error('Unsupported Quick Fix workspace edit');
+  if (!record(action.edit) || !isUnknownArray(action.edit.edits) || action.edit.edits.length > 1000) throw Error('Unsupported Quick Fix workspace edit');
   const edits:Monaco.editor.IIdentifiedSingleEditOperation[] = [];
   for (const row of action.edit.edits) {
     if (!record(row) || !record(row.resource) || !record(row.textEdit) || row.oldResource || row.newResource || row.cellEdit) throw Error('Resource operations are not supported');
@@ -72,7 +73,7 @@ export function createEditorQuickFixRuntime(deps:Deps) {
     if (!releases.delete(id)) return;
     void deps.call('vscode.codeActions.release',{...params(ctx),listId:id}).catch(()=>{});
   }
-  const command=deps.monaco.editor.registerCommand(GATEWAY,async (_accessor,token:unknown)=>{
+  const command=deps.monaco.editor.registerCommand(GATEWAY,async (_accessor: unknown,token:unknown)=>{
     const target=typeof token==='string' ? targets.get(token) : undefined;
     if (!target || !current(target)) throw Error('Quick Fix is stale; request it again');
     let applyingList:string|null=null;
@@ -80,7 +81,7 @@ export function createEditorQuickFixRuntime(deps:Deps) {
       const action=await resolve(target), editor=deps.getEditor(), model=editor?.getModel();
       if (!current(target) || !editor || !model || editor.getOption(deps.monaco.editor.EditorOption.readOnly)) throw Error('Editor is not available for this Quick Fix');
       const edits=quickFixEdits(action,target.context,model);
-      if (action.command!==undefined && (!record(action.command) || typeof action.command.id!=='string' || action.command.arguments!==undefined && !Array.isArray(action.command.arguments))) throw Error('Unsupported Quick Fix command');
+      if (action.command!==undefined && (!record(action.command) || typeof action.command.id!=='string' || action.command.arguments!==undefined && !isUnknownArray(action.command.arguments))) throw Error('Unsupported Quick Fix command');
       // A result is single-use, including an execution whose outcome is unknown.
       target.disposed=true;
       applyingList=String(target.raw.listId);running.add(applyingList);
@@ -105,7 +106,7 @@ export function createEditorQuickFixRuntime(deps:Deps) {
       if (!deps.isEnabled() || !ctx || model.uri.toString()!==ctx.uri || model.getVersionId()!==ctx.version || !context.markers.length || token.isCancellationRequested
           || context.only && context.only!=='quickfix' && !context.only.startsWith('quickfix.')) return {actions:[],dispose(){}};
       const result=await deps.call('vscode.codeActions.provide',{...params(ctx),range,trigger:context.trigger,text:model.getValue()});
-      if (!record(result) || !Array.isArray(result.actions)) return {actions:[],dispose(){}};
+      if (!record(result) || !isUnknownArray(result.actions)) return {actions:[],dispose(){}};
       const capturedContext:Context=ctx;
       const keys:string[]=[], lists=new Set<string>(), actions:Monaco.languages.CodeAction[]=[];
       for (const raw of result.actions) {

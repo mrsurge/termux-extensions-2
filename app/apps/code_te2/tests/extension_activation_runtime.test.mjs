@@ -104,6 +104,7 @@ test("enriches admitted user extensions from canonical disk manifests", () => {
     },
   };
   const diskExtension = {
+    icon: "media/package-icon.svg",
     identifier: { value: "openai.chatgpt" },
     isBuiltin: false,
     targetPlatform: "universal",
@@ -145,6 +146,7 @@ test("enriches admitted user extensions from canonical disk manifests", () => {
 
   assert.deepEqual(merged.enrichedIds, ["openai.chatgpt"]);
   assert.equal(merged.extensions.length, 1, "disk-only extensions are not admitted");
+  assert.equal(merged.extensions[0].icon, "media/package-icon.svg");
   assert.equal(merged.extensions[0].targetPlatform, "linux-x64");
   assert.equal(
     merged.extensions[0].extensionLocation,
@@ -193,6 +195,7 @@ test("sanitized extension snapshots carry the generated lowercase event map", ()
       publisher: "Sample",
       name: "Extension",
       version: "1.0.0",
+      icon: "./media/package.png",
       main: "./out/main.js",
       contributes: ALL_IMPLICIT_CONTRIBUTIONS,
       extensionLocation: {
@@ -204,6 +207,7 @@ test("sanitized extension snapshots carry the generated lowercase event map", ()
     null,
   );
   assert.ok(extension);
+  assert.equal(extension.icon, "./media/package.png");
   assert.ok(extension.activationEvents.includes("onLanguage:synthetic-language"));
 
   const snapshot = buildExtensionsSnapshot([extension], {

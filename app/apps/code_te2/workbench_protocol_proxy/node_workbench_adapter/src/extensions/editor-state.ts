@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 // Code OSS IEditorPropertiesChangeData; null means unchanged, [] means empty.
 export interface EditorRange {
   startLineNumber: number;
@@ -23,7 +24,7 @@ export interface EditorProperties {
 }
 
 function record(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function integer(value: unknown, min = 1, max = Number.MAX_SAFE_INTEGER): number {
@@ -58,7 +59,7 @@ function selection(value: unknown): EditorSelection {
 }
 
 function list(value: unknown): unknown[] {
-  if (!Array.isArray(value) || value.length > 1024) throw new Error("Invalid editor property list");
+  if (!isUnknownArray(value) || value.length > 1024) throw new Error("Invalid editor property list");
   return value;
 }
 

@@ -64,6 +64,11 @@ def _legacy_code_te2_slot() -> dict[str, object]:
 
 
 class SidebarWindowLedgerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.readiness_patch = patch.object(sidebar_window_state, '_extension_ready_surfaces', {})
+        self.readiness_patch.start()
+        self.addCleanup(self.readiness_patch.stop)
+
     def test_legacy_code_te2_slot_identity_is_migrated_once(self) -> None:
         store = _FakePreferencesStore(
             {
@@ -214,6 +219,7 @@ class SidebarWindowLedgerTests(unittest.TestCase):
                 "extensionId": "example.webview",
                 "viewId": "example.view",
                 "url": url,
+                "iconId": "markdown",
             },
         }
         with (
@@ -227,6 +233,7 @@ class SidebarWindowLedgerTests(unittest.TestCase):
         surface = cast(dict[str, object], window["webviewSurface"])
         self.assertEqual("ExtensionWebviewSurface", surface["dto"])
         self.assertEqual("example.view", surface["viewId"])
+        self.assertEqual("markdown", surface["iconId"])
 
     def test_extension_webview_snapshot_is_atomic_and_idempotent(self) -> None:
         project = "/workspace/project"
@@ -274,6 +281,28 @@ class SidebarWindowLedgerTests(unittest.TestCase):
             self.assertFalse(partial["changed"])
             self.assertEqual([], partial["removed"])
             self.assertIn(host_id, partial["state"]["slots"])
+
+            def readiness(result: dict[str, object]) -> str:
+                state = cast(dict[str, object], result['state'])
+                slots = cast(dict[str, object], state['slots'])
+                slot = cast(dict[str, object], slots[host_id])
+                return str(cast(dict[str, object], slot['readiness'])['status'])
+
+            self.assertEqual('ready', readiness(first))
+            persisted = sidebar_window_state._load_pref_state()
+            persisted_slots = cast(dict[str, object], persisted['slots'])
+            self.assertNotIn('readiness', cast(dict[str, object], persisted_slots[host_id]))
+            # A new worker starts with the same disk ledger but no admission.
+            self.assertTrue(sidebar_window_state.reset_extension_webview_readiness())
+            cold = {'state': sidebar_window_state.get_sidebar_window_state()}
+            self.assertEqual('starting', readiness(cold))
+            empty_progress = sidebar_window_state.reconcile_extension_webview_slots(project, {}, prune=False)
+            self.assertEqual('starting', readiness(empty_progress))
+            restored = sidebar_window_state.reconcile_extension_webview_slots(project, desired, prune=False)
+            self.assertTrue(restored['changed'])  # Must notify even if disk slots match.
+            self.assertEqual('ready', readiness(restored))
+            self.assertTrue(sidebar_window_state.reset_extension_webview_readiness(project))
+            self.assertEqual('starting', readiness({'state': sidebar_window_state.get_sidebar_window_state()}))
 
         self.assertTrue(first["changed"])
         self.assertFalse(second["changed"])

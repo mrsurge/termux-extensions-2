@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface EditorJumpPayloadLike {
   line?: number | string;
   column?: number | string;
@@ -23,19 +24,19 @@ interface EditorInstanceLike {
 }
 
 function asPayload(value: unknown): EditorJumpPayloadLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorJumpPayloadLike
     : null;
 }
 
 function asModel(value: unknown): EditorModelLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorModelLike
     : null;
 }
 
 function asEditor(value: unknown): EditorInstanceLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorInstanceLike
     : null;
 }

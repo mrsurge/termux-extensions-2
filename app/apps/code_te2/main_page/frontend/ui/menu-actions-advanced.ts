@@ -1,30 +1,29 @@
 // @ts-check
+import type { EditorViewState } from '../../../main.ts';
 
-/**
- * @param {{
- *   bindMenuToggle: (el: HTMLElement, action: () => any) => void,
- *   els: {
- *     miToggleAutosave: HTMLElement,
- *     miToggleDiffs: HTMLElement,
- *     miToggleDraftDiffs: HTMLElement,
- *     miToggleReadonly: HTMLElement,
- *     miTrackAgentSidebarEdits: HTMLElement,
- *   },
- *   getEditorViewState: () => any,
- *   updatePreference: (key: string, value: any) => Promise<boolean>,
- *   setMenuChecked: (el: HTMLElement, checked: boolean) => void,
- *   getCurrentPath: () => string,
- *   getCurrentPathExists: () => boolean,
- *   showAutosaveModal: (fileLabel: string, hasOtherDrafts: boolean) => Promise<boolean>,
- *   basename: (path: string) => string,
- *   getUnsaved: () => boolean,
- *   saveFile: () => Promise<any>,
- *   apiPost: (path: string, body: any) => Promise<any>,
- *   markUnsaved: (flag: boolean) => void,
- *   toast: (msg: string, kind?: any) => void,
- * }} deps
- */
-export function installAdvancedMenuActions(deps: any) {
+interface Dependencies {  bindMenuToggle: (el: HTMLElement, action: () => unknown) => void,
+  els: {
+    miToggleAutosave: HTMLElement,
+    miToggleDiffs: HTMLElement,
+    miToggleDraftDiffs: HTMLElement,
+    miToggleReadonly: HTMLElement,
+    miTrackAgentSidebarEdits: HTMLElement,
+  },
+  getEditorViewState: () => EditorViewState | null,
+  updatePreference: (key: string, value: unknown) => Promise<boolean>,
+  setMenuChecked: (el: HTMLElement, checked: boolean) => void,
+  getCurrentPath: () => string,
+  getCurrentPathExists: () => boolean,
+  showAutosaveModal: () => Promise<boolean>,
+  basename: (path: string) => string,
+  getUnsaved: () => boolean,
+  saveFile: () => Promise<unknown>,
+  requestBackendDraftDiscard: (payload: Record<string, unknown>) => Promise<unknown>,
+  markUnsaved: (flag: boolean) => void,
+  toast: (msg: string, kind?: unknown) => void,
+}
+
+export function installAdvancedMenuActions(deps: Dependencies) {
   let preTrackingPrefs: { readOnly: boolean } | null = null;
   const s = () => deps.getEditorViewState();
   const anyTracking = () => !!(s()?.trackAgentSidebarEdits);

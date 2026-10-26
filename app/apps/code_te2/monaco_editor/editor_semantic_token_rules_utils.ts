@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { toMonacoColorHex } from './editor_parse_utils.ts';
 
 interface TokenColorSettings {
@@ -52,12 +53,12 @@ const SEMANTIC_MOD_TO_TM_SCOPES: Record<string, string[]> = {
 
 export function buildSemanticTokenRules(tokenColors: TokenColorEntry[]): MonacoTokenRuleLike[] {
   const scopeSettings: Record<string, TokenColorSettings> = {};
-  if (!Array.isArray(tokenColors)) return [];
+  if (!isUnknownArray(tokenColors)) return [];
   for (let index = 0; index < tokenColors.length; index += 1) {
     const tokenColor = tokenColors[index];
     if (!tokenColor || !tokenColor.settings) continue;
     const scopes = tokenColor.scope;
-    const scopeList = Array.isArray(scopes) ? scopes : typeof scopes === 'string' ? scopes.split(',') : [];
+    const scopeList = isUnknownArray(scopes) ? scopes : typeof scopes === 'string' ? scopes.split(',') : [];
     for (let scopeIndex = 0; scopeIndex < scopeList.length; scopeIndex += 1) {
       const scope = String(scopeList[scopeIndex] || '').trim();
       if (scope) scopeSettings[scope] = tokenColor.settings;

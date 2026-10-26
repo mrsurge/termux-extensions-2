@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 /* Revision-scoped, bounded reads for the TextMate factory's grammar fan-out. */
 import type { PersistentGrammarCache } from './editor_textmate_persistent_cache.ts';
 
@@ -152,7 +153,7 @@ export function createTextmateGrammarBodyLoader(editorRpcCall: GrammarRpcCall, l
         const item = items[index];
         if (!item) return;
         const body = returned[id];
-        if (body && typeof body === 'object' && !Array.isArray(body)) {
+        if (body && typeof body === 'object' && !isUnknownArray(body)) {
           const record = body as Record<string, unknown>;
           if (record.ok === true && typeof record.raw === 'string' && record.raw) {
             complete(id, item, record.raw, null);
@@ -218,13 +219,13 @@ export function createTextmateGrammarBodyLoader(editorRpcCall: GrammarRpcCall, l
       if (generation !== requestGeneration) throw new Error('TextMate projection superseded');
       if (!result || typeof result !== 'object') throw new Error('Invalid TextMate closure');
       const reply = result as Record<string, unknown>;
-      if (reply.revision !== requestedRevision || reply.rootScope !== scope || !Array.isArray(reply.ids)
+      if (reply.revision !== requestedRevision || reply.rootScope !== scope || !isUnknownArray(reply.ids)
           || (reply.ids.length === 0 && reply.complete !== false) || reply.ids.length > 256 || !reply.bodies || typeof reply.bodies !== 'object'
-          || Array.isArray(reply.bodies)) throw new Error('Invalid TextMate closure');
+          || isUnknownArray(reply.bodies)) throw new Error('Invalid TextMate closure');
       const returned = reply.bodies as Record<string, unknown>;
       const seeds = new Map<string, string>();
       if (loadBundle) {
-        if (typeof reply.complete !== 'boolean' || !reply.fingerprints || typeof reply.fingerprints !== 'object' || Array.isArray(reply.fingerprints)) {
+        if (typeof reply.complete !== 'boolean' || !reply.fingerprints || typeof reply.fingerprints !== 'object' || isUnknownArray(reply.fingerprints)) {
           throw new Error('Invalid TextMate closure fingerprints');
         }
         const fingerprints = reply.fingerprints as Record<string, unknown>;

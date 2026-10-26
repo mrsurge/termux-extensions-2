@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import type { JsonObject } from "../../rpc/transport.ts";
 import {
   EXPLORER_RPC_METHODS,
@@ -57,7 +58,7 @@ const SEARCH_TIMEOUT_MS = 15_000;
 const MUTATION_TIMEOUT_MS = 180_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -69,7 +70,7 @@ function numberValue(value: unknown): number | null {
 }
 
 function stringList(value: unknown): string[] {
-  return Array.isArray(value)
+  return isUnknownArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
 }
@@ -201,7 +202,7 @@ export function createExplorerMarketplaceController(
       const response = await deps.requestExplorer(EXPLORER_RPC_METHODS.extensionsList, {}, SEARCH_TIMEOUT_MS);
       if (generation !== installedGeneration || !visible) return;
       installedResults.replaceChildren();
-      const extensions = Array.isArray(response.extensions) ? response.extensions.filter(isRecord) : [];
+      const extensions = isUnknownArray(response.extensions) ? response.extensions.filter(isRecord) : [];
       const user = extensions.filter(entry => entry.source === 'user');
       for (const extension of user) {
         const id = stringValue(extension.id); if (!id) continue;
@@ -641,7 +642,7 @@ export function createExplorerMarketplaceController(
       if (generation !== searchGeneration || requestedQuery !== query.trim()) {
         return;
       }
-      const rawItems = Array.isArray(response.items) ? response.items : [];
+      const rawItems = isUnknownArray(response.items) ? response.items : [];
       const nextItems = rawItems
         .map((item) => parseSummary(item))
         .filter((item): item is MarketplaceSummary => item !== null);

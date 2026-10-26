@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 // app/apps/code_te2/src/explorer/app/bootstrap.ts
 // Explorer v2 – Socket.IO‑driven, backend‑owned state.
 //
@@ -68,7 +69,7 @@ import {
 } from "../tree/view-utils.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function isCancelledError(error: unknown): boolean {
@@ -665,7 +666,7 @@ async function focusDirectoryFromSearch(rel: string): Promise<void> {
     EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated,
     projection,
   );
-  const listings = Array.isArray(projection.listings)
+  const listings = isUnknownArray(projection.listings)
     ? projection.listings.filter(isRecord)
     : [];
   listings.forEach((listing) => {

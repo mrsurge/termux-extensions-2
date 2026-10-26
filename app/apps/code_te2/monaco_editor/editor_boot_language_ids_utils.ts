@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface MonacoLanguagesLike {
   getLanguages?(): Array<{ id?: string | null }>;
 }
@@ -7,7 +8,7 @@ interface MonacoBootLike {
 }
 
 function asMonacoBootLike(value: unknown): MonacoBootLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as MonacoBootLike
     : null;
 }

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 export interface InlineCompletionPendingOptions {
   timeoutMs: number;
   timeoutMessage: string;
@@ -45,7 +46,7 @@ interface InlineCompletionSyncCacheEntry {
 const inlineCompletionSyncByPath = new Map<string, InlineCompletionSyncCacheEntry>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {

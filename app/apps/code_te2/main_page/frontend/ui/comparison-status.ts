@@ -1,8 +1,9 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import { buildDiffBaseOptions } from '../../../src/explorer/git/diff-base-controller.ts';
 
 type Data = Record<string, unknown>;
 function record(value: unknown): Data {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {};
+  return value && typeof value === 'object' && !isUnknownArray(value) ? value as Data : {};
 }
 
 export function installComparisonStatus(deps: {
@@ -46,7 +47,7 @@ export function installComparisonStatus(deps: {
     button.disabled = !project;
     const path = deps.getPath();
     const flags = actual[path.startsWith(project + '/') ? path.slice(project.length + 1) : ''];
-    warning.textContent = project && ref !== 'HEAD' && Array.isArray(flags) ? [
+    warning.textContent = project && ref !== 'HEAD' && isUnknownArray(flags) ? [
       flags.includes('modified') ? 'Modified 🚨' : '',
       flags.includes('staged') ? 'Staged changes exist 🚨' : '',
     ].filter(Boolean).join(' · ') : '';
@@ -110,7 +111,7 @@ export function installComparisonStatus(deps: {
       add('Draft versus disk (autosave off)', mode === 'disk', { mode: 'disk' });
       const divider = document.createElement('hr');
       currentMenu.append(divider);
-      const commits = Array.isArray(data.commits) ? data.commits.map(value => {
+      const commits = isUnknownArray(data.commits) ? data.commits.map(value => {
         const c = record(value);
         return { hash: String(c.hash || ''), short_hash: String(c.short_hash || ''), summary: String(c.summary || '') };
       }) : [];

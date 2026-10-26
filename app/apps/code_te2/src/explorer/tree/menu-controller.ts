@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import { restoreExplorerFile } from './restore-action.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
@@ -131,7 +132,7 @@ export function createExplorerTreeMenuController(
   function parseExtensionActions(value: unknown): ExplorerExtensionMenuAction[] {
     if (!value || typeof value !== 'object') return [];
     const rawActions = (value as { actions?: unknown }).actions;
-    if (!Array.isArray(rawActions)) return [];
+    if (!isUnknownArray(rawActions)) return [];
     const actions: ExplorerExtensionMenuAction[] = [];
     for (const raw of rawActions) {
       if (!raw || typeof raw !== 'object') continue;
@@ -958,7 +959,7 @@ export function createExplorerTreeMenuController(
         ) return;
         appendExtensionSubmenu(menu, entry, parseExtensionActions(result));
         positionCardMenu(menu, anchorEl);
-      }).catch((error) => {
+      }).catch((error: unknown) => {
         console.warn('[explorer-extension-menu] resolve failed', error);
       });
     }

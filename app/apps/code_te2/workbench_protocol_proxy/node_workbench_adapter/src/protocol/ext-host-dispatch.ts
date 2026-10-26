@@ -1,3 +1,4 @@
+import { isUnknownArray } from './value-types.ts';
 export interface DecodedExtHostRpc {
   kind: "ext";
   type?: number;
@@ -64,9 +65,9 @@ export interface ExtHostDispatchRuntime {
   extensionActivity: {
     handleRequest: (request: {
       req: number;
-      rpcId?: number;
-      method?: string;
-      args?: unknown[];
+      rpcId?: number | undefined;
+      method?: string | undefined;
+      args?: unknown[] | undefined;
     }) => {
       handledReply?: boolean;
       replyResult?: unknown;
@@ -177,7 +178,7 @@ function isRequestType(type: unknown): type is 1 | 2 | 3 | 4 {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -227,13 +228,13 @@ function emitRequestEvent(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRp
   };
   if (typeof msg.rpcId === "number") event.rpcId = msg.rpcId;
   if (typeof msg.method === "string") event.method = msg.method;
-  if (msg.method && LOG_ARGS_METHODS.has(msg.method) && Array.isArray(msg.args)) event.args = msg.args;
+  if (msg.method && LOG_ARGS_METHODS.has(msg.method) && isUnknownArray(msg.args)) event.args = msg.args;
   runtime.onEvent(event);
 }
 
 function logActivationLifecycle(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
   if (msg.method === "$onWillActivateExtension" || msg.method === "$onDidActivateExtension" || msg.method === "$onExtensionActivationError") {
-    const raw0 = Array.isArray(msg.args) ? msg.args[0] : undefined;
+    const raw0 = isUnknownArray(msg.args) ? msg.args[0] : undefined;
     const extId =
       (isRecord(raw0) && isRecord(raw0.value) && stringValue(raw0.value.id)) ||
       (isRecord(raw0) && stringValue(raw0.id)) ||
@@ -268,12 +269,12 @@ function applyProviderRegistration(runtime: ExtHostDispatchRuntime, msg: Decoded
 }
 
 function logDiagnosticsChange(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
-  const argsSummary = Array.isArray(msg.args) ? `args.length=${msg.args.length}` : `args=${typeof msg.args}`;
-  const pairs = Array.isArray(msg.args) && Array.isArray(msg.args[1]) ? msg.args[1] : [];
-  const markerCounts = pairs.map((pair: unknown) => (Array.isArray(pair) && Array.isArray(pair[1]) ? pair[1].length : "?"));
-  runtime.log(`[wb_client] ts=${runtime.nowMs()} $changeMany owner=${Array.isArray(msg.args) ? msg.args[0] : "?"} pairs=${pairs.length} markerCounts=[${markerCounts.join(",")}] ${argsSummary}`);
+  const argsSummary = isUnknownArray(msg.args) ? `args.length=${msg.args.length}` : `args=${typeof msg.args}`;
+  const pairs = isUnknownArray(msg.args) && isUnknownArray(msg.args[1]) ? msg.args[1] : [];
+  const markerCounts = pairs.map((pair: unknown) => (isUnknownArray(pair) && isUnknownArray(pair[1]) ? pair[1].length : "?"));
+  runtime.log(`[wb_client] ts=${runtime.nowMs()} $changeMany owner=${isUnknownArray(msg.args) ? msg.args[0] : "?"} pairs=${pairs.length} markerCounts=[${markerCounts.join(",")}] ${argsSummary}`);
   try {
-    if (markerCounts.includes("?") && pairs.length > 0 && Array.isArray(pairs[0])) {
+    if (markerCounts.includes("?") && pairs.length > 0 && isUnknownArray(pairs[0])) {
       const uri = pairs[0][0];
       const markers = pairs[0][1];
       const uriKeys = objectKeysPreview(uri);
@@ -292,18 +293,18 @@ function logDiagnosticsChange(runtime: ExtHostDispatchRuntime, msg: DecodedExtHo
       }
       runtime.log(
         `[wb_client] ts=${runtime.nowMs()} $changeMany suspicious pair0 uriType=${typeof uri} uriPath=${uriPath} uriKeys=${JSON.stringify(uriKeys)} ` +
-        `markersType=${Array.isArray(markers) ? "array" : typeof markers} markersKeys=${JSON.stringify(markerKeys)} markersPreview=${markersPreview}`,
+        `markersType=${isUnknownArray(markers) ? "array" : typeof markers} markersKeys=${JSON.stringify(markerKeys)} markersPreview=${markersPreview}`,
       );
     }
   } catch {
     // Preserve current logging-only behavior.
   }
-  if (pairs.length > 0 && Array.isArray(pairs[0]) && pairs[0].length >= 2) {
-    const sampleMarkers = Array.isArray(pairs[0][1]) ? pairs[0][1].slice(0, 1) : [];
+  if (pairs.length > 0 && isUnknownArray(pairs[0]) && pairs[0].length >= 2) {
+    const sampleMarkers = isUnknownArray(pairs[0][1]) ? pairs[0][1].slice(0, 1) : [];
     if (sampleMarkers.length && isRecord(sampleMarkers[0])) {
       runtime.log(`[wb_client] ts=${runtime.nowMs()} $changeMany sample marker keys:`, Object.keys(sampleMarkers[0]));
     }
-    const allMarkers = Array.isArray(pairs[0][1]) ? pairs[0][1] : [];
+    const allMarkers = isUnknownArray(pairs[0][1]) ? pairs[0][1] : [];
     const dump = allMarkers.slice(0, 3).map((marker: unknown) => ({
       severity: isRecord(marker) ? marker.severity : undefined,
       code: isRecord(marker) ? marker.code : undefined,
@@ -314,7 +315,7 @@ function logDiagnosticsChange(runtime: ExtHostDispatchRuntime, msg: DecodedExtHo
       endLineNumber: isRecord(marker) ? marker.endLineNumber : undefined,
       endColumn: isRecord(marker) ? marker.endColumn : undefined,
       tags: isRecord(marker) ? marker.tags : undefined,
-      relatedInformation: isRecord(marker) && Array.isArray(marker.relatedInformation) ? marker.relatedInformation.length : 0,
+      relatedInformation: isRecord(marker) && isUnknownArray(marker.relatedInformation) ? marker.relatedInformation.length : 0,
     }));
     runtime.log(`[diagnostics_dump] total=${allMarkers.length} first3=${JSON.stringify(dump)}`);
   }
@@ -323,7 +324,7 @@ function logDiagnosticsChange(runtime: ExtHostDispatchRuntime, msg: DecodedExtHo
 
 function handleSemanticTokensEvent(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): boolean {
   if (msg.method !== "$emitDocumentSemanticTokensEvent" && msg.method !== "$emitDocumentRangeSemanticTokensEvent") return false;
-  const rawHandle = Array.isArray(msg.args) ? msg.args[0] : undefined;
+  const rawHandle = isUnknownArray(msg.args) ? msg.args[0] : undefined;
   const eventHandle = Number(rawHandle);
   if (!Number.isFinite(eventHandle)) {
     runtime.log(`[semanticTokens] ignored ${msg.method} with invalid eventHandle=${String(rawHandle)}`);
@@ -405,7 +406,7 @@ const MAIN_THREAD_STORAGE_METHODS = new Set([
 function storageRequestArguments(
   msg: DecodedExtHostRpc,
 ): { shared: boolean; extensionId: string; value?: unknown } {
-  const args = Array.isArray(msg.args) ? msg.args : [];
+  const args = isUnknownArray(msg.args) ? msg.args : [];
   const shared = args[0];
   const extensionId = args[1];
   if (typeof shared !== "boolean") {
@@ -473,7 +474,7 @@ function handleMainThreadStorageRequest(
         ? encodeExtReplyOkEmpty(Number(msg.req ?? 0))
         : encodeExtReplyOkJson(Number(msg.req ?? 0), raw);
       sendReplyPayload(runtime, Number(msg.req ?? 0), msg.method, payload);
-    }).catch((error) => sendStorageError(runtime, msg, error));
+    }).catch((error: unknown) => sendStorageError(runtime, msg, error));
     return true;
   }
 
@@ -488,7 +489,7 @@ function handleMainThreadStorageRequest(
       msg.method,
       encodeExtReplyOkEmpty(Number(msg.req ?? 0)),
     );
-  }).catch((error) => sendStorageError(runtime, msg, error));
+  }).catch((error: unknown) => sendStorageError(runtime, msg, error));
   return true;
 }
 
@@ -531,13 +532,13 @@ function handleMainThreadCommandRequest(
 
 function handleTryOpenDocument(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
   const req = Number(msg.req ?? 0);
-  const uri = Array.isArray(msg.args) ? msg.args[0] : undefined;
-  const options = Array.isArray(msg.args) ? msg.args[1] ?? {} : {};
+  const uri = isUnknownArray(msg.args) ? msg.args[0] : undefined;
+  const options = isUnknownArray(msg.args) ? msg.args[1] ?? {} : {};
   const uriStr = runtime.uriObjToStringSafe(uri);
   runtime.log(`[ext_reply] $tryOpenDocument req=${req} uri=${uriStr}`);
   runtime.tryOpenDocument(uri, options).then((openedUri) => {
     sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, openedUri));
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     runtime.log(`[ext_reply] $tryOpenDocument error: ${error instanceof Error ? error.message : String(error)}`);
     sendReplyPayload(
       runtime,
@@ -550,11 +551,11 @@ function handleTryOpenDocument(runtime: ExtHostDispatchRuntime, msg: DecodedExtH
 
 function handleCheckExists(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
   const req = Number(msg.req ?? 0);
-  const folders = Array.isArray(msg.args) ? msg.args[0] : [];
-  const includes = Array.isArray(msg.args) ? msg.args[1] : [];
+  const folders = isUnknownArray(msg.args) ? msg.args[0] : [];
+  const includes = isUnknownArray(msg.args) ? msg.args[1] : [];
   runtime.checkWorkspaceExists(folders, includes).then((exists) => {
     sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, exists));
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     runtime.log(`[ext_reply] $checkExists error: ${error instanceof Error ? error.message : String(error)}`);
     sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, false));
   });
@@ -562,11 +563,11 @@ function handleCheckExists(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostR
 
 function handleStartFileSearch(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
   const req = Number(msg.req ?? 0);
-  const includeFolder = Array.isArray(msg.args) ? msg.args[0] : null;
-  const options = Array.isArray(msg.args) ? msg.args[1] : {};
+  const includeFolder = isUnknownArray(msg.args) ? msg.args[0] : null;
+  const options = isUnknownArray(msg.args) ? msg.args[1] : {};
   runtime.startFileSearch(includeFolder, options).then((results) => {
     sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, results));
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     runtime.log(`[ext_reply] $startFileSearch error: ${error instanceof Error ? error.message : String(error)}`);
     sendReplyPayload(
       runtime,
@@ -582,7 +583,7 @@ function handleStartFileSearch(runtime: ExtHostDispatchRuntime, msg: DecodedExtH
 
 function handleReadFile(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): Uint8Array | null {
   const req = Number(msg.req ?? 0);
-  const uri = Array.isArray(msg.args) ? msg.args[0] : undefined;
+  const uri = isUnknownArray(msg.args) ? msg.args[0] : undefined;
   const uriStr = runtime.uriObjToStringSafe(uri);
   const uriScheme = isRecord(uri) ? stringValue(uri.scheme) : null;
   const virtualBuffer = runtime.readVirtualVscodeUriBuffer(uri);
@@ -597,7 +598,7 @@ function handleReadFile(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc)
     runtime.log(`[ext_reply] $readFile req=${req} uri=${uriStr} -> local fsPath=${fsPath}`);
     runtime.readLocalUriBuffer(uri).then((buffer) => {
       sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkVSBuffer(req, buffer));
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       runtime.log(`[ext_reply] $readFile local-file error: ${error instanceof Error ? error.message : String(error)}`);
       sendReplyPayload(
         runtime,
@@ -616,7 +617,7 @@ function handleReadFile(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc)
         return;
       }
       sendReplyPayload(runtime, req, msg.method, encodeExtReplyError(req, { message: `Content provider returned null for ${uriStr}`, code: "FileNotFound" }));
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       runtime.log(`[ext_reply] $readFile content-provider error: ${error instanceof Error ? error.message : String(error)}`);
       sendReplyPayload(
         runtime,
@@ -633,7 +634,7 @@ function handleReadFile(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc)
 
 function handleStat(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): Uint8Array | null {
   const req = Number(msg.req ?? 0);
-  const uri = Array.isArray(msg.args) ? msg.args[0] : undefined;
+  const uri = isUnknownArray(msg.args) ? msg.args[0] : undefined;
   const uriStr = runtime.uriObjToStringSafe(uri);
   const uriScheme = isRecord(uri) ? stringValue(uri.scheme) : null;
   const virtualStat = runtime.statVirtualVscodeUri(uri);
@@ -647,7 +648,7 @@ function handleStat(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): Ui
     runtime.log(`[ext_reply] $stat req=${req} uri=${uriStr} -> local fsPath=${fsPath}`);
     runtime.statLocalUri(uri).then((statPayload) => {
       sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, statPayload));
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       runtime.log(`[ext_reply] $stat local-file error: ${error instanceof Error ? error.message : String(error)}`);
       sendReplyPayload(
         runtime,

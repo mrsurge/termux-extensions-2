@@ -1,7 +1,8 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import type { EditorCacheStatePayload } from './editor_save_mirror_contract.ts';
 
 function asCacheStatePayload(value: unknown): EditorCacheStatePayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorCacheStatePayload
     : null;
 }

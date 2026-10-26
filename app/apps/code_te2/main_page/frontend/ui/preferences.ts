@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 type State = Record<string, unknown>;
 interface PreferencesDeps {
   getProject(): string | null;
@@ -10,7 +11,7 @@ interface PreferencesDeps {
   getMenuItems(): Record<string, HTMLElement | null>;
 }
 function record(value: unknown): State | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as State : null;
+  return value !== null && typeof value === 'object' && !isUnknownArray(value) ? value as State : null;
 }
 
 // Preferences have one transport: owning host RPC plus pushed state projections.

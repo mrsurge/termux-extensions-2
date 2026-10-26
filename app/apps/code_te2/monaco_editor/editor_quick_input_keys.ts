@@ -21,7 +21,7 @@ export function quickInputAction(editor: QuickInputEditor, key: string): boolean
   if (!action?.run) return false;
   const doc = editor.getDomNode?.()?.ownerDocument;
   if (doc) owners.set(doc, editor);
-  void Promise.resolve(action.run()).catch(error => console.warn('[quick_input] action failed', error));
+  void Promise.resolve(action.run()).catch((error: unknown) => console.warn('[quick_input] action failed', error));
   return true;
 }
 

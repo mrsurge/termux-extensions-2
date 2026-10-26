@@ -21,7 +21,9 @@
     "test:marketplace": "node --test tests/explorer_marketplace.test.mjs",
     "test:mobile-input": "node --test tests/mobile_special_keys.test.mjs",
     "test:transport": "node --test tests/socketio_transport.test.mjs tests/terminal_drawer_transport.test.mjs tests/terminal_output_projection.test.mjs tests/terminal_touch_selection.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node scripts/check-no-any.mjs",
+    "typecheck:frontend": "tsc --noEmit",
+    "typecheck:wba": "tsc -p workbench_protocol_proxy/node_workbench_adapter/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",

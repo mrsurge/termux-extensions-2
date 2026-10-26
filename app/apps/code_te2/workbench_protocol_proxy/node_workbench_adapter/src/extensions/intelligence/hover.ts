@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import type { ProviderDocument } from "../provider-registry";
 
 export interface HoverPendingOptions {
@@ -45,7 +46,7 @@ export interface HoverSingleParams {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -78,7 +79,7 @@ function hoverRange(reply: unknown): unknown {
 function hoverContents(reply: unknown): unknown[] {
   const result = replyResult(reply);
   const contents = field(result, "contents");
-  return Array.isArray(contents) ? contents : [];
+  return isUnknownArray(contents) ? contents : [];
 }
 
 export async function provideHover(runtime: HoverRuntime, params: unknown = {}): Promise<Record<string, unknown>> {

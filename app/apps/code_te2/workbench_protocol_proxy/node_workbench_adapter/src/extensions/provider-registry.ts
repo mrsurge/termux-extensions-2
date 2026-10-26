@@ -1,5 +1,6 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import { createRequire } from "node:module";
-import { completionTrace } from "../server/runtime-debug.mjs";
+import { completionTrace } from "../server/runtime-debug.ts";
 
 interface PicomatchOptions {
   dot?: boolean;
@@ -10,7 +11,7 @@ type Picomatch = (
   options?: PicomatchOptions,
 ) => (value: string) => boolean;
 
-const require = createRequire(import.meta.url);
+const require: (specifier: string) => unknown = createRequire(import.meta.url);
 const picomatch = require(
   "../../../../vendor/picomatch/index.js",
 ) as Picomatch;
@@ -93,7 +94,7 @@ function emptyOutcome(handled = false): ProviderRegistrationOutcome {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function selectorLanguage(selector: unknown): string | null {
@@ -251,7 +252,7 @@ function tokenLegendLength(
 ): number {
   if (!isRecord(legend)) return 0;
   const value = legend[key];
-  return Array.isArray(value) ? value.length : 0;
+  return isUnknownArray(value) ? value.length : 0;
 }
 
 function finiteHandle(value: unknown): number | null {
@@ -260,7 +261,7 @@ function finiteHandle(value: unknown): number | null {
 }
 
 function normalizeSelector(value: unknown): unknown[] | null {
-  return Array.isArray(value) ? value : null;
+  return isUnknownArray(value) ? value : null;
 }
 
 function methodMatches(method: unknown, name: string): method is string {
@@ -299,7 +300,7 @@ export class ProviderRegistry {
     method: unknown,
     args: unknown,
   ): ProviderRegistrationOutcome {
-    if (!Array.isArray(args)) return emptyOutcome(false);
+    if (!isUnknownArray(args)) return emptyOutcome(false);
     if (methodMatches(method, "$unregister")) {
       const handle = finiteHandle(args[0]);
       if (handle === null) return emptyOutcome(true);
@@ -312,7 +313,7 @@ export class ProviderRegistry {
       const handle = finiteHandle(args[0]), selector = normalizeSelector(args[1]);
       if (handle === null || !selector) return outcome;
       const metadata = isRecord(args[2]) ? args[2] : {};
-      const providedKinds = Array.isArray(metadata.providedKinds) ? metadata.providedKinds.filter((v): v is string => typeof v === 'string') : undefined;
+      const providedKinds = isUnknownArray(metadata.providedKinds) ? metadata.providedKinds.filter((v): v is string => typeof v === 'string') : undefined;
       this.providers.codeActions.set(handle, {handle, selector, ...(providedKinds ? {providedKinds} : {}), supportsResolve: args[5] === true});
       outcome.events.push({type:'provider/codeActions', handle});
       return outcome;
@@ -516,7 +517,7 @@ export class ProviderRegistry {
           selector: entry.selector,
           handle: entry.handle,
           language,
-          triggerCharacters: Array.isArray(entry.triggerCharacters)
+          triggerCharacters: isUnknownArray(entry.triggerCharacters)
             ? entry.triggerCharacters
             : [],
           supportsResolve: !!entry.supportsResolve,
@@ -536,10 +537,10 @@ export class ProviderRegistry {
           extensionId: entry.extensionId ?? null,
           extensionVersion: entry.extensionVersion ?? null,
           groupId: entry.groupId ?? null,
-          yieldsToGroupIds: Array.isArray(entry.yieldsToGroupIds)
+          yieldsToGroupIds: isUnknownArray(entry.yieldsToGroupIds)
             ? entry.yieldsToGroupIds
             : [],
-          excludesGroupIds: Array.isArray(entry.excludesGroupIds)
+          excludesGroupIds: isUnknownArray(entry.excludesGroupIds)
             ? entry.excludesGroupIds
             : [],
           displayName: entry.displayName ?? null,
@@ -660,7 +661,7 @@ export class ProviderRegistry {
     const handleValue = Number(args[0]);
     const selector = args[1];
     outcome.logs.push(
-      `[providers] $registerHoverProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
+      `[providers] $registerHoverProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} isArr=${isUnknownArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
     );
 
     const handle = Number.isFinite(handleValue) ? handleValue : null;
@@ -695,7 +696,7 @@ export class ProviderRegistry {
     const eventHandle =
       typeof args[3] === "number" && Number.isFinite(args[3]) ? args[3] : null;
     outcome.logs.push(
-      `[providers] $registerFoldingRangeProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} eventHandle=${eventHandle ?? "none"} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
+      `[providers] $registerFoldingRangeProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} eventHandle=${eventHandle ?? "none"} isArr=${isUnknownArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
     );
 
     const handle = Number.isFinite(handleValue) ? handleValue : null;
@@ -730,7 +731,7 @@ export class ProviderRegistry {
     if (args.length < 2) return outcome;
     const handle = finiteHandle(args[0]);
     const selector = normalizeSelector(args[1]);
-    const triggerCharacters = Array.isArray(args[2])
+    const triggerCharacters = isUnknownArray(args[2])
       ? args[2].map(String).filter(Boolean)
       : [];
     const supportsResolve = !!args[3];
@@ -805,13 +806,13 @@ export class ProviderRegistry {
     const extensionId = typeof args[3] === "string" ? args[3] : null;
     const extensionVersion = typeof args[4] === "string" ? args[4] : null;
     const groupId = typeof args[5] === "string" ? args[5] : null;
-    const yieldsToGroupIds = Array.isArray(args[6])
+    const yieldsToGroupIds = isUnknownArray(args[6])
       ? args[6].map(String).filter(Boolean)
       : [];
     const displayName = typeof args[7] === "string" ? args[7] : null;
     const debounceDelayMs =
       typeof args[8] === "number" && Number.isFinite(args[8]) ? args[8] : null;
-    const excludesGroupIds = Array.isArray(args[9])
+    const excludesGroupIds = isUnknownArray(args[9])
       ? args[9].map(String).filter(Boolean)
       : [];
     const eventHandle = finiteHandle(args[10]);
@@ -895,7 +896,7 @@ export class ProviderRegistry {
     const eventHandle = finiteHandle(args[3]);
     const legendKeys = isRecord(legend) ? Object.keys(legend).join(",") : "N/A";
     outcome.logs.push(
-      `[providers] range check: handle=${handleValue} isFinite=${Number.isFinite(handleValue)} isArrSelector=${Array.isArray(selector)} legendTruthy=${!!legend} legendType=${typeof legend} legendKeys=${legendKeys}`,
+      `[providers] range check: handle=${handleValue} isFinite=${Number.isFinite(handleValue)} isArrSelector=${isUnknownArray(selector)} legendTruthy=${!!legend} legendType=${typeof legend} legendKeys=${legendKeys}`,
     );
 
     const handle = Number.isFinite(handleValue) ? handleValue : null;
@@ -940,7 +941,7 @@ export class ProviderRegistry {
     const handleValue = Number(args[0]);
     const selector = args[1];
     outcome.logs.push(
-      `[providers] $registerDocumentColorProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
+      `[providers] $registerDocumentColorProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} isArr=${isUnknownArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
     );
 
     const handle = Number.isFinite(handleValue) ? handleValue : null;

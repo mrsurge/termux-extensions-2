@@ -189,7 +189,7 @@ After wiring the bridge:
 Treat `main_page` and `editor_iframe` as internal TE2 workers unless you are specifically debugging TE2 itself.
 
 The default TE2 console bridge for hosted frontends lives at:
-- `app/apps/code_te2/main_page/frontend/console_bridge.js`
+- `app/apps/code_te2/main_page/frontend/console_bridge.ts`
 
 The internal TE2 host wires that bridge from:
 - `app/apps/code_te2/main_page/frontend/connections/ui-ipc.ts`

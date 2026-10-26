@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import type { JsonObject } from "../../rpc/transport.ts";
 import { getIcon as getFileIcon } from '/static/js/file_icons.js';
 import { ExplorerHistoryController } from '../history/controller.ts';
@@ -82,7 +83,7 @@ const SEARCH_MODE_OPTIONS: readonly SearchModeOption[] = [
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function isExplorerSearchMode(value: unknown): value is ExplorerSearchMode {

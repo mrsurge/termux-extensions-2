@@ -1,7 +1,8 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import { randomUUID } from 'node:crypto';
 import type { ProviderRegistry, ProviderDocument, ProviderEntry } from '../provider-registry';
 
-const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !isUnknownArray(v);
 export interface QuickFixRuntime {
   registry: ProviderRegistry;
   document(params: Record<string, unknown>): ProviderDocument;
@@ -46,7 +47,7 @@ export class QuickFixService {
         if (provider?.providedKinds?.length && !provider.providedKinds.some(k => k === 'quickfix' || k.startsWith('quickfix.'))) continue;
         const raw = await this.runtime.request('$provideCodeActions', [handle, this.runtime.uri(path), params.range, {only:'quickfix', trigger:params.trigger === 1 ? 1 : 2}]);
         if (epoch !== this.epoch) return {actions:[]};
-        if (!record(raw) || !Number.isInteger(raw.cacheId) || !Array.isArray(raw.actions)) continue;
+        if (!record(raw) || !Number.isInteger(raw.cacheId) || !isUnknownArray(raw.actions)) continue;
         if (this.runtime.registry.getProvider('codeActions', handle) !== provider) {
           await this.runtime.request('$releaseCodeActions', [handle, raw.cacheId]).catch(()=>{});
           continue;
@@ -79,7 +80,7 @@ export class QuickFixService {
     if (!action) throw Error('Unknown Quick Fix action');
     const provider = this.runtime.registry.getProvider('codeActions', list.handle);
     let resolved: unknown = {};
-    if (provider?.supportsResolve && Array.isArray(action.cacheId)) resolved = await this.runtime.request('$resolveCodeAction', [list.handle, action.cacheId]);
+    if (provider?.supportsResolve && isUnknownArray(action.cacheId)) resolved = await this.runtime.request('$resolveCodeAction', [list.handle, action.cacheId]);
     if (this.lists.get(id) !== list || this.runtime.registry.getProvider('codeActions', list.handle) !== list.provider) throw Error('Quick Fix provider retired during resolution');
     const merged = {...action, ...(record(resolved) ? resolved : {})};
     if (record(merged.command) && (typeof merged.command.id !== 'string' || !this.runtime.commandSupported(merged.command.id))) {

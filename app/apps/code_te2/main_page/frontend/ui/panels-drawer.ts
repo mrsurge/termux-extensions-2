@@ -1,28 +1,26 @@
 // @ts-check
 
-/**
- * @param {{
- *   createTerminalDrawer: (opts?: any) => any,
- *   createConsoleDrawer: () => any,
- *   mobileSecondEditor?: { attachDrawer: Function, show: Function, hide: Function },
- *   createExtensionActivityPanel: (opts: any) => any,
- *   createCodeInspectorPanel: (opts: any) => any,
- *   initDrawerAndShortcuts: (opts: any) => any,
- *   bindMenuToggle: (el: HTMLElement, action: () => any) => void,
- *   requireEl: (selector: string) => any,
- *   hostToast: (msg: string) => void,
- *   setFontScale: (preset: any) => Promise<any>,
- *   triggerEditorSearchPanel: (reason: string, opts?: any) => Promise<any>,
- *   openFile: (path: string, options?: any) => Promise<any>,
- *   jumpToCurrentFileLine: (line: number) => Promise<any>,
- *   requestCodeInspectorCommand: (payload: any) => Promise<any>,
- *   emitImeIntent?: (active: boolean, params?: Record<string, unknown>) => void,
- *   saveFile: () => Promise<any>,
- *   resetToNewFile: () => void,
- *   openPickedFile: () => void,
- * }} deps
- */
-export function initPanelsAndDrawer(deps: any) {
+interface Dependencies {  createTerminalDrawer: typeof import('../host-terminal-drawer.ts').createTerminalDrawer,
+  createConsoleDrawer: typeof import('../host-console-drawer.ts').createConsoleDrawer,
+  mobileSecondEditor?: ReturnType<typeof import('../mobile-secondary-editor.ts').createMobileSecondaryEditorController>,
+  createExtensionActivityPanel: typeof import('./extension-activity.ts').createExtensionActivityPanel,
+  createCodeInspectorPanel: typeof import('./code-inspector.ts').createCodeInspectorPanel,
+  initDrawerAndShortcuts: typeof import('./drawer-shortcuts.ts').initDrawerAndShortcuts,
+  bindMenuToggle: (el: HTMLElement, action: () => unknown) => void,
+  requireEl: (selector: string) => HTMLElement,
+  hostToast: (msg: string) => void,
+  setFontScale: (preset: string) => Promise<unknown>,
+  triggerEditorSearchPanel: (reason: string, opts?: { replace?: boolean }) => Promise<unknown>,
+  openFile: (path: string, options?: import('../file-ops/open-flow.ts').OpenFileOptions) => Promise<unknown>,
+  jumpToCurrentFileLine: (line: number) => Promise<unknown>,
+  requestCodeInspectorCommand: (payload: Record<string, unknown>) => Promise<unknown>,
+  emitImeIntent?: (active: boolean, params?: Record<string, unknown>) => void,
+  saveFile: () => Promise<unknown>,
+  resetToNewFile: () => void,
+  openPickedFile: () => void,
+}
+
+export function initPanelsAndDrawer(deps: Dependencies) {
   const terminal = deps.createTerminalDrawer({
     onReady: () => console.log('Terminal drawer ready'),
     emitImeIntent: deps.emitImeIntent,
@@ -59,7 +57,7 @@ export function initPanelsAndDrawer(deps: any) {
     isDrawerOpen: () => terminal.isOpen(),
     activateTerminal: () => terminal.activateTerminal(),
     setFontScale: (preset: string) => deps.setFontScale(preset),
-    triggerEditorSearchPanel: (reason: string, opts: any) => deps.triggerEditorSearchPanel(reason, opts),
+    triggerEditorSearchPanel: (reason = 'menu', opts?: { replace?: boolean }) => deps.triggerEditorSearchPanel(reason, opts),
     hostToast: (msg: string) => deps.hostToast(msg),
     jumpToCurrentFileLine: (line: number) => deps.jumpToCurrentFileLine(line),
     saveFile: () => deps.saveFile(),

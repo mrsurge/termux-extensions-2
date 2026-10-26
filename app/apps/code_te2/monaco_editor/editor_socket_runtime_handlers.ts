@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { EDITOR_RPC_NOTIFICATIONS } from "./editor_rpc_contract.ts";
 import { handleDraftDiffEvent } from "./editor_socket_draft_diff_handler_utils.js";
 import { handleIssuesDumpRequest } from "./editor_socket_issues_dump_handler_utils.js";
@@ -150,7 +151,7 @@ export function registerEditorRuntimeSocketHandlers(
   const handleEditCommandPayload = (payload: unknown): void => {
     try {
       const record =
-        payload && typeof payload === "object" && !Array.isArray(payload)
+        payload && typeof payload === "object" && !isUnknownArray(payload)
           ? (payload as Record<string, unknown>)
           : {};
       const command = typeof record.command === "string" ? record.command : "";

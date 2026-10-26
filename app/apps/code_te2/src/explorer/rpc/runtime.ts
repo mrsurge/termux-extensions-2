@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import { createExplorerRpcConnection } from './connection.ts';
 import { installExplorerRpcClient } from './client.ts';
 import {
@@ -60,7 +61,7 @@ function hostWindow(): Window & ExplorerRpcRuntimeGlobals {
 }
 
 function asJsonObject(value: unknown): JsonObject {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value && typeof value === 'object' && !isUnknownArray(value)
     ? value as JsonObject
     : {};
 }
@@ -150,7 +151,7 @@ export function createExplorerRpcRuntime(deps: ExplorerRpcRuntimeDeps): Explorer
       try {
         const keys = Object.keys(payload);
         const firstMarkers = keys.length > 0 ? payload[keys[0]] : [];
-        const sampleMarkers = Array.isArray(firstMarkers) ? firstMarkers.slice(0, 1) : [];
+        const sampleMarkers = isUnknownArray(firstMarkers) ? firstMarkers.slice(0, 1) : [];
         log(
           '[Problems] diagnostics:detail rx',
           keys.length,
@@ -233,7 +234,7 @@ export function createExplorerRpcRuntime(deps: ExplorerRpcRuntimeDeps): Explorer
 
   async function connect(): Promise<ExplorerRpcConnection> {
     const connection = ensureConnection();
-    await connection.connect().catch((err) => {
+    await connection.connect().catch((err: unknown) => {
       warn('[ExplorerRPC] Failed to open explorer Socket.IO:', err);
       throw err;
     });

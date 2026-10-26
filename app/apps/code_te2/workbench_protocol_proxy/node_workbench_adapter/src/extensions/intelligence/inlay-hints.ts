@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 export interface InlayHintsPendingOptions {
   timeoutMs: number;
   timeoutMessage: string;
@@ -33,7 +34,7 @@ export interface InlayHintsRuntime {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -71,7 +72,7 @@ function normalizeRange(value: unknown): Record<string, number> | null {
 }
 
 function normalizeChainedCacheId(value: unknown): [number, number] | null {
-  if (!Array.isArray(value) || value.length < 2) return null;
+  if (!isUnknownArray(value) || value.length < 2) return null;
   const first = numberFrom(value[0], NaN);
   const second = numberFrom(value[1], NaN);
   return Number.isFinite(first) && Number.isFinite(second) ? [first, second] : null;

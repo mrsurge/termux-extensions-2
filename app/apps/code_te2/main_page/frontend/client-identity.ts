@@ -1,3 +1,4 @@
+import { recordValue } from '../../src/rpc/value-types.ts';
 import { generateUuid } from './uuid.ts';
 import {
   androidNativeRenderer,
@@ -88,13 +89,13 @@ function requestGeckoClientIdentity(
       window.removeEventListener("message", onMessage);
       reject(new Error("Gecko native client identity bridge timed out"));
     }, 10_000);
-    function onMessage(event: MessageEvent): void {
+    function onMessage(event: MessageEvent<unknown>): void {
       if (
         event.source !== requestTarget ||
         event.origin !== window.location.origin
       )
         return;
-      const data = event.data;
+      const data = recordValue(event.data);
       if (
         !data ||
         data.channel !== GECKO_IDENTITY_RESPONSE ||
@@ -103,16 +104,16 @@ function requestGeckoClientIdentity(
         return;
       window.clearTimeout(timeout);
       window.removeEventListener("message", onMessage);
-      if (data.result?.ok !== true) {
+      if (recordValue(data.result).ok !== true) {
         reject(
           new Error(
-            String(data.result?.error || "Gecko client identity failed"),
+            String(recordValue(data.result).error || "Gecko client identity failed"),
           ),
         );
         return;
       }
       try {
-        resolve(validatedClientInstanceId(data.result.clientInstanceId));
+        resolve(validatedClientInstanceId(recordValue(data.result).clientInstanceId));
       } catch (error) {
         reject(error);
       }

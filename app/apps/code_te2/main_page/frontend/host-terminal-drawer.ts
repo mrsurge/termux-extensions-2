@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 // app/apps/code_te2/main_page/frontend/host-terminal-drawer.ts
 
 import { generateUuid } from './uuid.ts';
@@ -224,7 +225,7 @@ function coerceShell(value: unknown): TerminalShell | null {
 }
 
 function coerceShells(value: unknown): TerminalShell[] {
-  if (!Array.isArray(value)) return [];
+  if (!isUnknownArray(value)) return [];
   return value.map(coerceShell).filter((shell): shell is TerminalShell => !!shell);
 }
 
@@ -921,7 +922,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     const handleFocus = () => {
       publishTerminalSpecialKeyFocus(window, true);
       emitTerminalImeIntent(true, 'textarea_focus');
-      void bindDrawerVendoredCtrlHandler(currentTerm).catch((err) => {
+      void bindDrawerVendoredCtrlHandler(currentTerm).catch((err: unknown) => {
         console.warn('Failed to rebind vendored ctrl helper:', err);
       });
     };
@@ -950,7 +951,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     runtimeWindow.__fileEditorCm6TerminalHelpersActive = !!active;
     if (active && term) {
       runtimeWindow.term = term;
-      void bindDrawerVendoredCtrlHandler(term).catch((err) => {
+      void bindDrawerVendoredCtrlHandler(term).catch((err: unknown) => {
         console.warn('Failed to bind vendored ctrl helper:', err);
       });
       return;
@@ -1081,7 +1082,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       }
       lastShellId = receivedShellId;
       if (term) {
-        void bindDrawerVendoredCtrlHandler(term).catch((err) => {
+        void bindDrawerVendoredCtrlHandler(term).catch((err: unknown) => {
           console.warn('Failed to bind vendored ctrl helper:', err);
         });
       }
@@ -1238,7 +1239,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     container.addEventListener('pointerdown', () => {
       emitTerminalImeIntent(true, 'pointerdown');
       setDrawerHelperFocusActive(true);
-      void bindDrawerVendoredCtrlHandler(nextTerm).catch((err) => {
+      void bindDrawerVendoredCtrlHandler(nextTerm).catch((err: unknown) => {
         console.warn('Failed to bind vendored ctrl helper:', err);
       });
       try { nextTerm.focus(); } catch (_) {}

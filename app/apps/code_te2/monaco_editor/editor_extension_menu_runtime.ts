@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import {
   buildExtensionEditorSelection,
   type ExtensionEditorLike,
@@ -40,7 +41,7 @@ interface ExtensionEditorMenuRuntimeDeps {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === "object" && !Array.isArray(value);
+  return value != null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringField(value: unknown, key: string): string | null {
@@ -50,9 +51,10 @@ function stringField(value: unknown, key: string): string | null {
 }
 
 function parseActions(value: unknown): ExtensionMenuAction[] {
-  if (!isRecord(value) || !Array.isArray(value.actions)) return [];
+  if (!isRecord(value) || !isUnknownArray(value.actions)) return [];
   const actions: ExtensionMenuAction[] = [];
   for (const raw of value.actions) {
+    if (!isRecord(raw)) continue;
     const command = stringField(raw, "command");
     const title = stringField(raw, "title");
     const extensionId = stringField(raw, "extensionId");

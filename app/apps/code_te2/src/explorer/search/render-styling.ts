@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import { highlightTextmateElement } from '../../../monaco_editor/editor_textmate_snippets.ts';
 import { diffWordsWithSpace } from "../../../vendor/diff/libesm/index.js";
 import type { ExplorerSearchTextRange } from "./types.ts";
@@ -163,7 +164,7 @@ function normalizeSnippetRanges(
   text: string,
   options: SearchSnippetOptions | undefined,
 ): NormalizedTextRange[] {
-  const ranges = Array.isArray(options?.ranges) ? options.ranges : [];
+  const ranges = isUnknownArray(options?.ranges) ? options.ranges : [];
   const normalized = ranges
     .map((range) => clampRange(range, text, options?.matchText))
     .filter((range): range is NormalizedTextRange => Boolean(range))
@@ -394,7 +395,7 @@ export function renderHighlightedDiffText(
     mode === "removed"
       ? diffWordsWithSpace(text, compareAgainst)
       : diffWordsWithSpace(compareAgainst, text);
-  if (!Array.isArray(parts) || parts.length === 0) {
+  if (!isUnknownArray(parts) || parts.length === 0) {
     target.textContent = text;
     highlightTextmateElement(target, { filePath });
     return;

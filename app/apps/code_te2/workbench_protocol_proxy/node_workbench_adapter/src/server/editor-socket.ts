@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import type { Server as HttpServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Server as SocketIoServerCtor } from "socket.io";
@@ -5,19 +6,22 @@ import {
   WBA_RPC_CODEC_MSGPACK_V1,
   decodeWbaRpcMessage,
   encodeWbaRpcMessage,
-} from "../protocol/messagepack-codec.mjs";
+} from "../protocol/messagepack-codec.ts";
 
 type SocketIoModule = {
   Server: typeof SocketIoServerCtor;
 };
 
-const require = createRequire(import.meta.url);
+const require: (specifier: string) => unknown = createRequire(import.meta.url);
 const { Server: SocketIoServer } =
   require("../../../../vendor/node_socketio/node_modules/socket.io/dist/index.js") as SocketIoModule;
 
 export const WBA_SOCKET_PATH = "/wba_ws/socket.io";
 export const WBA_SOCKET_NAMESPACE = "/wba";
 export const WBA_RPC_EVENT = "rpc";
+
+interface RpcEvents { rpc(payload: unknown): void }
+interface SocketData { clientInstanceId?: string; windowId?: string | null }
 
 export type JsonRpcReply = Record<string, unknown> | null;
 
@@ -42,7 +46,7 @@ export interface EditorWbaSocketServer {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 const CLIENT_INSTANCE_PATTERN = /^client_[a-z0-9]{12,64}$/;
@@ -84,7 +88,7 @@ export function attachEditorWbaSocket(
   httpServer: HttpServer,
   runtime: EditorWbaSocketRuntime,
 ): EditorWbaSocketServer {
-  const io = new SocketIoServer(httpServer, {
+  const io = new SocketIoServer<RpcEvents, RpcEvents, Record<string, never>, SocketData>(httpServer, {
     path: WBA_SOCKET_PATH,
     serveClient: false,
     transports: ["websocket"],
@@ -111,7 +115,7 @@ export function attachEditorWbaSocket(
   }
 
   namespace.use((socket, next) => {
-    const auth = socket.handshake.auth;
+    const auth: unknown = socket.handshake.auth;
     if (!isRecord(auth) || auth.rpcCodec !== WBA_RPC_CODEC_MSGPACK_V1) {
       next(new Error("unsupported_rpc_codec"));
       return;
@@ -151,7 +155,7 @@ export function attachEditorWbaSocket(
       void (async () => {
         try {
           const decoded = decodeWbaRpcMessage(payload);
-          if (Array.isArray(decoded)) {
+          if (isUnknownArray(decoded)) {
             const replies = await Promise.all(
               decoded.map((entry) => runtime.handleJsonRpc(entry, context)),
             );

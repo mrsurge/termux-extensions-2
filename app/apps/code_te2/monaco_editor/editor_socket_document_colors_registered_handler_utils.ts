@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 export interface DocumentColorProviderRegisteredPayload {
   language?: string;
   handle?: unknown;
@@ -10,7 +11,7 @@ interface DocumentColorProviderRegistrationLike {
 function asDocumentColorProviderRegisteredPayload(
   value: unknown,
 ): DocumentColorProviderRegisteredPayload | null {
-  return value != null && typeof value === "object" && !Array.isArray(value)
+  return value != null && typeof value === "object" && !isUnknownArray(value)
     ? (value as DocumentColorProviderRegisteredPayload)
     : null;
 }

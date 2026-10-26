@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { isMirrorPayloadValid } from './editor_mirror_payload_valid_utils.js';
 import { shouldDropMirrorForSource } from './editor_mirror_source_drop_utils.js';
@@ -71,19 +72,19 @@ interface SaveMirrorSocketHandlerDeps {
 }
 
 function asMirrorPayload(value: unknown): EditorMirrorPayloadLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorMirrorPayloadLike
     : null;
 }
 
 function asCacheStatePayload(value: unknown): EditorCacheStatePayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorCacheStatePayload
     : null;
 }
 
 function asSaveSnapshotRequestPayload(value: unknown): EditorSaveSnapshotRequestPayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorSaveSnapshotRequestPayload
     : null;
 }

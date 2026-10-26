@@ -130,7 +130,7 @@ function configureMonacoEnvironment(
       worker.onerror = (event) => {
         console.error('[MonacoWorker] error', { moduleId, label, event });
       };
-      worker.onmessageerror = (event) => {
+      worker.onmessageerror = (event: MessageEvent<unknown>) => {
         console.error('[MonacoWorker] messageerror', { moduleId, label, event });
       };
       return worker;

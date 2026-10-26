@@ -6,7 +6,7 @@ export type UnknownRecord = Record<string, unknown>;
 
 export type ShortcutKind = "url" | "framework_app";
 export type ShortcutLoad = "lazy" | "eager";
-export type ShortcutIconKind = "asset" | "emoji" | "image" | "text" | "";
+export type ShortcutIconKind = "asset" | "emoji" | "image" | "text" | "codicon" | "";
 
 export interface ShortcutIcon extends UnknownRecord {
   kind?: ShortcutIconKind | string;
@@ -65,6 +65,7 @@ export interface ExtensionWebviewSurfaceDescriptor extends UnknownRecord {
   surfaceKind: "view" | "panel";
   url: string;
   iconUrl: string;
+  iconId?: string;
   retainContextWhenHidden: boolean;
   viewColumn: number;
 }

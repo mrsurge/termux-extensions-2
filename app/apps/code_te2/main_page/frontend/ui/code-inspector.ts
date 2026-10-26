@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import { symbolIcon } from '../../../src/code-inspector/document-symbols.ts';
 type JsonObject = Record<string, unknown>;
 
@@ -28,11 +29,11 @@ interface CodeInspectorPanelController {
 }
 
 function isRecord(value: unknown): value is JsonObject {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
+  return value != null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function asArray(value: unknown): JsonObject[] {
-  return Array.isArray(value) ? value.filter(isRecord) : [];
+  return isUnknownArray(value) ? value.filter(isRecord) : [];
 }
 
 function asString(value: unknown): string {
@@ -377,7 +378,7 @@ export function createCodeInspectorPanel(
     void deps.requestCommand({
       action: 'clearHighlights',
       requestId: projection.requestId,
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       console.warn('[CodeInspector] clear highlights failed', error);
     });
   };
@@ -392,7 +393,7 @@ export function createCodeInspectorPanel(
       action: 'direction',
       requestId: current.requestId,
       direction,
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       console.warn('[CodeInspector] direction request failed', error);
     }).finally(() => {
       pendingDirection = false;

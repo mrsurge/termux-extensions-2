@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 /*
  * Workbench-based TextMate runtime for TE2.
  * Source lineage:
@@ -138,11 +139,11 @@ function asString(value: unknown): string {
 }
 
 function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
+  return isUnknownArray(value) ? (value as T[]) : [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
@@ -697,7 +698,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
             const nextState = currentState === result.ruleStack ? currentState : result.ruleStack;
             const tokens: Array<{ startIndex: number; scopes: string }> = [];
             for (const token of result.tokens) {
-              const scopes = Array.isArray(token.scopes) ? token.scopes : [];
+              const scopes = isUnknownArray(token.scopes) ? token.scopes : [];
               const last = scopes.length ? scopes[scopes.length - 1] : '';
               try {
                 if ((win as WindowTextmateLike & { __debugTextmateScopes?: boolean }).__debugTextmateScopes) {

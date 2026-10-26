@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import { getIcon as getFileIcon, renderIcon } from '/static/js/file_icons.js';
 
 interface RecentFileEntry {
@@ -80,7 +81,7 @@ function cancelUiFrame(handle: UiFrameHandle | null): void {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function recentFileEntry(value: unknown): RecentFileEntry | null {
@@ -100,7 +101,7 @@ function normalizedOpenState(state: unknown): FileTabsOpenState {
   const record = isRecord(state) ? state : {};
   const nestedOpenState = isRecord(record.openState) ? record.openState : null;
   const projection = nestedOpenState || record;
-  const recents = Array.isArray(projection.recents)
+  const recents = isUnknownArray(projection.recents)
     ? projection.recents
       .map((entry) => recentFileEntry(entry))
       .filter((entry): entry is RecentFileEntry => entry !== null)
@@ -136,7 +137,7 @@ function nonnegativeInteger(value: unknown): number {
 
 function normalizedDecorations(payload: unknown): Map<string, FileTabDecoration> {
   const record = isRecord(payload) ? payload : {};
-  const items = Array.isArray(record.items) ? record.items : [];
+  const items = isUnknownArray(record.items) ? record.items : [];
   const result = new Map<string, FileTabDecoration>();
   items.forEach((item) => {
     if (!isRecord(item) || typeof item.path !== 'string' || !item.path) return;
@@ -227,8 +228,8 @@ export function revealFileTabInViewport(
 function storedOrder(projectPath: string): string[] {
   if (!projectPath) return [];
   try {
-    const value = JSON.parse(localStorage.getItem(fileTabOrderStorageKey(projectPath)) || '[]');
-    return Array.isArray(value)
+    const value: unknown = JSON.parse(localStorage.getItem(fileTabOrderStorageKey(projectPath)) || '[]');
+    return isUnknownArray(value)
       ? value.filter((path): path is string => typeof path === 'string' && Boolean(path))
       : [];
   } catch {
@@ -290,7 +291,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     openSecond.textContent = 'Open in a Second Window';
     openSecond.addEventListener('click', () => {
       closeContextMenu();
-      void deps.openInSecondWindow?.(entry.path).catch((error) => {
+      void deps.openInSecondWindow?.(entry.path).catch((error: unknown) => {
         console.error('[FileTabs] Failed to open tab in second window:', error);
       });
     });
@@ -715,7 +716,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       const path = tabs[(index + event.detail + tabs.length) % tabs.length]?.dataset.path;
       if (!path) return;
       cycling = true;
-      void deps.openFile(path, { keyboard: true }).catch(error => console.warn('[file_tabs] cycle failed', error)).finally(() => { cycling = false; });
+      void deps.openFile(path, { keyboard: true }).catch((error: unknown) => console.warn('[file_tabs] cycle failed', error)).finally(() => { cycling = false; });
     });
     window.addEventListener('code-te2:open-state-changed', (event) => {
       if (event instanceof CustomEvent) refreshOpenState(event.detail);

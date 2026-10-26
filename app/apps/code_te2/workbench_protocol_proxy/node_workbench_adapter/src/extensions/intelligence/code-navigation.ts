@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import type { ProviderKind } from "../provider-registry";
 
 export interface CodeNavigationPendingOptions {
@@ -142,7 +143,7 @@ const LOCATION_PREVIEW_LEADING_CONTEXT = 40;
 const LOCATION_PREVIEW_READ_CONCURRENCY = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -311,7 +312,9 @@ async function attachLocationPreviews(
       while (nextGroup < groups.length) {
         const groupIndex = nextGroup;
         nextGroup += 1;
-        const [filePath, entries] = groups[groupIndex];
+        const group = groups[groupIndex];
+        if (!group) continue;
+        const [filePath, entries] = group;
         try {
           const text = await runtime.readTextFile(filePath);
           for (const location of entries) {
@@ -341,7 +344,7 @@ function mergeLocations(replies: unknown[]): {
   for (const reply of replies) {
     if (replyType(reply) === 9) {
       const result = replyResult(reply);
-      if (!Array.isArray(result)) continue;
+      if (!isUnknownArray(result)) continue;
       for (const rawLocation of result) {
         const location = normalizeLocation(rawLocation);
         if (location) locations.set(locationKey(location), location);
@@ -556,7 +559,7 @@ export async function provideDocumentHighlights(
       lastError = replyError(reply);
       continue;
     }
-    if (replyType(reply) !== 9 || !Array.isArray(replyResult(reply))) continue;
+    if (replyType(reply) !== 9 || !isUnknownArray(replyResult(reply))) continue;
     for (const rawHighlight of replyResult(reply) as unknown[]) {
       if (!isRecord(rawHighlight)) continue;
       const range = normalizeRange(rawHighlight.range);
@@ -594,7 +597,7 @@ function normalizeCallHierarchyItem(value: unknown): Record<string, unknown> | n
     name: stringValue(value.name),
     detail: stringValue(value.detail),
     kind: finiteNumber(value.kind, 0),
-    tags: Array.isArray(value.tags) ? value.tags : [],
+    tags: isUnknownArray(value.tags) ? value.tags : [],
     uri,
     path,
     range: normalizeRange(value.range),
@@ -606,7 +609,7 @@ function normalizeCallResults(
   value: unknown,
   direction: "incoming" | "outgoing",
 ): Record<string, unknown>[] {
-  if (!Array.isArray(value)) return [];
+  if (!isUnknownArray(value)) return [];
   const results: Record<string, unknown>[] = [];
   for (const rawCall of value) {
     if (!isRecord(rawCall)) continue;
@@ -616,7 +619,7 @@ function normalizeCallResults(
     results.push({
       ...item,
       direction,
-      fromRanges: Array.isArray(rawCall.fromRanges)
+      fromRanges: isUnknownArray(rawCall.fromRanges)
         ? rawCall.fromRanges.map(normalizeRange).filter(Boolean)
         : [],
     });
@@ -668,7 +671,7 @@ export async function prepareCallHierarchy(
   if (replyType(reply) === 11) return { ok: false, error: replyError(reply) };
   if (replyType(reply) !== 9) return { ok: false, error: reply };
 
-  const roots: Record<string, unknown>[] = Array.isArray(replyResult(reply))
+  const roots: Record<string, unknown>[] = isUnknownArray(replyResult(reply))
     ? (replyResult(reply) as unknown[])
         .map(normalizeCallHierarchyItem)
         .filter((item): item is Record<string, unknown> => !!item)

@@ -181,9 +181,9 @@ for (const scenario of ['prepare-first', 'ready-first', 'legacy', 'prepare-error
 
 test('preparation is local-only and separate host execution does not reapply dimensions', async () => {
   const output = await build({ entryPoints: [new URL('../main_page/frontend/boot/prepare-page.ts', import.meta.url).pathname], bundle: true, format: 'cjs', write: false, metafile: true });
-  assert.equal(Object.keys(output.metafile.inputs).length, 4);
+  assert.equal(Object.keys(output.metafile.inputs).length, 5);
   for (const input of Object.keys(output.metafile.inputs)) {
-    assert.match(input, /(?:prepare-page|layout-manager|host-resize-manager|drawer-sizing)\.ts$/);
+    assert.match(input, /(?:prepare-page|layout-manager|host-resize-manager|drawer-sizing|value-types)\.ts$/);
   }
   const window = new Window();
   window.document.body.innerHTML = '<main><div class="fe-root"></div></main>';

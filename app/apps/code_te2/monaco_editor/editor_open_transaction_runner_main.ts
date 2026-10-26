@@ -330,7 +330,7 @@ export async function runEditorOpenTransaction(
     settleOpenTransaction(deps.openTransactionStore, tx);
     // WBA/model hydration is ordered separately and must not hold the next visible file open.
     if (languageOpenPromise) void languageOpenPromise;
-    void deps.requestAgentEditDocumentState(openCompletePayload).catch((error) => {
+    void deps.requestAgentEditDocumentState(openCompletePayload).catch((error: unknown) => {
       console.warn('[AgentEditReview] document state request failed after open', error);
     });
   } catch (err) {

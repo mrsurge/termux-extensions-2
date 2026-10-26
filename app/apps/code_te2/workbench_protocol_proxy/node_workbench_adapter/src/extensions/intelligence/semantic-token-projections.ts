@@ -20,7 +20,7 @@ export interface SemanticProjectionFullResult {
     data: number[];
   };
   legend?: unknown;
-  providerHandle?: number;
+  providerHandle?: number | undefined;
 }
 
 interface StoredSemanticProjection {
@@ -29,7 +29,7 @@ interface StoredSemanticProjection {
   resultId: string;
   data: Uint32Array;
   legend?: unknown;
-  providerHandle?: number;
+  providerHandle?: number | undefined;
   byteLength: number;
   lastAccess: number;
 }

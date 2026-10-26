@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 // @ts-check
 
 import { createUiIpcRpcConnection } from './ui-ipc-rpc.ts';
@@ -109,7 +110,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       const detail = { ...data };
       const runtimeWindow = window as unknown as SidebarRuntimeEventWindow;
       if (!runtimeWindow.__codeTe2SidebarRuntimeReady) {
-        const pending = Array.isArray(runtimeWindow.__codeTe2PendingSidebarEvents) ? runtimeWindow.__codeTe2PendingSidebarEvents : [];
+        const pending = isUnknownArray(runtimeWindow.__codeTe2PendingSidebarEvents) ? runtimeWindow.__codeTe2PendingSidebarEvents : [];
         pending.push(detail);
         if (pending.length > 24) pending.splice(0, pending.length - 24);
         runtimeWindow.__codeTe2PendingSidebarEvents = pending;

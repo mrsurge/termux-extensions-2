@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 // Host console drawer module (vConsole-based observability UI)
 //
 // Connects to the framework-owned TE2 console Socket.IO namespace as a
@@ -40,7 +41,7 @@ interface VConsoleInstance {
   destroy(): void;
 }
 
-type VConsoleConstructor = new (options: Record<string, unknown>) => VConsoleInstance;
+export type VConsoleConstructor = new (options: Record<string, unknown>) => VConsoleInstance;
 
 type HostConsoleWindow = Window & {
   VConsole?: VConsoleConstructor;
@@ -78,7 +79,7 @@ function getSocketIoFactory(): ((namespace: string, options?: Record<string, unk
 }
 
 function isEvalResultMessage(value: unknown): value is EvalResultMessage {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+  return !!value && typeof value === 'object' && !isUnknownArray(value);
 }
 
 export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): ConsoleDrawerController {
@@ -196,7 +197,7 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
       _patchEvalCommand();
 
       return vConsoleInstance;
-    }).catch((err) => {
+    }).catch((err: unknown) => {
       console.warn('[console] failed to load vConsole:', err);
       return null;
     });
@@ -334,7 +335,7 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
 
     // Server pushes the worker list on register changes
     nextSocket.on?.('console:workers', (workers: unknown) => {
-      if (!Array.isArray(workers)) return;
+      if (!isUnknownArray(workers)) return;
       _replaceWorkers(workers.filter((worker): worker is string => typeof worker === 'string'));
     });
   }
@@ -360,11 +361,11 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
   }
 
   function _handleLog(msg: unknown): void {
-    const message = msg && typeof msg === 'object' && !Array.isArray(msg)
+    const message = msg && typeof msg === 'object' && !isUnknownArray(msg)
       ? msg as ConsoleLogMessage
       : null;
     if (!message) return;
-    if (!Array.isArray(message.args)) return;
+    if (!isUnknownArray(message.args)) return;
     if (!vConsoleInstance) return;
 
     const workerId = message.workerId || '?';

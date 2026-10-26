@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { monacoThemeName } from './editor_theme_name_utils.ts';
 import { themeJsonWithUiTheme } from './editor_theme_url_utils.ts';
 import { configureColdBootTrace, traceColdBoot } from './editor_cold_boot_trace.ts';
@@ -26,11 +27,11 @@ export async function applyMonacoThemeRuntime(
     if (typeof options.ensureTe2DiffThemeFn === 'function') options.ensureTe2DiffThemeFn();
     // The backend projects the selected theme; the renderer only translates it.
     const selected = await options.getSelectedThemeFn();
-    if (!selected || typeof selected !== 'object' || Array.isArray(selected)) throw new Error('Invalid selected theme projection');
+    if (!selected || typeof selected !== 'object' || isUnknownArray(selected)) throw new Error('Invalid selected theme projection');
     const selection = selected as Record<string, unknown>;
     const resolvedId = selection.id;
     const source = selection.theme;
-    if (typeof resolvedId !== 'string' || !resolvedId || !source || typeof source !== 'object' || Array.isArray(source)) {
+    if (typeof resolvedId !== 'string' || !resolvedId || !source || typeof source !== 'object' || isUnknownArray(source)) {
       throw new Error('Invalid selected theme projection');
     }
     if (typeof selection.uiTheme !== 'string') throw new Error('Invalid selected theme base');
@@ -41,7 +42,7 @@ export async function applyMonacoThemeRuntime(
       id: resolvedId,
       base: selection.uiTheme,
       name: typeof json.name === 'string' ? json.name : '',
-      tokenRules: Array.isArray(json.tokenColors) ? json.tokenColors.length : 0,
+      tokenRules: isUnknownArray(json.tokenColors) ? json.tokenColors.length : 0,
       semanticRules: json.semanticTokenColors && typeof json.semanticTokenColors === 'object'
         ? Object.keys(json.semanticTokenColors).length : 0,
     });

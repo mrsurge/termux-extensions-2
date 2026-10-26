@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import {
   EDITOR_RPC_EVENT,
   EDITOR_RPC_METHODS,
@@ -61,7 +62,7 @@ interface EditorRpcTransportDeps {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }
@@ -71,7 +72,7 @@ function idKey(id: JsonRpcId): string {
 }
 
 function clearSocketReplayBuffer(socket: EditorRpcSocketLike | null | undefined): void {
-  if (Array.isArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
+  if (isUnknownArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
 }
 
 export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
@@ -159,7 +160,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   }
 
   function deliver(decoded: unknown): void {
-    if (Array.isArray(decoded)) {
+    if (isUnknownArray(decoded)) {
       decoded.forEach(handleEnvelope);
       return;
     }

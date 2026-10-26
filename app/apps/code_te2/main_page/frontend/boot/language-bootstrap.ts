@@ -1,7 +1,8 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import type { HostBootSnapshot } from './boot-snapshot.ts';
 
 function record(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+  return value !== null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown> : null;
 }
 

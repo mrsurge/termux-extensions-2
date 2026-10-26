@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -22,7 +23,7 @@ interface FileSearchOptions extends Record<string, unknown> {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function normalizePattern(value: string): string {
@@ -33,7 +34,7 @@ function normalizePattern(value: string): string {
 }
 
 function patternStrings(value: unknown): string[] {
-  const values = Array.isArray(value) ? value : [value];
+  const values = isUnknownArray(value) ? value : [value];
   const patterns: string[] = [];
   for (const item of values) {
     if (typeof item === "string" && item.trim()) {
@@ -46,7 +47,7 @@ function patternStrings(value: unknown): string[] {
       patterns.push(normalizePattern(pattern.trim()));
       continue;
     }
-    if (Array.isArray(pattern)) patterns.push(...patternStrings(pattern));
+    if (isUnknownArray(pattern)) patterns.push(...patternStrings(pattern));
   }
   return patterns;
 }

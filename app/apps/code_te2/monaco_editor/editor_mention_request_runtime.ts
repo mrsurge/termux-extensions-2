@@ -24,7 +24,7 @@ export function createEditorMentionSender(deps: MentionSenderDeps) {
         throw new Error('Mention rejected');
       }
       deps.toast('Mentioned in conversation');
-    }).catch(error => {
+    }).catch((error: unknown) => {
       console.warn('[mention] delivery failed', error);
       deps.toast('Failed to mention in conversation');
     });

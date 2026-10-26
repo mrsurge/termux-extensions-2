@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
 import { withDiffLineNumbers } from './editor_diff_line_numbers.ts';
 
@@ -72,7 +73,7 @@ interface EditorLifecycleDeps {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }

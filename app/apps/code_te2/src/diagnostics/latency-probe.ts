@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../rpc/value-types.ts';
 export type DiagnosticsLatencyFields = Record<
   string,
   string | number | boolean | null | undefined
@@ -201,7 +202,7 @@ export function diagnosticsPayloadStats(
   const values = Object.values(payload);
   let markers = 0;
   for (const value of values) {
-    if (Array.isArray(value)) markers += value.length;
+    if (isUnknownArray(value)) markers += value.length;
   }
   return {
     files: values.length,

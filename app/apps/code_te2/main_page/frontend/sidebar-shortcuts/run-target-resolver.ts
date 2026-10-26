@@ -1,3 +1,4 @@
+import { recordValue } from '../../../src/rpc/value-types.ts';
 import type {
   RunProfileRuntimeMetadata,
   RunTargetDescriptor,
@@ -51,9 +52,9 @@ function registerThroughGecko(
       window.removeEventListener('message', onMessage);
       reject(new Error('Gecko run-target runtime registration timed out'));
     }, NATIVE_TIMEOUT_MS);
-    const onMessage = (event: MessageEvent): void => {
+    const onMessage = (event: MessageEvent<unknown>): void => {
       if (event.source !== window || event.origin !== window.location.origin) return;
-      const data = event.data;
+      const data = recordValue(event.data);
       if (
         !data ||
         typeof data !== 'object' ||
@@ -62,8 +63,8 @@ function registerThroughGecko(
       ) return;
       window.clearTimeout(timeout);
       window.removeEventListener('message', onMessage);
-      if (data.result?.ok === true) resolve();
-      else reject(new Error(data.result?.error || 'Gecko runtime registration failed'));
+      if (recordValue(data.result).ok === true) resolve();
+      else reject(new Error(String(recordValue(data.result).error || 'Gecko runtime registration failed')));
     };
     window.addEventListener('message', onMessage);
     window.postMessage(

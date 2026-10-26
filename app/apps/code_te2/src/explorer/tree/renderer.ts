@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import type { ExplorerTreeEntry } from './types.ts';
 import { renderExplorerTreeLabel } from './label.ts';
 
@@ -24,11 +25,11 @@ export interface ExplorerTreeRenderOptions {
 }
 
 function isTreeEntry(value: unknown): value is ExplorerTreeEntry {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function normalizeEntries(entries: unknown): ExplorerTreeEntry[] {
-  if (!Array.isArray(entries)) {
+  if (!isUnknownArray(entries)) {
     return [];
   }
   return entries.filter(isTreeEntry);
@@ -53,7 +54,7 @@ function getEntryName(entry: ExplorerTreeEntry): string {
 }
 
 function getEntryGitFlags(entry: ExplorerTreeEntry): string[] {
-  return Array.isArray(entry.gitFlags)
+  return isUnknownArray(entry.gitFlags)
     ? entry.gitFlags.filter((flag): flag is string => typeof flag === 'string')
     : [];
 }

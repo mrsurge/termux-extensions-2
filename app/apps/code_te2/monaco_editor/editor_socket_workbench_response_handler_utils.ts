@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface WorkbenchPendingEntry {
   timer: ReturnType<typeof setTimeout>;
   resolve(value: unknown): void;
@@ -11,7 +12,7 @@ export interface WorkbenchResponsePayload {
 }
 
 function asWorkbenchResponsePayload(value: unknown): WorkbenchResponsePayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as WorkbenchResponsePayload
     : null;
 }

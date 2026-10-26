@@ -83,7 +83,7 @@ export class ExtensionActivationRuntime {
         });
         return result;
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         this.eventRequests.delete(event);
         this.options.onEvent({
           type: "extension/activationFailed",
@@ -150,7 +150,7 @@ export class ExtensionActivationRuntime {
         });
         return result;
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         this.extensionRequests.delete(cacheKey);
         this.options.onEvent({
           type: "extension/activationFailed",

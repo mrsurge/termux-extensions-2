@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import {
   createJsonTextmateField,
   type JsonTextmateFieldHandle,
@@ -95,7 +96,7 @@ interface SelectPopupState {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !isUnknownArray(value);
 }
 
 function cloneValues(values: Record<string, unknown>): Record<string, unknown> {
@@ -131,7 +132,7 @@ function lineListToValue(raw: string): string[] {
 }
 
 function valueToLineList(value: unknown): string {
-  if (Array.isArray(value)) {
+  if (isUnknownArray(value)) {
     return value
       .map((item) => String(item ?? ""))
       .filter((item) => item.trim())
@@ -167,7 +168,7 @@ function matchesVisibility(
   )
     return false;
   if (
-    Array.isArray(rule.in) &&
+    isUnknownArray(rule.in) &&
     !rule.in.some((item) => sameValue(item, current))
   )
     return false;
@@ -214,7 +215,7 @@ export function createCustomSelectControl(options: {
   if (options.ariaLabel) button.setAttribute("aria-label", options.ariaLabel);
   root.appendChild(button);
 
-  const selectOptions = Array.isArray(options.options) ? options.options : [];
+  const selectOptions = isUnknownArray(options.options) ? options.options : [];
   let selectedValue = options.value;
   let popup: SelectPopupState | null = null;
 
@@ -340,7 +341,7 @@ function createSelectControl(
   return createCustomSelectControl({
     document,
     value: current,
-    options: Array.isArray(field.options) ? field.options : [],
+    options: isUnknownArray(field.options) ? field.options : [],
     onChange: (value) => onValue(field.key, value),
     ariaLabel: field.label,
   });
@@ -400,7 +401,7 @@ function createFieldControl(
     const maxItems = Number.isInteger(field.maxItems) && Number(field.maxItems) > 0
       ? Number(field.maxItems)
       : 8;
-    let items: Array<{ port: number | null; label: string }> = Array.isArray(current)
+    let items: Array<{ port: number | null; label: string }> = isUnknownArray(current)
       ? current.filter(isRecord).map((item) => {
         const rawPort = item.port;
         const parsedPort = typeof rawPort === "number"
@@ -588,7 +589,7 @@ export function createDeclarativeForm(
     controlCleanups = [];
     container.innerHTML = "";
     rows = [];
-    const fields = Array.isArray(contract.fields) ? contract.fields : [];
+    const fields = isUnknownArray(contract.fields) ? contract.fields : [];
     fields.forEach((field) => {
       const row = document.createElement("div");
       row.className = "declarative-field-row";

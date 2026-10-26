@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { messagePackRpcWireCodec } from '../src/rpc/codec.ts';
 
 export const WBA_RPC_EVENT = 'rpc' as const;
@@ -61,7 +62,7 @@ interface WbaRpcTransportDeps {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
+  return value != null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function isSuccessEnvelope(value: unknown): value is WbaRpcSuccessEnvelope {
@@ -81,7 +82,7 @@ function idKey(id: WbaRpcId): string {
 }
 
 function clearSocketReplayBuffer(socket: WbaRpcSocketLike | null | undefined): void {
-  if (Array.isArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
+  if (isUnknownArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
 }
 
 function asParamsRecord(value: unknown): Record<string, unknown> {
@@ -250,7 +251,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
       deps.onProtocolError?.(error);
       return;
     }
-    if (Array.isArray(decoded)) {
+    if (isUnknownArray(decoded)) {
       decoded.forEach(handleEnvelope);
       return;
     }

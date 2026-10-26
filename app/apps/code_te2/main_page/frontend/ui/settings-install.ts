@@ -1,20 +1,20 @@
+import { settingsRequest, type SettingsRequest, type SettingsNotify, type ExtensionSummary, objectValue, configProperties, type ConfigProperty } from './settings-contracts.ts';
 
 import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
 
-/**
- * @param {{
- *   installBtn: HTMLButtonElement,
- *   pickerAvailable: () => boolean,
- *   pickFile: (startPath: string) => Promise<string | null>,
- *   getStartPath: () => string,
- *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
- *   refreshExtManager: () => Promise<any> | void,
- *   reloadEditorFrame: () => void,
- *   openExtConfigModal: (extId: string, displayName: string, schema: any, currentValues: any) => void,
- *   toast: (msg: string, ms?: number) => void
- * }} deps
- */
-export function createSettingsInstallController(deps: any) {
+interface Dependencies {  installBtn: HTMLButtonElement,
+  pickerAvailable: () => boolean,
+  pickFile: (startPath: string) => Promise<string | null>,
+  getStartPath: () => string,
+  busRequest: SettingsRequest,
+  refreshExtManager: () => Promise<unknown> | void,
+  reloadEditorFrame: () => void,
+  openExtConfigModal: (extId: string, displayName: string, schema: unknown, currentValues: unknown) => void,
+  toast: (msg: string, ms?: number) => void
+}
+
+export function createSettingsInstallController(deps: Dependencies) {
+  const busRequest = settingsRequest(deps.busRequest);
   function install() {
     deps.installBtn.addEventListener('click', async () => {
       if (!deps.pickerAvailable()) {
@@ -31,7 +31,7 @@ export function createSettingsInstallController(deps: any) {
       deps.installBtn.disabled = true;
       deps.installBtn.textContent = 'Installing…';
       try {
-        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsInstall, { vsix_path: picked }, 60000);
+        const res = await busRequest(EXPLORER_RPC_METHODS.extensionsInstall, { vsix_path: picked }, 60000);
         if (res?.ok) {
           const ext = res.extension || {};
           const schema = res.config_schema || {};

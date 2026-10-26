@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import {
   type ExplorerContentSearchFileResult,
   type ExplorerContentSearchMatch,
@@ -58,7 +59,7 @@ export function renderContentResults(
 ): void {
   const payload = deps.replacement?.view(data) || normalizeContentSearchResults(data);
   deps.replacement?.toolbar(container);
-  const results = Array.isArray(payload.results) ? payload.results : [];
+  const results = isUnknownArray(payload.results) ? payload.results : [];
   const list = document.createElement("div");
   list.className = "fe-search-list";
 
@@ -68,7 +69,7 @@ export function renderContentResults(
     const fileGroup = document.createElement("div");
     fileGroup.className = "fe-search-file-group fe-search-content-group";
 
-    const matches = Array.isArray(fileResult.matches) ? fileResult.matches : [];
+    const matches = isUnknownArray(fileResult.matches) ? fileResult.matches : [];
     fileGroup.classList.toggle('has-sticky-scope', matches.length >= 3);
     const fileHeader = document.createElement("div");
     fileHeader.className = "fe-search-file-header";
@@ -126,10 +127,10 @@ export function renderContentResults(
       snippet.className = "fe-search-snippet";
       const snippetText = match.snippet || match.text || "";
       const snippetRanges =
-        Array.isArray(match.snippetRanges) && match.snippetRanges.length > 0
+        isUnknownArray(match.snippetRanges) && match.snippetRanges.length > 0
           ? match.snippetRanges
           : snippetText === match.text &&
-              Array.isArray(match.lineRanges) &&
+              isUnknownArray(match.lineRanges) &&
               match.lineRanges.length > 0
             ? match.lineRanges
             : undefined;
@@ -178,7 +179,7 @@ export function renderContentResults(
     typeof payload.match_count === "number"
       ? payload.match_count
       : results.reduce((count, result) => {
-          const matches = Array.isArray(result.matches) ? result.matches : [];
+          const matches = isUnknownArray(result.matches) ? result.matches : [];
           return count + matches.length;
         }, 0);
   const totalFileCount = payload.totalFileCount ?? visibleFileCount;

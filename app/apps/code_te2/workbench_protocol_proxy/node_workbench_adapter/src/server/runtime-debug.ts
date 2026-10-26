@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import { randomUUID } from "node:crypto";
 
 export const runtimeDebugEnabled = /^(1|true|yes|on)$/i.test(
@@ -46,7 +47,7 @@ export function projectDebugResult(value: unknown): Record<string, unknown> {
     if (typeof item !== "object") { truncated = true; return `<${typeof item}>`; }
     if (seen.has(item)) { truncated = true; return "<cycle/shared>"; }
     seen.add(item);
-    const output: Record<string, unknown> | unknown[] = Array.isArray(item) ? [] : Object.create(null) as Record<string, unknown>;
+    const output: Record<string, unknown> | unknown[] = isUnknownArray(item) ? [] : Object.create(null) as Record<string, unknown>;
     for (const key in item) {
       if (!Object.prototype.hasOwnProperty.call(item, key)) continue;
       if (--budget < 0) { truncated = true; break; }
@@ -55,7 +56,7 @@ export function projectDebugResult(value: unknown): Record<string, unknown> {
       const projected = descriptor && "value" in descriptor
         ? visit(descriptor.value as unknown, depth + 1)
         : (truncated = true, "<accessor>");
-      if (Array.isArray(output)) output.push(projected);
+      if (isUnknownArray(output)) output.push(projected);
       else output[key] = projected;
     }
     return output;

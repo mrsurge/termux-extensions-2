@@ -18,6 +18,7 @@ export const PINNED_RPC_IDS = Object.freeze({
   MainThreadWebviewViews: 46,
   MainThreadExtensionService: 54,
   MainThreadDocumentContentProviders: 19,
+  MainThreadLanguageFeatures: 26,
   ExtHostConfiguration: 90,
   ExtHostCommands: 89,
   ExtHostDocumentsAndEditors: 94,

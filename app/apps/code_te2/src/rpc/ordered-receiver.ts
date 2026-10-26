@@ -34,13 +34,13 @@ export function createOrderedRpcReceiver(options: {
         timer = setTimeout(() => {
           if (generation === current) fail(new Error('RPC decode timeout'));
         }, 10000);
-        void result.then(value => {
+        void result.then((value: unknown) => {
           if (generation !== current) return;
           if (timer) clearTimeout(timer);
           timer = null; active = null; running = false; queuedBytes -= item.size;
           try { options.deliver(value); } catch (error) { fail(error); return; }
           drain();
-        }, error => { if (generation === current) fail(error); });
+        }, (error: unknown) => { if (generation === current) fail(error); });
         return;
       }
       active = null; queuedBytes -= item.size;

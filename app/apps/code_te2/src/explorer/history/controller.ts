@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import { CompressibleAsyncDataTree } from 'te2-scm-tree';
 import { getIcon as getFileIcon } from '/static/js/file_icons.js';
 import { HistoryTreeHost } from './vscode_scm/history-tree-host.ts';
@@ -9,7 +10,7 @@ import type { JsonObject } from '../../rpc/transport.ts';
 import { gitActionButton } from '../git/action-button.ts';
 
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Invalid History response');
+  if (!value || typeof value !== 'object' || isUnknownArray(value)) throw Error('Invalid History response');
   return value as Record<string, unknown>;
 }
 function text(value: unknown): string {
@@ -27,7 +28,7 @@ function timestamp(value: unknown): number {
   return milliseconds;
 }
 function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw Error('Invalid History list');
+  if (!isUnknownArray(value)) throw Error('Invalid History list');
   return value as unknown[];
 }
 function counts(value: unknown): HistoryCounts {
@@ -253,7 +254,7 @@ export class ExplorerHistoryController {
       counts: this.statistics.get(historyItemViewModel.historyItem.id) || { state: 'pending' },
     }));
     if (!this.complete) rows.push({ type: 'historyItemLoadMore', graphColumns: models.at(-1)?.outputSwimlanes || [], state: 'idle' });
-    if (this.tree) { void this.tree.updateRows(rows).catch(error => this.message(error)); return; }
+    if (this.tree) { void this.tree.updateRows(rows).catch((error: unknown) => this.message(error)); return; }
     const generation = this.generation;
     this.tree = new HistoryTreeHost(this.body, CompressibleAsyncDataTree,
       { type: 'historyRoot', id: String(generation), rows },
@@ -294,7 +295,7 @@ export class ExplorerHistoryController {
         loadMore: async () => { await this.request(RPC.historyMore, { generation }); },
         onError: error => this.message(error),
       }, getFileIcon, this.expandedCommitIds);
-    void this.tree.ready.then(() => this.layout()).catch(error => this.message(error));
+    void this.tree.ready.then(() => this.layout()).catch((error: unknown) => this.message(error));
   }
 
   private restoreFrontier(): void {
@@ -310,7 +311,7 @@ export class ExplorerHistoryController {
     const epoch = this.epoch, generation = this.generation;
     this.restoreRequestedCount = this.commits.length;
     this.restoreLoading = true;
-    void this.request(RPC.historyMore, { generation }).catch(error => {
+    void this.request(RPC.historyMore, { generation }).catch((error: unknown) => {
       if (epoch === this.epoch) this.message(error);
     }).finally(() => {
       if (epoch !== this.epoch) return;

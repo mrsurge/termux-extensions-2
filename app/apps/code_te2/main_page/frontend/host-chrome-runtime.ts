@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 type JsonObject = Record<string, unknown>;
 
 export interface SaveFileChoice {
@@ -74,7 +75,7 @@ function normalizeMarker(value: unknown): DiagnosticMarker | null {
 }
 
 function normalizeMarkers(value: unknown): DiagnosticMarker[] {
-  if (!Array.isArray(value)) return [];
+  if (!isUnknownArray(value)) return [];
   return value.map(normalizeMarker).filter((marker): marker is DiagnosticMarker => marker !== null);
 }
 

@@ -1,4 +1,5 @@
-import { activationEventsForExtension } from "./activation-events.mjs";
+import { isUnknownArray } from '../protocol/value-types.ts';
+import { activationEventsForExtension } from "./activation-events.ts";
 
 export interface ExtensionCatalogRuntime {
   env: Record<string, string | undefined>;
@@ -27,7 +28,7 @@ export interface ExtHostInitOptions {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -54,7 +55,7 @@ function envFlagEnabled(env: Record<string, string | undefined>, name: string, d
 }
 
 function arrayOfStrings(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String) : [];
+  return isUnknownArray(value) ? value.map(String) : [];
 }
 
 function mergeStringLists(primary: unknown, secondary: unknown): string[] {
@@ -97,9 +98,9 @@ function declaredActivationEventsFrom(
   manifest: Record<string, unknown>,
 ): unknown[] {
   const manifestEvents = manifest.activationEvents;
-  if (Array.isArray(manifestEvents)) return manifestEvents;
+  if (isUnknownArray(manifestEvents)) return manifestEvents;
   const extEvents = field(ext, "activationEvents");
-  return Array.isArray(extEvents) ? extEvents : [];
+  return isUnknownArray(extEvents) ? extEvents : [];
 }
 
 export function extensionIdentifierFrom(ext: unknown): string | null {
@@ -173,6 +174,7 @@ export function sanitizeExtensionForInit(
     activationEvents,
     contributes,
     id,
+    icon: stringValue(manifest.icon) ?? stringValue(field(ext, "icon")),
     identifier: {
       value: String(id),
       _lower: String(id).toLowerCase(),
@@ -187,14 +189,14 @@ export function sanitizeExtensionForInit(
     targetPlatform,
     extensionLocation,
     preRelease: boolValue(field(metadata, "preRelease") ?? field(ext, "preRelease")),
-    extensionDependencies: Array.isArray(manifest.extensionDependencies) ? manifest.extensionDependencies : undefined,
-    extensionPack: Array.isArray(manifest.extensionPack) ? manifest.extensionPack : undefined,
+    extensionDependencies: isUnknownArray(manifest.extensionDependencies) ? manifest.extensionDependencies : undefined,
+    extensionPack: isUnknownArray(manifest.extensionPack) ? manifest.extensionPack : undefined,
   };
 }
 
 export function buildExtensionsSnapshot(scannedExtensions: unknown[], options: ExtensionSnapshotOptions): Record<string, unknown> {
   const includeBuiltin = envFlagEnabled(options.env, "TE2_INCLUDE_BUILTIN_EXTS", "");
-  const base = Array.isArray(scannedExtensions)
+  const base = isUnknownArray(scannedExtensions)
     ? scannedExtensions.filter((ext) => includeBuiltin || field(ext, "isBuiltin") === false)
     : [];
   const afterExclude = options.excludeIds.length
@@ -215,7 +217,7 @@ export function buildExtensionsSnapshot(scannedExtensions: unknown[], options: E
     const manifest = recordField(ext, "packageJSON") ?? (isRecord(ext) ? ext : {});
     const contributes = recordField(manifest, "contributes");
     if (contributes && (contributes.grammars || contributes.languages)) {
-      const activationEvents = Array.isArray(field(ext, "activationEvents")) ? field(ext, "activationEvents") as unknown[] : [];
+      const activationEvents = isUnknownArray(field(ext, "activationEvents")) ? field(ext, "activationEvents") as unknown[] : [];
       const hasStarActivation = activationEvents.includes("*");
       const hasOnLanguage = activationEvents.some((event) => typeof event === "string" && event.startsWith("onLanguage"));
       if (activationEvents.length === 0 || (!hasStarActivation && hasOnLanguage) || activationEvents.every((event) => typeof event === "string" && event.startsWith("onLanguage"))) {
@@ -234,7 +236,7 @@ export function buildExtensionsSnapshot(scannedExtensions: unknown[], options: E
     const ident = extensionIdentifierFrom(ext);
     if (!ident) continue;
     const events = field(ext, "activationEvents");
-    if (Array.isArray(events) && events.length) {
+    if (isUnknownArray(events) && events.length) {
       activationEvents[String(ident).toLowerCase()] = events;
     }
     const eligible = includeBuiltin || field(ext, "isBuiltin") === false;
@@ -253,8 +255,8 @@ export async function scanExtensionsFromDisk(runtime: ExtensionCatalogRuntime, a
   const jsonPath = String(runtime.env.TE2_EXTENSIONS_JSON ?? "").trim();
   if (!jsonPath) throw new Error("TE2_EXTENSIONS_JSON is required");
   const raw = await runtime.readTextFile(jsonPath);
-  const entries = JSON.parse(raw);
-  if (!Array.isArray(entries)) return [];
+  const entries: unknown = JSON.parse(raw);
+  if (!isUnknownArray(entries)) return [];
 
   const out: Record<string, unknown>[] = [];
   let pkgCount = 0;
@@ -278,8 +280,9 @@ export async function scanExtensionsFromDisk(runtime: ExtensionCatalogRuntime, a
         maxPkgBytes = pkgBytes;
         maxPkgPath = pkgPath;
       }
-      const manifest = JSON.parse(pkgRaw);
-      if (Array.isArray(manifest?.activationEvents)) totalActivationEvents += manifest.activationEvents.length;
+      const manifest: unknown = JSON.parse(pkgRaw);
+      if (!isRecord(manifest)) continue;
+      if (isUnknownArray(manifest?.activationEvents)) totalActivationEvents += manifest.activationEvents.length;
       if (manifest?.contributes && typeof manifest.contributes === "object") {
         try {
           totalContribKeys += Object.keys(manifest.contributes).length;
@@ -380,8 +383,8 @@ export function buildExtHostInitData(runtime: ExtensionCatalogRuntime, options: 
   };
   const extSnap = isRecord(initData.extensions) ? initData.extensions : {};
   runtime.logMetrics("metrics/ext_init", {
-    all_extensions: Array.isArray(extSnap.allExtensions) ? extSnap.allExtensions.length : 0,
-    my_extensions: Array.isArray(extSnap.myExtensions) ? extSnap.myExtensions.length : 0,
+    all_extensions: isUnknownArray(extSnap.allExtensions) ? extSnap.allExtensions.length : 0,
+    my_extensions: isUnknownArray(extSnap.myExtensions) ? extSnap.myExtensions.length : 0,
     activation_events_keys: isRecord(extSnap.activationEvents) ? Object.keys(extSnap.activationEvents).length : 0,
   });
   return initData;
@@ -405,9 +408,9 @@ export async function buildLanguageCatalog(
   };
 
   const mergedById = new Map<string, Record<string, unknown>>();
-  for (const ext of Array.isArray(extensions) ? extensions : []) {
+  for (const ext of isUnknownArray(extensions) ? extensions : []) {
     const contributes = recordField(ext, "contributes");
-    const languages = contributes && Array.isArray(contributes.languages) ? contributes.languages : [];
+    const languages = contributes && isUnknownArray(contributes.languages) ? contributes.languages : [];
     if (!languages.length) continue;
     const extId = extensionIdentifierFrom(ext) ?? String(field(ext, "id") ?? "");
     const priority = field(ext, "isBuiltin") === false ? 1 : 0;

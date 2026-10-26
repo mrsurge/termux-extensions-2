@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import { createModalFrame } from './modal-kit/modal-frame.tsx';
 
 interface Dependencies {
@@ -7,7 +8,7 @@ interface Dependencies {
   toast(message: string): void;
 }
 function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+  return value !== null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown> : {};
 }
 export function createAutosaveModalController(deps: Dependencies) {

@@ -1,7 +1,8 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 type JsonRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is JsonRecord {
-  return value != null && typeof value === "object" && !Array.isArray(value);
+  return value != null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function parseRegex(
@@ -90,7 +91,7 @@ function reviveOnEnterRules(
   languageId: string,
   value: unknown,
 ): JsonRecord[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!isUnknownArray(value)) return undefined;
   const result: JsonRecord[] = [];
   value.forEach((entry, index) => {
     if (!isRecord(entry) || !isRecord(entry.action)) return;
@@ -150,11 +151,11 @@ function reviveFoldingRules(
 }
 
 function reviveAutoClosingPairs(value: unknown): JsonRecord[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!isUnknownArray(value)) return undefined;
   const result: JsonRecord[] = [];
   for (const entry of value) {
     if (
-      Array.isArray(entry) &&
+      isUnknownArray(entry) &&
       typeof entry[0] === "string" &&
       typeof entry[1] === "string"
     ) {
@@ -168,7 +169,7 @@ function reviveAutoClosingPairs(value: unknown): JsonRecord[] | undefined {
     ) {
       const pair: JsonRecord = { open: entry.open, close: entry.close };
       if (
-        Array.isArray(entry.notIn) &&
+        isUnknownArray(entry.notIn) &&
         entry.notIn.every((item) => typeof item === "string")
       ) {
         pair.notIn = entry.notIn;

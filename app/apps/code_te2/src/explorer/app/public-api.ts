@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 interface ExplorerPublicApiDeps {
   scrollToActiveFile(): Promise<void>;
   handleNotification(method: string, payload: Record<string, unknown>): void;
@@ -6,7 +7,7 @@ interface ExplorerPublicApiDeps {
 }
 
 function normalizePayload(payload: unknown): Record<string, unknown> {
-  return payload && typeof payload === 'object' && !Array.isArray(payload)
+  return payload && typeof payload === 'object' && !isUnknownArray(payload)
     ? (payload as Record<string, unknown>)
     : {};
 }

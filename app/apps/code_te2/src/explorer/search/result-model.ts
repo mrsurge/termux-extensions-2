@@ -1,7 +1,9 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import type {
   ContentEditTarget,
   ExplorerContentSearchFileResult,
   ExplorerContentSearchMatch,
+  ExplorerSearchTextRange,
   ExplorerContentSearchResults,
   SearchContentDtoFile,
   SearchContentDtoMatch,
@@ -9,11 +11,24 @@ import type {
 } from "./types.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function textRanges(value: unknown): ExplorerSearchTextRange[] | undefined {
+  if (!isUnknownArray(value)) return undefined;
+  const result: ExplorerSearchTextRange[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    if (typeof raw.start !== 'number' || typeof raw.end !== 'number' ||
+      !Number.isSafeInteger(raw.start) || !Number.isSafeInteger(raw.end) ||
+      raw.start < 0 || raw.end < raw.start) continue;
+    result.push({ start: raw.start, end: raw.end });
+  }
+  return result;
 }
 
 function numberValue(value: unknown): number | undefined {
@@ -55,8 +70,8 @@ function normalizeDtoMatch(
     snippet,
     matchText: stringValue(match.matchText),
     editTarget: editTarget(match.editTarget),
-    lineRanges: Array.isArray(match.lineRanges) ? match.lineRanges : undefined,
-    snippetRanges: Array.isArray(match.snippetRanges)
+    lineRanges: isUnknownArray(match.lineRanges) ? match.lineRanges : undefined,
+    snippetRanges: isUnknownArray(match.snippetRanges)
       ? match.snippetRanges
       : undefined,
   };
@@ -65,7 +80,7 @@ function normalizeDtoMatch(
 function normalizeDtoFile(
   file: SearchContentDtoFile,
 ): ExplorerContentSearchFileResult {
-  const matches = Array.isArray(file.matches)
+  const matches = isUnknownArray(file.matches)
     ? file.matches.map(normalizeDtoMatch)
     : [];
   return {
@@ -84,7 +99,7 @@ function normalizeProjectedFile(
   value: unknown,
 ): ExplorerContentSearchFileResult | null {
   if (!isRecord(value)) return null;
-  const matches = Array.isArray(value.matches)
+  const matches = isUnknownArray(value.matches)
     ? value.matches.filter(isRecord).map((match) => ({
         line: numberValue(match.line),
         endLine: numberValue(match.endLine),
@@ -93,12 +108,8 @@ function normalizeProjectedFile(
         snippet: stringValue(match.snippet) || stringValue(match.text) || "",
         matchText: stringValue(match.matchText),
         editTarget: editTarget(match.editTarget),
-        lineRanges: Array.isArray(match.lineRanges)
-          ? match.lineRanges
-          : undefined,
-        snippetRanges: Array.isArray(match.snippetRanges)
-          ? match.snippetRanges
-          : undefined,
+        lineRanges: textRanges(match.lineRanges),
+        snippetRanges: textRanges(match.snippetRanges),
       }))
     : [];
   return {
@@ -120,7 +131,7 @@ export function normalizeContentSearchResults(
     return { mode: "content", results: [], truncated: false };
   }
 
-  if (Array.isArray(value.files)) {
+  if (isUnknownArray(value.files)) {
     const dto = value as SearchContentDtoResult;
     const results = value.files.map((file) =>
       normalizeDtoFile(file as SearchContentDtoFile),
@@ -152,7 +163,7 @@ export function normalizeContentSearchResults(
     };
   }
 
-  const rawResults = Array.isArray(value.results) ? value.results : [];
+  const rawResults = isUnknownArray(value.results) ? value.results : [];
   const results = rawResults
     .map(normalizeProjectedFile)
     .filter((item): item is ExplorerContentSearchFileResult => Boolean(item));

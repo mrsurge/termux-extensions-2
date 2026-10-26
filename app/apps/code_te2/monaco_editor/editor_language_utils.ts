@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface MonacoUriNamespaceLike {
   file?(path: string): unknown;
 }
@@ -31,7 +32,7 @@ export function resolveMonacoLanguageId(
     if (!id) continue;
     if (id.toLowerCase() === requested) return id;
     if (
-      Array.isArray(descriptor.aliases) &&
+      isUnknownArray(descriptor.aliases) &&
       descriptor.aliases.some(
         (alias) => typeof alias === 'string' && alias.trim().toLowerCase() === requested,
       )

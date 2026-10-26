@@ -107,7 +107,7 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
           console.warn('[Monaco] editor.gitBaselines.get apply failed', error);
         }
       },
-      (error) => {
+      (error: unknown) => {
         if (traceStartup) traceInlineDiffInit('baseline-request-failed', { path: currentPath, error: String(error) });
         console.warn('[Monaco] editor.gitBaselines.get failed', error);
       },

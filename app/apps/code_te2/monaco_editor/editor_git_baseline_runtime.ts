@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface MonacoPositionLike {
   [key: string]: unknown;
 }
@@ -134,7 +135,7 @@ function scheduleLineChangeDebug(diffEditor: MonacoDiffEditorLike | null, deps: 
         try {
           let lineChanges: unknown = null;
           try { lineChanges = typeof diffEditor.getLineChanges === 'function' ? diffEditor.getLineChanges() : null; } catch (_) { lineChanges = null; }
-          const count = Array.isArray(lineChanges) ? lineChanges.length : (lineChanges === null ? 'null' : '0');
+          const count = isUnknownArray(lineChanges) ? lineChanges.length : (lineChanges === null ? 'null' : '0');
           deps.setDebugGit('git=on lc=' + String(count));
         } catch (_) {}
       });
@@ -146,9 +147,9 @@ function scheduleLineChangeDebug(diffEditor: MonacoDiffEditorLike | null, deps: 
       try {
         let lineChanges: unknown = null;
         try { lineChanges = typeof diffEditor.getLineChanges === 'function' ? diffEditor.getLineChanges() : null; } catch (_) { lineChanges = null; }
-        const count = Array.isArray(lineChanges) ? lineChanges.length : (lineChanges === null ? 'null' : '0');
+        const count = isUnknownArray(lineChanges) ? lineChanges.length : (lineChanges === null ? 'null' : '0');
         deps.setDebugGit('git=on lc=' + String(count) + (tag ? ' ' + tag : ''));
-        if (tag === 't800' && (!Array.isArray(lineChanges) || lineChanges.length === 0)) {
+        if (tag === 't800' && (!isUnknownArray(lineChanges) || lineChanges.length === 0)) {
           try {
             let result: unknown = null;
             let diffModel: Record<string, unknown> | null = null;

@@ -6,6 +6,7 @@ import { copyFile, mkdir } from 'node:fs/promises';
 import { buildTree } from './src/explorer/history/vscode_scm/tree/build.mjs';
 import { readFileSync } from 'node:fs';
 import { validateCache } from '../../../scripts/build_textmate_cache.mjs';
+import { wbaRuntimeImports } from './scripts/wba-runtime-imports.mjs';
 
 validateCache(JSON.parse(readFileSync('monaco_editor/textmate/markdown-cache.json', 'utf8')));
 
@@ -71,6 +72,7 @@ const preparationConfig = {
 const workbenchAdapterConfig = {
   entryPoints: [
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/wire-encoding.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/protocol/value-types.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/completion-timeouts.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/rpc-ids.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/pinned-rpc-ids.ts',
@@ -121,6 +123,7 @@ const workbenchAdapterConfig = {
   ],
   outdir: 'workbench_protocol_proxy/node_workbench_adapter/dist',
   outbase: 'workbench_protocol_proxy/node_workbench_adapter/src',
+  plugins: [wbaRuntimeImports],
   bundle: false,
   sourcemap: isWatch,
   minify: !isWatch,

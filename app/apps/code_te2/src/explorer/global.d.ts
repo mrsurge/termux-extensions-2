@@ -57,27 +57,7 @@ interface ExplorerTeFilePicker {
   ): Promise<ExplorerTeFilePickerSaveChoice | null>;
 }
 
-declare global {
-  interface Window {
-    host?: ExplorerHostBridge;
-    __codeTe2EditorState?: unknown;
-    __codeTe2ApplyAutosaveContent?: (payload: unknown) => void;
-    __codeTe2ApplyRemoteDraft?: (payload: unknown) => void;
-    __codeTe2EnsureDraftDiffs?: (force?: boolean) => Promise<void> | void;
-    __codeTe2EnsureInlineDiffs?: (force?: boolean) => Promise<void> | void;
-    __codeTe2HandlePrefsChanged?: (payload: unknown) => void;
-    __codeTe2HandleProjectOpened?: (path: string, payload?: Record<string, unknown>) => void;
-    __codeTe2HandleWatcherError?: (payload: Record<string, unknown>) => void;
-    __codeTe2HandleWatcherRaiseResult?: (payload: Record<string, unknown>) => void;
-    __codeTe2PendingPrefsChanged?: unknown;
-    __codeTe2PendingWatcherError?: Record<string, unknown>;
-    __codeTe2PendingWatcherRaiseResult?: Record<string, unknown>;
-    __codeTe2ReloadCurrentFile?: () => void;
-    __codeTe2RequestGitBaselines?: () => void;
-    __explorerStickyScopes?: ExplorerStickyScopesApi | null;
-    teFilePicker?: ExplorerTeFilePicker;
-  }
-}
+// Window contracts are centralized in main_page/frontend/global.d.ts.
 
 declare module '/static/js/file_icons.js' {
   interface SetiIconPayload {
@@ -282,18 +262,18 @@ declare module '/static/vendor/monaco-editor-core/esm/vs/base/common/codicons.js
 
 declare module '/static/vendor/monaco-editor-core/esm/vs/base/common/history.js' {
   export class HistoryNavigator<T = string> {
-    constructor(items?: Iterable<T>, limit?: number);
+    constructor(items?: Iterable<T, unknown, unknown>, limit?: number);
     add(value: T): void;
     getHistory(): T[];
   }
 }
 
 declare module '/static/vendor/monaco-editor-core/esm/vs/nls.js' {
-  export function localize(
+  export const localize: (
     key: string,
     message: string,
     ...args: unknown[]
-  ): string;
+  ) => string;
 }
 
 declare module '/static/vendor/monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js' {

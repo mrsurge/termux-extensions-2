@@ -7,7 +7,7 @@ import { notifyExplorerRpc } from '../../../src/explorer/rpc/client.ts';
 
 type WatcherMode = 'ipc' | 'watchexec' | 'none';
 
-interface WatcherConfig {
+export interface WatcherConfig {
   mode: WatcherMode;
   storage_type: string;
   poll_interval_ms: number;
@@ -23,12 +23,12 @@ interface WatcherLimitModalController {
   closeBtn: HTMLButtonElement;
 }
 
-interface WatcherErrorPayload {
+export interface WatcherErrorPayload {
   message?: string;
   limit?: number;
 }
 
-interface WatcherRaisePayload {
+export interface WatcherRaisePayload {
   ok?: boolean;
   stdout?: string;
   stderr?: string;
@@ -213,7 +213,7 @@ function _updateWatcherStatusIndicator(mode: WatcherMode | string) {
  * register the global window handlers used by the explorer socket.
  * @param {{ toast?: (msg: string) => void, host?: { toast?: (msg: string) => void } }} hostOrContext
  */
-export function initWatcherUI(hostOrContext: any) {
+export function initWatcherUI(hostOrContext: { toast?: (msg: string) => void; host?: { toast?: (msg: string) => void } }) {
   _toast =
     hostOrContext?.toast ||
     hostOrContext?.host?.toast ||
@@ -266,11 +266,11 @@ export function initWatcherUI(hostOrContext: any) {
 export function drainPendingWatcherEvents() {
   try {
     if (window.__codeTe2PendingWatcherError) {
-      window.__codeTe2HandleWatcherError(window.__codeTe2PendingWatcherError);
+      window.__codeTe2HandleWatcherError?.(window.__codeTe2PendingWatcherError);
       window.__codeTe2PendingWatcherError = null;
     }
     if (window.__codeTe2PendingWatcherRaiseResult) {
-      window.__codeTe2HandleWatcherRaiseResult(window.__codeTe2PendingWatcherRaiseResult);
+      window.__codeTe2HandleWatcherRaiseResult?.(window.__codeTe2PendingWatcherRaiseResult);
       window.__codeTe2PendingWatcherRaiseResult = null;
     }
   } catch (_) {}

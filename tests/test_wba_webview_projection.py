@@ -8,6 +8,48 @@ from app.apps.code_te2 import wba_event_bridge
 
 
 class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reset_invalidates_readiness_without_removing_saved_presentations(self) -> None:
+        module = 'app.apps.code_te2.ui_ipc.sidebar_window_state'
+        publish = AsyncMock()
+        with (
+            patch.object(wba_event_bridge, '_event_workspace_root', return_value='/workspace/project'),
+            patch(f'{module}.reset_extension_webview_readiness', return_value=True) as reset,
+            patch(f'{module}.get_sidebar_window_state', return_value={'slots': {'saved': {}}}),
+            patch('app.apps.code_te2.sidebar_window_events.publish_sidebar_window_state_changed', publish),
+            patch('app.apps.code_te2.adapter_lifecycle_events.publish_adapter_session_reset', AsyncMock()),
+        ):
+            await wba_event_bridge.dispatch_wba_pipe_event({'type': 'adapter/sessionReset'})
+            reset.assert_called_once_with()
+            self.assertEqual({'slots': {'saved': {}}}, publish.call_args.args[0])
+            reset.reset_mock()
+            await wba_event_bridge.dispatch_wba_pipe_event({
+                'type': 'webview/snapshot', 'workspaceFolder': '/workspace/project',
+                'authoritative': False, 'reason': 'disconnect', 'surfaces': [],
+            })
+            reset.assert_called_once_with('/workspace/project')
+            self.assertEqual(2, publish.await_count)
+
+    async def test_theme_icon_survives_backend_projection_without_image_fetch(self) -> None:
+        project = "/workspace/project"
+        surface = {
+            "dto": "ExtensionWebviewSurface", "version": 1,
+            "surfaceId": "vsix:workspace:theme", "hostId": "vsix-webview:theme",
+            "workspaceId": "workspace", "projectPath": project,
+            "extensionId": "example.theme", "viewId": "example.view",
+            "surfaceKind": "view", "title": "Theme View",
+            "url": "/api/app/code_te2/services/wba/webview/theme",
+            "iconId": "markdown", "iconUrl": "",
+        }
+        reconcile = Mock(return_value={"changed": False})
+        with (
+            patch.object(wba_event_bridge, "_event_workspace_root", return_value=project),
+            patch("app.apps.code_te2.ui_ipc.sidebar_window_state.reconcile_extension_webview_slots", reconcile),
+        ):
+            await wba_event_bridge.dispatch_wba_pipe_event({"type": "webview/snapshot", "workspaceFolder": project, "surfaces": [surface]})
+        payload = reconcile.call_args.args[1][surface["hostId"]]
+        self.assertEqual({"kind": "codicon", "name": "markdown"}, payload["icon"])
+        self.assertEqual("markdown", payload["webviewSurface"]["iconId"])
+
     async def test_activation_progress_cannot_prune_existing_membership(self) -> None:
         with (
             patch.object(wba_event_bridge, "_event_workspace_root", return_value="/workspace/project"),

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import {
   SHORTCUT_KIND_FRAMEWORK_APP,
   SHORTCUT_KIND_URL,
@@ -11,7 +12,7 @@ export function normStr(value: unknown): string {
 }
 
 export function asRecord(value: unknown): UnknownRecord {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {};
+  return value && typeof value === 'object' && !isUnknownArray(value) ? value as UnknownRecord : {};
 }
 
 export function firstGrapheme(text: unknown): string {

@@ -1,6 +1,7 @@
+import { isUnknownArray } from '../rpc/value-types.ts';
 type JsonObject = Record<string, unknown>;
 const isRecord = (value: unknown): value is JsonObject =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
+  value !== null && typeof value === 'object' && !isUnknownArray(value);
 const text = (value: unknown): string => typeof value === 'string' ? value.slice(0, 240) : '';
 
 // WBA returns VS Code's internal (zero-based) SymbolKind and one-based IRange,
@@ -43,7 +44,7 @@ export function documentSymbolTree(items: unknown[], path: string): { tree: Json
         description: text(value.detail) || text(value.containerName),
         kind: typeof value.kind === 'number' && Number.isInteger(value.kind) && value.kind >= 0 && value.kind < ICONS.length ? value.kind : 18,
         range: range ?? selectionRange, selectionRange,
-        children: visit(Array.isArray(value.children) ? value.children : [], depth + 1),
+        children: visit(isUnknownArray(value.children) ? value.children : [], depth + 1),
       });
     }
     return nodes;

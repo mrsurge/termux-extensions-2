@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { toMonacoColorHex } from './editor_parse_utils.ts';
 
 interface TokenColorSettings {
@@ -20,7 +21,7 @@ interface MonacoTokenRuleLike {
 
 export function vscodeTokenColorsToMonacoRules(tokenColors: TokenColorEntry[]): MonacoTokenRuleLike[] {
   const rules: MonacoTokenRuleLike[] = [];
-  if (!Array.isArray(tokenColors)) return rules;
+  if (!isUnknownArray(tokenColors)) return rules;
   for (let index = 0; index < tokenColors.length; index += 1) {
     const tokenColor = tokenColors[index];
     if (!tokenColor || !tokenColor.settings) continue;
@@ -30,7 +31,7 @@ export function vscodeTokenColorsToMonacoRules(tokenColors: TokenColorEntry[]): 
       ? tokenColor.settings.fontStyle.trim()
       : null;
     const scopes = tokenColor.scope;
-    const scopeList = Array.isArray(scopes)
+    const scopeList = isUnknownArray(scopes)
       ? scopes
       : (typeof scopes === 'string' ? scopes.split(',') : []);
     for (let scopeIndex = 0; scopeIndex < scopeList.length; scopeIndex += 1) {

@@ -1,5 +1,5 @@
-import { encodePipeMessage } from "../protocol/pipe-codec.mjs";
-export { PipeMessagePackDecoder } from "../protocol/pipe-codec.mjs";
+import { encodePipeMessage } from "../protocol/pipe-codec.ts";
+export { PipeMessagePackDecoder } from "../protocol/pipe-codec.ts";
 
 export interface JsonRpcErrorReply {
   jsonrpc: "2.0";

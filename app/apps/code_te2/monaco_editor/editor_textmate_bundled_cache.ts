@@ -1,3 +1,4 @@
+import { isUnknownArray, recordValue } from '../src/rpc/value-types.ts';
 import type { BundledGrammarBody, BundledGrammarLoader } from './editor_textmate_grammar_loader.ts';
 import { grammarSha256 } from './editor_textmate_sha256.ts';
 
@@ -10,13 +11,13 @@ export function createBundledGrammarCache(fetchAsset: () => Promise<Response>): 
     const value: unknown = await response.json();
     if (!value || typeof value !== 'object') throw new Error('Invalid bundled TextMate cache');
     const cache = value as Record<string, unknown>;
-    if (cache.schema !== 1 || !cache.bodies || typeof cache.bodies !== 'object' || Array.isArray(cache.bodies)) {
+    if (cache.schema !== 1 || !cache.bodies || typeof cache.bodies !== 'object' || isUnknownArray(cache.bodies)) {
       throw new Error('Invalid bundled TextMate cache');
     }
     const bodies: Record<string, BundledGrammarBody> = Object.create(null);
     if (Object.keys(cache.bodies).length > 256) throw new Error('Bundled TextMate cache too large');
     let bytes = 0;
-    for (const [id, body] of Object.entries(cache.bodies)) {
+    for (const [id, body] of Object.entries(recordValue(cache.bodies))) {
       if (!body || typeof body !== 'object') throw new Error('Invalid bundled grammar');
       const entry = body as Record<string, unknown>;
       if (typeof entry.raw !== 'string' || typeof entry.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(entry.sha256)) {
@@ -29,7 +30,7 @@ export function createBundledGrammarCache(fetchAsset: () => Promise<Response>): 
       if (actual === entry.sha256) bodies[id] = { raw: entry.raw, sha256: entry.sha256 };
     }
     return bodies;
-  })().catch(error => {
+  })().catch((error: unknown) => {
     console.warn('[TextMate] bundled cache unavailable', error);
     return Object.create(null) as Record<string, BundledGrammarBody>;
   });

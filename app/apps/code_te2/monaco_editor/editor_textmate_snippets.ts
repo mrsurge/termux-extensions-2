@@ -71,7 +71,7 @@ export function applySnippetSyntax(target: HTMLElement, tokens: readonly Snippet
       if (token.color && /^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(token.color)) span.style.color = token.color;
       if (token.fontStyle & 1) span.style.fontStyle = 'italic';
       if (token.fontStyle & 2) span.style.fontWeight = 'bold';
-      const decorations = [];
+      const decorations: string[] = [];
       if (token.fontStyle & 4) decorations.push('underline');
       if (token.fontStyle & 8) decorations.push('line-through');
       if (decorations.length) span.style.textDecoration = decorations.join(' ');

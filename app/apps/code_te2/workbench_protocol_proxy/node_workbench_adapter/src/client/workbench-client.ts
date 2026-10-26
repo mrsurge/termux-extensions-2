@@ -1,11 +1,12 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import crypto from "node:crypto";
-import { editorProperties } from "../extensions/editor-state.mjs";
-import { QuickFixService } from '../extensions/intelligence/code-actions.mjs';
+import { editorProperties } from "../extensions/editor-state.ts";
+import { QuickFixService } from '../extensions/intelligence/code-actions.ts';
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { completionTrace } from "../server/runtime-debug.mjs";
-import { CompletionWarmup, warmCompletionProvider, type CompletionWarmupDocument } from "../extensions/intelligence/completion-warmup.mjs";
+import { completionTrace } from "../server/runtime-debug.ts";
+import { CompletionWarmup, warmCompletionProvider, type CompletionWarmupDocument } from "../extensions/intelligence/completion-warmup.ts";
 
 // ╔═══════════════════════════════════════════════════════════════════════╗
 // ║  DO NOT HARDCODE CONFIGURATION VALUES IN THIS FILE.                   ║
@@ -29,14 +30,14 @@ import {
   encodeExtRequestJsonArgs,
   encodeExtRequestMixedArgs,
   isTerminalExtReply,
-} from "../protocol/wire-encoding.mjs";
+} from "../protocol/wire-encoding.ts";
 import type { DecodedExtHostRpc } from "../protocol/wire-encoding";
-import { loadRpcIds } from "../protocol/rpc-ids.mjs";
-import { PendingExtRequestOwner } from "../protocol/pending-requests.mjs";
+import { loadRpcIds } from "../protocol/rpc-ids.ts";
+import { PendingExtRequestOwner } from "../protocol/pending-requests.ts";
 import {
   handleExtHostReply,
   handleExtHostRequest,
-} from "../protocol/ext-host-dispatch.mjs";
+} from "../protocol/ext-host-dispatch.ts";
 import {
   buildConfigurationInitData,
   resolveWatcherExcludes,
@@ -45,14 +46,14 @@ import {
   getVirtualVscodeContent,
   readVirtualVscodeUriBuffer,
   statVirtualVscodeUri,
-} from "./configuration.mjs";
+} from "./configuration.ts";
 import {
   connectManagementSession,
   discoverServerRootPath as discoverWorkbenchServerRootPath,
   commitFromServerRootPath as commitFromWorkbenchServerRootPath,
   loadProductVersionFromAppRoot as loadWorkbenchProductVersion,
-} from "./management.mjs";
-import { connectExtensionHostSession } from "./extension-host.mjs";
+} from "./management.ts";
+import { connectExtensionHostSession } from "./extension-host.ts";
 import {
   fsPathFromUri as fsPathFromLocalUri,
   provideTextDocumentContent as provideLocalTextDocumentContent,
@@ -62,7 +63,7 @@ import {
   tryOpenDocument as openLocalDocument,
   uriForPath as buildUriForPath,
   uriObjToStringSafe as stringifyUriSafe,
-} from "./document-content.mjs";
+} from "./document-content.ts";
 import {
   createCompletionRuntime,
   createCodeNavigationRuntime,
@@ -79,7 +80,7 @@ import {
   createSemanticTokensRuntime,
   createTransportRuntime,
   createWorkspaceLifecycleRuntime,
-} from "./runtime-adapters.mjs";
+} from "./runtime-adapters.ts";
 import type { RuntimeBuilderState } from "./runtime-adapters";
 import {
   allocExtReqId,
@@ -90,7 +91,7 @@ import {
   sendExtMixed,
   sendExtPending,
   trackExtSent,
-} from "./transport-session.mjs";
+} from "./transport-session.ts";
 import type {
   TransportPendingOptions,
   TransportRuntime,
@@ -111,7 +112,7 @@ import type {
 } from "../workspace/lifecycle";
 import type { ExtHostInitOptions } from "../extensions/catalog";
 import type { ProviderKind } from "../extensions/provider-registry";
-import { DiagnosticsSnapshotStore } from "../extensions/intelligence/diagnostics-snapshot.mjs";
+import { DiagnosticsSnapshotStore } from "../extensions/intelligence/diagnostics-snapshot.ts";
 import {
   buildExtensionsSnapshot,
   buildExtHostInitData,
@@ -120,15 +121,15 @@ import {
   sanitizeExtensionForInit,
   scanExtensionsFromDisk,
   workspaceFromFolder,
-} from "../extensions/catalog.mjs";
-import { ProviderRegistry } from "../extensions/provider-registry.mjs";
-import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
-import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
-import { ExtensionCommandRuntime } from "../extensions/command-runtime.mjs";
-import { ExtensionEditorNavigationRuntime } from "../extensions/editor-navigation-runtime.mjs";
-import { ExtensionMementoStore } from "../extensions/extension-storage.mjs";
-import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
-import { WebviewRuntime } from "../extensions/webview-runtime.mjs";
+} from "../extensions/catalog.ts";
+import { ProviderRegistry } from "../extensions/provider-registry.ts";
+import { ExtensionActivityRuntime } from "../extensions/activity-runtime.ts";
+import { ExtensionActivationRuntime } from "../extensions/activation-runtime.ts";
+import { ExtensionCommandRuntime } from "../extensions/command-runtime.ts";
+import { ExtensionEditorNavigationRuntime } from "../extensions/editor-navigation-runtime.ts";
+import { ExtensionMementoStore } from "../extensions/extension-storage.ts";
+import { ExtensionLanguageResolver } from "../extensions/language-resolver.ts";
+import { WebviewRuntime } from "../extensions/webview-runtime.ts";
 import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
@@ -139,29 +140,29 @@ import {
   provideOutgoingCalls,
   provideReferences,
   releaseCallHierarchy,
-} from "../extensions/intelligence/code-navigation.mjs";
+} from "../extensions/intelligence/code-navigation.ts";
 import {
   provideCompletions,
   synchronizeCompletionText,
-} from "../extensions/intelligence/completions.mjs";
+} from "../extensions/intelligence/completions.ts";
 import {
   provideColorPresentations,
   provideDocumentColors,
-} from "../extensions/intelligence/document-colors.mjs";
+} from "../extensions/intelligence/document-colors.ts";
 import {
   provideInlayHints,
   releaseInlayHints,
   resolveInlayHint,
-} from "../extensions/intelligence/inlay-hints.mjs";
+} from "../extensions/intelligence/inlay-hints.ts";
 import {
   freeInlineCompletions,
   handleInlineCompletionDidShow,
   provideInlineCompletions,
-} from "../extensions/intelligence/inline-completions.mjs";
+} from "../extensions/intelligence/inline-completions.ts";
 import {
   provideHover,
   provideHoverSingle,
-} from "../extensions/intelligence/hover.mjs";
+} from "../extensions/intelligence/hover.ts";
 import {
   getSemanticTokensLegend as loadSemanticTokensLegend,
   parseSemanticTokensDto,
@@ -169,28 +170,28 @@ import {
   provideSemanticTokens,
   provideSemanticTokensRange,
   provideSemanticTokensSingle,
-} from "../extensions/intelligence/semantic-tokens.mjs";
+} from "../extensions/intelligence/semantic-tokens.ts";
 import {
   SemanticTokenProjectionManager,
   type SemanticProjectionDocument,
-} from "../extensions/intelligence/semantic-token-projections.mjs";
+} from "../extensions/intelligence/semantic-token-projections.ts";
 import {
   provideDocumentSymbols,
   provideDocumentSymbolsSingle,
   provideFoldingRanges,
   provideFoldingRangesSingle,
-} from "../extensions/intelligence/structure.mjs";
+} from "../extensions/intelligence/structure.ts";
 import {
   didChange as applyDidChange,
   openFile as openWorkbenchFile,
   resubscribeWatcher as resubscribeWorkbenchWatcher,
   setupFileWatcher as setupWorkbenchWatcher,
   switchWorkspace as switchWorkbenchWorkspace,
-} from "../workspace/lifecycle.mjs";
-import { WorkbenchDocumentRegistry } from "../workspace/document-registry.mjs";
-import { checkWorkspaceContains } from "../workspace/workspace-contains.mjs";
-import { searchWorkspaceFiles } from "../workspace/file-search.mjs";
-import { ClientOperationGate } from "./client-operation-gate.mjs";
+} from "../workspace/lifecycle.ts";
+import { WorkbenchDocumentRegistry } from "../workspace/document-registry.ts";
+import { checkWorkspaceContains } from "../workspace/workspace-contains.ts";
+import { searchWorkspaceFiles } from "../workspace/file-search.ts";
+import { ClientOperationGate } from "./client-operation-gate.ts";
 
 type WorkbenchEventSink = (payload: Record<string, unknown>) => void;
 type MgmtIpcLike = NonNullable<ManagementRuntime["refs"]["mgmtIpc"]>;
@@ -607,7 +608,7 @@ async function spanTraceAsync<T>(
 
 function _shouldSkipSize(obj: unknown, maxItems: number): boolean {
   if (!obj || typeof obj !== "object") return false;
-  if (Array.isArray(obj)) return obj.length > maxItems;
+  if (isUnknownArray(obj)) return obj.length > maxItems;
   return Object.keys(obj).length > maxItems;
 }
 
@@ -692,7 +693,7 @@ function _languageIdFromPath(filePath: string | null | undefined): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function externalUriString(uriObj: unknown): string | null {
@@ -1057,6 +1058,7 @@ export class WorkbenchClient {
     });
     this._webviews = new WebviewRuntime({
       reconstructionStoragePath: webviewReconstructionStoragePath,
+      getActiveDocument: () => this.state.activePath,
       rpcIds: {
         MainThreadWebviews: _rpcIds.MainThreadWebviews,
         MainThreadWebviewPanels: _rpcIds.MainThreadWebviewPanels,
@@ -2617,7 +2619,7 @@ export class WorkbenchClient {
 
   private _activateInitializedDocuments(): void {
     for (const language of new Set(this._documentRegistry.values().map(entry => entry.languageId))) {
-      void this.activateLanguage(language).catch(error => console.warn("[document_initialization] activation failed", language, error));
+      void this.activateLanguage(language).catch((error: unknown) => console.warn("[document_initialization] activation failed", language, error));
     }
   }
 
@@ -2628,7 +2630,7 @@ export class WorkbenchClient {
       ...params,
       clientForegroundPaths: this._protectedDocumentPaths(),
     });
-    if (Array.isArray(result.released)) {
+    if (isUnknownArray(result.released)) {
       const releasedPaths = new Set(result.released.map((path) => String(path)));
       const removedEditors: string[] = [];
       for (const releasedPath of result.released) {
@@ -2936,7 +2938,7 @@ export class WorkbenchClient {
     if (params.sessionId !== this._completionSessionId) return { ok: false, error: "stale_completion_session" };
     const handle = params.providerHandle;
     const id = params.id;
-    if (typeof handle !== "number" || !Number.isInteger(handle) || !Array.isArray(id)
+    if (typeof handle !== "number" || !Number.isInteger(handle) || !isUnknownArray(id)
       || id.length !== 2 || !id.every(value => typeof value === "number" && Number.isInteger(value))) {
       return { ok: false, error: "invalid_completion_identity" };
     }
@@ -3092,10 +3094,10 @@ export class WorkbenchClient {
 
   async languageCatalog(): Promise<Record<string, unknown>> {
     if (this._languageCatalogCache) return this._languageCatalogCache;
-    if (!Array.isArray(this._extensions) || this._extensions.length === 0) {
+    if (!isUnknownArray(this._extensions) || this._extensions.length === 0) {
       try {
         await waitFor(
-          () => Array.isArray(this._extensions) && this._extensions.length > 0,
+          () => isUnknownArray(this._extensions) && this._extensions.length > 0,
           { timeoutMs: 5000, intervalMs: 50 },
         );
       } catch {}
@@ -3331,6 +3333,16 @@ export class WorkbenchClient {
 
   webviewMessage(params: Record<string, unknown>): Record<string, unknown> {
     return this._webviews.receiveBrowserMessage(params);
+  }
+
+  webviewOpenLink(params: Record<string, unknown>): Promise<unknown> {
+    return this._runWithClientEditorFacade(params, async () => {
+      const target = this._webviews.linkTarget(params);
+      if (target.kind === "command") {
+        return this._extensionCommands.execute({ ...params, surface: "webview", command: target.command, arguments: target.arguments });
+      }
+      return this._extensionEditorNavigation.openFromWorkbenchCommand(target.uri, target.options);
+    }, { label: "webview.openLink", timeoutMs: 35000 });
   }
 
   webviewState(params: Record<string, unknown>): Promise<Record<string, unknown>> {

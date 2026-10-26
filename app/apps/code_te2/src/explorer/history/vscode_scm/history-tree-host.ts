@@ -42,7 +42,7 @@ export class HistoryTreeHost implements TreeDisposable {
   private readonly hover: HistoryDetailsHover | null;
   private readonly pendingExpandedCommitIds: Set<string>;
 
-  constructor(container: HTMLElement, Tree: HistoryTreeConstructor, input: HistoryTreeInput, readChildren: HistoryChildrenReader, private readonly actions: HistoryTreeActions, resolveIcon?: HistoryFileIconResolver, expandedCommitIds: Iterable<string> = []) {
+  constructor(container: HTMLElement, Tree: HistoryTreeConstructor, input: HistoryTreeInput, readChildren: HistoryChildrenReader, private readonly actions: HistoryTreeActions, resolveIcon?: HistoryFileIconResolver, expandedCommitIds: Iterable<string, unknown, unknown> = []) {
     this.input = { ...input };
     this.pendingExpandedCommitIds = new Set(expandedCommitIds);
     this.element = container.ownerDocument.createElement('div');
@@ -105,7 +105,7 @@ export class HistoryTreeHost implements TreeDisposable {
     this.ready = this.tree.setInput(this.input).then(() => {
       this.inputReady = true;
       return this.restoreExpandedRows();
-    }).catch(error => {
+    }).catch((error: unknown) => {
       if (!this.disposed) { this.dispose(); throw error; }
     });
   }
@@ -158,19 +158,19 @@ export class HistoryTreeHost implements TreeDisposable {
       this.retrying.add(key);
       void Promise.resolve().then(() => {
         if (!this.disposed) return this.tree.updateChildren(row.owner, false, true);
-      }).catch(error => { if (!this.disposed) this.actions.onError(error); })
+      }).catch((error: unknown) => { if (!this.disposed) this.actions.onError(error); })
         .finally(() => { this.retrying.delete(key); });
     } else if (row.type === 'historyItemChangeViewModel') {
       void Promise.resolve().then(() => {
         if (!this.disposed) return this.actions.openFile(row);
-      }).catch(error => { if (!this.disposed) this.actions.onError(error); });
+      }).catch((error: unknown) => { if (!this.disposed) this.actions.onError(error); });
     } else if (!this.loadingMore && row.state !== 'loading') {
       this.loadingMore = true;
       this.autoLoadFailed = false;
       this.requestedRowCount = this.input.rows.length;
       void Promise.resolve().then(() => {
         if (!this.disposed) return this.actions.loadMore();
-      }).catch(error => {
+      }).catch((error: unknown) => {
         this.autoLoadFailed = true;
         if (!this.disposed) this.actions.onError(error);
       }).finally(() => {

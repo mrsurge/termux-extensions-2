@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
 import {
   type DetailedLineRangeMappingLike,
@@ -115,7 +116,7 @@ interface NormalizedAgentEdit {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }
@@ -125,7 +126,7 @@ function asString(value: unknown): string {
 }
 
 function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
+  return isUnknownArray(value) ? value : [];
 }
 
 function asLine(value: unknown, fallback: number): number {
@@ -149,7 +150,7 @@ function normalizeRange(range: AgentEditRangeLike | null | undefined, fallbackLi
 }
 
 function asStringLines(value: unknown): string[] {
-  if (Array.isArray(value)) {
+  if (isUnknownArray(value)) {
     return value
       .filter((item): item is string => typeof item === 'string')
       .map((item) => item.replace(/\r$/, ''));
@@ -334,7 +335,7 @@ export function createAgentEditReviewRuntime(deps: AgentEditReviewRuntimeDeps) {
         knownRevision: edit.revision,
         ts: Date.now(),
       }, { timeoutMs: 5000 });
-      const response = typeof result === 'object' && result !== null && !Array.isArray(result)
+      const response = typeof result === 'object' && result !== null && !isUnknownArray(result)
         ? result as Record<string, unknown>
         : null;
       if (response?.queued === true) {

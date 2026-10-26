@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 type UnknownRecord = Record<string, unknown>;
 
 interface TerminalLike {
@@ -18,7 +19,7 @@ interface ProjectSwitchControllerDeps {
 }
 
 function asRecord(value: unknown): UnknownRecord | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value && typeof value === 'object' && !isUnknownArray(value)
     ? value as UnknownRecord
     : null;
 }

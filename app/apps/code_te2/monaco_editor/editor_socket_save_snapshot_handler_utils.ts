@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import type { EditorSaveSnapshotRequestPayload } from './editor_save_mirror_contract.ts';
 
 interface MonacoModelLike {
@@ -5,7 +6,7 @@ interface MonacoModelLike {
 }
 
 function asSaveSnapshotRequestPayload(value: unknown): EditorSaveSnapshotRequestPayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as EditorSaveSnapshotRequestPayload
     : null;
 }
@@ -25,7 +26,7 @@ export function handleSaveSnapshotRequest(
 
   const response: Record<string, unknown> = { requestId };
   try {
-    const typedModel = model != null && typeof model === 'object' && !Array.isArray(model)
+    const typedModel = model != null && typeof model === 'object' && !isUnknownArray(model)
       ? model as MonacoModelLike
       : null;
     if (!currentPath || !typedModel || typeof typedModel.getValue !== 'function') {

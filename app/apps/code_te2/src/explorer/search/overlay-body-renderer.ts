@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import type { ExplorerSearchOverlayState } from "./types.ts";
 import { installScrollExpansion } from './scroll-expansion.ts';
 import { totalChangeStatistics } from './change-statistics.ts';
@@ -60,12 +61,12 @@ export function renderSearchOverlayBody(
     const progress = document.createElement('div');
     progress.className = 'fe-changes-progress fe-search-status';
     const data = searchResults && typeof searchResults === 'object' ? searchResults as Record<string, unknown> : {};
-    const all: unknown[] = Array.isArray(data.changes) ? data.changes : [];
+    const all: unknown[] = isUnknownArray(data.changes) ? data.changes : [];
     data.recentChanges ??= { paths: [] };
     const shown = typeof data.shown === 'number' ? data.shown : 40;
     const key = (item: unknown): unknown => item && typeof item === 'object' ? (item as Record<string, unknown>).rel : undefined;
     const present = new Set(all.map(key));
-    const revealed = new Set((Array.isArray(data.revealedPaths) ? data.revealedPaths : []).filter(path => present.has(path)));
+    const revealed = new Set((isUnknownArray(data.revealedPaths) ? data.revealedPaths : []).filter(path => present.has(path)));
     for (const item of all) {
       if (revealed.size >= shown) break;
       revealed.add(key(item));

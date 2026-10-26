@@ -1,33 +1,33 @@
+import { settingsRequest, type SettingsRequest, type SettingsNotify, type ExtensionSummary, objectValue, configProperties, type ConfigProperty } from './settings-contracts.ts';
 
 import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
 
-/**
- * @param {{
- *   extManagerListEl: HTMLElement,
- *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
- *   reloadEditorFrame: () => void,
- *   openExtConfigModal: (extId: string, displayName: string, schema: any, currentValues: any) => void,
- *   getActiveScope: () => string,
- *   toast: (msg: string, ms?: number) => void
- * }} deps
- */
-export function createSettingsManagerController(deps: any) {
+interface Dependencies {  extManagerListEl: HTMLElement,
+  busRequest: SettingsRequest,
+  reloadEditorFrame: () => void,
+  openExtConfigModal: (extId: string, displayName: string, schema: unknown, currentValues: unknown) => void,
+  getActiveScope: () => string,
+  toast: (msg: string, ms?: number) => void
+}
+
+export function createSettingsManagerController(deps: Dependencies) {
+  const busRequest = settingsRequest(deps.busRequest);
   let configurationGeneration = 0;
   async function openExtensionSettings(extId: string, label: string) {
     const generation = ++configurationGeneration;
     const scope = deps.getActiveScope();
-    const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsConfigSchemaGet, { ext_id: extId }, 10000);
+    const res = await busRequest(EXPLORER_RPC_METHODS.extensionsConfigSchemaGet, { ext_id: extId }, 10000);
     const schema = res?.schema || {};
-    const schemaKeys = Object.keys(schema?.properties || schema || {});
-    const currentValues: Record<string, any> = {};
+    const schemaKeys = Object.keys(configProperties(schema));
+    const currentValues: Record<string, unknown> = {};
     if (scope === 'workspace') {
-      const wsRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 5000);
+      const wsRes = await busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 5000);
       for (const key of schemaKeys) {
         if (key in (wsRes?.settings || {})) currentValues[key] = wsRes.settings[key];
       }
     } else {
-      const listRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 5000);
-      const extension = (listRes?.extensions || []).find((entry: any) => entry.id === extId);
+      const listRes = await busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 5000);
+      const extension = (listRes?.extensions || []).find((entry) => entry.id === extId);
       if (extension?.configuration_values) Object.assign(currentValues, extension.configuration_values);
     }
     if (generation !== configurationGeneration || scope !== deps.getActiveScope()) return;
@@ -37,10 +37,10 @@ export function createSettingsManagerController(deps: any) {
   async function refreshEditorExtManagerModal() {
     const document = deps.extManagerListEl.ownerDocument;
     deps.extManagerListEl.textContent = 'Loading…';
-    let extensions = [];
-    let langSlots = {};
+    let extensions: ExtensionSummary[] = [];
+    let langSlots: Record<string, unknown> = {};
     try {
-      const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 10000);
+      const res = await busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 10000);
       extensions = res?.extensions || [];
       langSlots = res?.language_slots || {};
     } catch (e) {
@@ -64,12 +64,12 @@ export function createSettingsManagerController(deps: any) {
 
     extensions
       .slice()
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         // user extensions first, then builtins
         if (a.source !== b.source) return a.source === 'user' ? -1 : 1;
         return String(a.display_name || a.id).localeCompare(String(b.display_name || b.id));
       })
-      .forEach((ext: any) => {
+      .forEach((ext) => {
         const extId = String(ext.id || '').trim();
         if (!extId) return;
         const label = String(ext.display_name || extId);
@@ -150,7 +150,7 @@ export function createSettingsManagerController(deps: any) {
         toggle.addEventListener('click', async () => {
           toggle.disabled = true;
           try {
-            await deps.busRequest(EXPLORER_RPC_METHODS.extensionsToggle, {
+            await busRequest(EXPLORER_RPC_METHODS.extensionsToggle, {
               ext_id: extId,
               active: !isActive,
             }, 10000);
@@ -192,7 +192,7 @@ export function createSettingsManagerController(deps: any) {
             if (!(await window.teUI.dialog.confirm(`Uninstall ${label}?`))) return;
             trash.disabled = true;
             try {
-              const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsUninstall, {
+              const res = await busRequest(EXPLORER_RPC_METHODS.extensionsUninstall, {
                 ext_id: extId,
               }, 30000);
               if (res?.ok) {

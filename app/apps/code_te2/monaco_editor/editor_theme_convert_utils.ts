@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { expandShortHex } from './editor_parse_utils.ts';
 import { vscodeTokenColorsToMonacoRules } from './editor_theme_rules_utils.ts';
 import { buildSemanticTokenRules } from './editor_semantic_token_rules_utils.ts';
@@ -37,7 +38,7 @@ export function vscodeThemeToMonacoTheme(
   } catch (_) {
     isLight = themeKey.toLowerCase().includes('light');
   }
-  const tokenColors = themeJson && Array.isArray(themeJson.tokenColors) ? themeJson.tokenColors : [];
+  const tokenColors = themeJson && isUnknownArray(themeJson.tokenColors) ? themeJson.tokenColors : [];
   const colorsIn = themeJson && themeJson.colors ? themeJson.colors : {};
   const colors: Record<string, string> = {};
   try {

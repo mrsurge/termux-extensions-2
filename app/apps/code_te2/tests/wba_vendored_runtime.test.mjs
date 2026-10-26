@@ -65,6 +65,10 @@ test("installed WBA provider registry resolves only its vendored matcher", async
       path.join(isolatedCodeTe2, "vendor", "picomatch"),
       { recursive: true },
     );
+    const isolatedValues = path.resolve(path.dirname(isolatedRegistry), '../protocol/value-types.mjs');
+    await mkdir(path.dirname(isolatedValues), { recursive: true });
+    await cp(path.join(codeTe2Root,
+      'workbench_protocol_proxy/node_workbench_adapter/dist/protocol/value-types.mjs'), isolatedValues);
 
     const generated = await readFile(isolatedRegistry, "utf8");
     assert.doesNotMatch(generated, /(?:from|require\()\s*["']picomatch["']/);

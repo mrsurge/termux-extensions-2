@@ -192,6 +192,13 @@ async def dispatch_wba_pipe_event(ev: JsonObject) -> None:
 
 async def _handle_adapter_session_reset(ev: JsonObject) -> None:
     project_root = _event_workspace_root(ev)
+    from .ui_ipc.sidebar_window_state import reset_extension_webview_readiness, get_sidebar_window_state
+    from .sidebar_window_events import publish_sidebar_window_state_changed
+
+    if reset_extension_webview_readiness():
+        await publish_sidebar_window_state_changed(
+            get_sidebar_window_state(), source="wba_event_bridge:session_reset", sidebar_scope="global",
+        )
     try:
         from .adapter_lifecycle_events import publish_adapter_session_reset
 
@@ -269,6 +276,12 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
         return
     project_root = str(Path(raw_root).expanduser().resolve(strict=False))
     if ev.get("authoritative") is False:
+        from .ui_ipc.sidebar_window_state import reset_extension_webview_readiness, get_sidebar_window_state
+
+        if reset_extension_webview_readiness(project_root):
+            await publish_sidebar_window_state_changed(
+                get_sidebar_window_state(), source="wba_event_bridge:surface_reset", sidebar_scope="global",
+            )
         reason = str(ev.get("reason") or "session_reset").strip()
         print(
             "[wba_event_bridge] retained extension webview membership "
@@ -321,6 +334,7 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
             "surfaceKind": surface_kind if surface_kind in {"view", "panel"} else "view",
             "url": url,
             "iconUrl": str(raw_surface.get("iconUrl") or "").strip(),
+            "iconId": str(raw_surface.get("iconId") or "").strip(),
             "retainContextWhenHidden": bool(
                 raw_surface.get("retainContextWhenHidden")
             ),
@@ -336,6 +350,7 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
         title = str(raw_surface.get("title") or raw_surface.get("viewId") or "Extension")
         url = str(surface["url"])
         icon_url = str(surface.get("iconUrl") or "").strip()
+        icon_id = str(surface.get("iconId") or "").strip()
         extension_id = str(surface.get("extensionId") or "Extension")
         desired_slots[host_id] = {
             "kind": "url",
@@ -348,7 +363,9 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
             "load": "eager",
             "version": str(raw_surface.get("htmlRevision") or 0),
             "icon": (
-                {"kind": "image", "src": icon_url}
+                {"kind": "codicon", "name": icon_id}
+                if icon_id
+                else {"kind": "image", "src": icon_url}
                 if icon_url
                 else {"kind": "text", "text": extension_id[:2].upper()}
             ),

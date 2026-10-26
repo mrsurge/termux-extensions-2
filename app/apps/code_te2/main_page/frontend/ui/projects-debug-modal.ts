@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 
 // Production Projects modal. Legacy CSS/DOM names retain "debug" for compatibility.
 // All intents use host-owned RPC callbacks; state projection belongs to the backend.
@@ -9,7 +10,7 @@ interface ProjectsModalDeps {
 }
 
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!value || typeof value !== 'object' || isUnknownArray(value)) {
     throw new Error('Invalid Projects response');
   }
   return value as Record<string, unknown>;
@@ -26,7 +27,7 @@ function result(value: unknown): Record<string, unknown> {
 
 function projectEntries(value: unknown): ProjectDebugEntry[] {
   const rows = result(value).data;
-  if (!Array.isArray(rows)) throw new Error('Invalid Projects list');
+  if (!isUnknownArray(rows)) throw new Error('Invalid Projects list');
   return rows.map((value: unknown) => {
     const row = record(value);
     if (typeof row.path !== 'string') throw new Error('Invalid project path');

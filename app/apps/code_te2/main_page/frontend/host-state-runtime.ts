@@ -29,10 +29,6 @@ interface SpinnerUiState {
 interface HostStateWindow extends Window {
   __adapterConnected?: boolean;
   __adapterReadyResolve?: ((ready: boolean) => void) | null;
-  __feLspSpinnerUi?: SpinnerUiState;
-  __feLspSpinnerState?: {
-    hideTimer?: number | null;
-  };
 }
 
 function hostWindow(): HostStateWindow {

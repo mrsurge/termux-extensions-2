@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import {
   EXPLORER_RPC_METHODS,
   type ExplorerRpcMethod,
@@ -79,7 +80,7 @@ const SEARCH_INPUT_DEBOUNCE_MS = 500;
 let searchSequence = 0;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -624,9 +625,9 @@ export function createExplorerSearchController(
       const current: Record<string, unknown> = isRecord(previous) ? previous : { mode: 'changes', changes: [] };
       if (isRecord(part.metadata)) Object.assign(current, part.metadata);
       if (isRecord(part.delta)) {
-        const updates: unknown[] = Array.isArray(part.delta.updates) ? part.delta.updates : [];
-        const removed: unknown[] = Array.isArray(part.delta.removed) ? part.delta.removed : [];
-        const old: unknown[] = Array.isArray(current.changes) ? current.changes : [];
+        const updates: unknown[] = isUnknownArray(part.delta.updates) ? part.delta.updates : [];
+        const removed: unknown[] = isUnknownArray(part.delta.removed) ? part.delta.removed : [];
+        const old: unknown[] = isUnknownArray(current.changes) ? current.changes : [];
         const entries = new Map(old.filter(isRecord).map(item => [item.rel, item]));
         for (const rel of removed) entries.delete(rel);
         for (const item of updates.filter(isRecord)) entries.set(item.rel, item);
@@ -641,14 +642,14 @@ export function createExplorerSearchController(
         return;
       }
       if (isRecord(part.change)) {
-        const changes = Array.isArray(current.changes) ? current.changes : [];
+        const changes = isUnknownArray(current.changes) ? current.changes : [];
         if (changes.length >= 700) return;
         current.changes = [...changes, part.change];
       }
       current.complete = false;
       deps.setSearchResults(current);
       deps.setSearchLoading(false);
-      setSearchStatus({ status: 'running', message: `Loading diffs: ${Array.isArray(current.changes) ? current.changes.length : 0} files` });
+      setSearchStatus({ status: 'running', message: `Loading diffs: ${isUnknownArray(current.changes) ? current.changes.length : 0} files` });
       deps.renderSearchOverlay();
       return;
     }

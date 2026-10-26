@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { provideWorkbenchCompletionItemsFromVscodeSuggest, resolveWorkbenchCompletionItem } from "./vscode_completion_vendor/suggest.js";
 import { traceCompletion } from "./editor_completion_trace.ts";
 import {
@@ -426,18 +427,18 @@ interface CreateEditorLanguageBridgeProvidersDeps {
   ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean>;
   flushMirrorDebounce(): void;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<void>;
-  getWorkbenchLanguageIds(): Iterable<string>;
+  getWorkbenchLanguageIds(): Iterable<string, unknown, unknown>;
   languageBridge: LanguageBridgeState;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === "object" && !Array.isArray(value)
+  return value != null && typeof value === "object" && !isUnknownArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
 function asArray(value: unknown): unknown[] | null {
-  return Array.isArray(value) ? value : null;
+  return isUnknownArray(value) ? value : null;
 }
 
 function documentSymbolProviderSelector(
@@ -976,7 +977,7 @@ export function createEditorLanguageBridgeProviders(
   function getCompletionRegistrationSignature(
     entry: CompletionProviderRegistrationLike,
   ): string {
-    const triggerCharacters = Array.isArray(entry.triggerCharacters)
+    const triggerCharacters = isUnknownArray(entry.triggerCharacters)
       ? entry.triggerCharacters.map(String).sort().join(",")
       : "";
     return (
@@ -1080,7 +1081,7 @@ export function createEditorLanguageBridgeProviders(
   }
 
   function completionSelector(selector: unknown, language: string): unknown {
-    if (!Array.isArray(selector)) return language;
+    if (!isUnknownArray(selector)) return language;
     // WBA uses vscode-remote URIs, while Monaco uses local file URIs for the
     // same documents. Keep language/glob scoring in Monaco; WBA rechecks matches.
     return selector.map(raw => {
@@ -1113,7 +1114,7 @@ export function createEditorLanguageBridgeProviders(
     deps.languageBridge.completionProvidersByLanguage[langId][handleKey] = {
       handle: handleKey,
       selector,
-      triggerCharacters: Array.isArray(registration.triggerCharacters)
+      triggerCharacters: isUnknownArray(registration.triggerCharacters)
         ? registration.triggerCharacters.map(String).filter(Boolean)
         : [],
       supportsResolve: !!registration.supportsResolve,
@@ -1151,7 +1152,7 @@ export function createEditorLanguageBridgeProviders(
   }
 
   function normalizeMonacoColor(raw: unknown): Record<string, number> | null {
-    if (Array.isArray(raw) && raw.length >= 4) {
+    if (isUnknownArray(raw) && raw.length >= 4) {
       return {
         red: numberFrom(raw[0]),
         green: numberFrom(raw[1]),
@@ -1226,7 +1227,7 @@ export function createEditorLanguageBridgeProviders(
     const out: Record<string, unknown> = { label: record.label };
     const textEdit = normalizeMonacoTextEdit(record.textEdit);
     if (textEdit) out.textEdit = textEdit;
-    if (Array.isArray(record.additionalTextEdits)) {
+    if (isUnknownArray(record.additionalTextEdits)) {
       const edits = record.additionalTextEdits
         .map(normalizeMonacoTextEdit)
         .filter((item): item is Record<string, unknown> => !!item);
@@ -1697,10 +1698,10 @@ export function createEditorLanguageBridgeProviders(
           } catch (_) {}
         },
         groupId: registration.groupId || registration.extensionId || undefined,
-        yieldsToGroupIds: Array.isArray(registration.yieldsToGroupIds)
+        yieldsToGroupIds: isUnknownArray(registration.yieldsToGroupIds)
           ? registration.yieldsToGroupIds
           : [],
-        excludesGroupIds: Array.isArray(registration.excludesGroupIds)
+        excludesGroupIds: isUnknownArray(registration.excludesGroupIds)
           ? registration.excludesGroupIds
           : [],
         displayName: registration.displayName || undefined,
@@ -1757,10 +1758,10 @@ export function createEditorLanguageBridgeProviders(
         extensionId: registration.extensionId || null,
         extensionVersion: registration.extensionVersion || null,
         groupId: registration.groupId || null,
-        yieldsToGroupIds: Array.isArray(registration.yieldsToGroupIds)
+        yieldsToGroupIds: isUnknownArray(registration.yieldsToGroupIds)
           ? registration.yieldsToGroupIds.map(String).filter(Boolean)
           : [],
-        excludesGroupIds: Array.isArray(registration.excludesGroupIds)
+        excludesGroupIds: isUnknownArray(registration.excludesGroupIds)
           ? registration.excludesGroupIds.map(String).filter(Boolean)
           : [],
         displayName: registration.displayName || null,
@@ -2116,7 +2117,7 @@ export function createEditorLanguageBridgeProviders(
             callWorkbenchSemanticTokens(params, opts) {
               return deps.editorWorkbenchCall("semantic_tokens", params, opts);
             },
-          }).catch((error) => {
+          }).catch((error: unknown) => {
             console.warn("[semanticTokens] request failed", error);
             return null;
           });
@@ -2166,7 +2167,7 @@ export function createEditorLanguageBridgeProviders(
         deps.languageBridge.semanticTokensLegendCache[langId] = legend;
         registerSemanticTokensWithLegend(langId, legend);
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.warn(
           "[semanticTokens] legend fetch failed for " + langId,
           error,

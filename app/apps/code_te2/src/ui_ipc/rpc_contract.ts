@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../rpc/value-types.ts';
 import { RPC_NAMESPACES } from '../rpc/namespaces.ts';
 import type { JsonObject, JsonRpcNotificationEnvelope } from '../rpc/transport.ts';
 
@@ -99,7 +100,7 @@ export interface UiIpcRpcNotification {
 const UI_IPC_RPC_NOTIFICATION_METHOD_SET = new Set<string>(Object.values(UI_IPC_RPC_NOTIFICATIONS));
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === 'object' && !isUnknownArray(value);
 }
 
 export function normalizeUiIpcRpcParams(payload: unknown): JsonObject {

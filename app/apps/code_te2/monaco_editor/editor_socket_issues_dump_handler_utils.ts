@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface MonacoUriLike {
   toString(): string;
 }
@@ -20,19 +21,19 @@ export interface IssuesDumpPayloadLike {
 }
 
 function asIssuesDumpPayloadLike(value: unknown): IssuesDumpPayloadLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as IssuesDumpPayloadLike
     : null;
 }
 
 function asMonacoLike(value: unknown): MonacoLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as MonacoLike
     : null;
 }
 
 function asMonacoModelLike(value: unknown): MonacoModelLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as MonacoModelLike
     : null;
 }

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 export interface RawExtensionConfigDefaults {
   contents: Record<string, unknown>;
   keys: string[];
@@ -25,7 +26,7 @@ interface ConfigurationBuckets {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function cloneJsonValue(value: unknown): unknown {
@@ -41,7 +42,7 @@ function cloneJsonValue(value: unknown): unknown {
 function visitConfigurationNodes(node: unknown, visit: (node: Record<string, unknown>) => void): void {
   if (!isRecord(node)) return;
   visit(node);
-  if (Array.isArray(node.allOf)) {
+  if (isUnknownArray(node.allOf)) {
     for (const child of node.allOf) visitConfigurationNodes(child, visit);
   }
 }
@@ -140,14 +141,14 @@ function collectExtensionConfigurationBuckets(extensions: unknown[]): Configurat
     }
   };
 
-  for (const ext of Array.isArray(extensions) ? extensions : []) {
+  for (const ext of isUnknownArray(extensions) ? extensions : []) {
     if (!isRecord(ext)) continue;
     const packageJson = isRecord(ext.packageJSON) ? ext.packageJSON : null;
     const manifest = packageJson ?? ext;
     const contributes = isRecord(manifest.contributes) ? manifest.contributes : null;
     let configs = contributes?.configuration;
     if (!configs) continue;
-    const configList = Array.isArray(configs) ? configs : [configs];
+    const configList = isUnknownArray(configs) ? configs : [configs];
     for (const cfg of configList) {
       visitConfigurationNodes(cfg, (node) => {
         const props = isRecord(node.properties) ? node.properties : null;
@@ -261,7 +262,7 @@ export function extractExtensionConfigDefaults(scannedExtensions: unknown[], log
   const allContents: Record<string, unknown> = {};
   const allKeys: string[] = [];
   try {
-    const exts = Array.isArray(scannedExtensions) ? scannedExtensions : [];
+    const exts = isUnknownArray(scannedExtensions) ? scannedExtensions : [];
     for (const ext of exts) {
       if (!isRecord(ext)) continue;
       const packageJson = isRecord(ext.packageJSON) ? ext.packageJSON : null;
@@ -269,7 +270,7 @@ export function extractExtensionConfigDefaults(scannedExtensions: unknown[], log
       const contributes = isRecord(manifest.contributes) ? manifest.contributes : null;
       let configs = contributes?.configuration;
       if (!configs) continue;
-      const configList = Array.isArray(configs) ? configs : [configs];
+      const configList = isUnknownArray(configs) ? configs : [configs];
       for (const cfg of configList) {
         if (!isRecord(cfg)) continue;
         const props = isRecord(cfg.properties) ? cfg.properties : null;
@@ -297,7 +298,7 @@ export function extractExtensionConfigDefaults(scannedExtensions: unknown[], log
   } catch (e) {
     log(`[config] error scanning extension defaults: ${e instanceof Error ? e.message : String(e)}`);
   }
-  log(`[config] extracted ${allKeys.length} default keys from ${Array.isArray(scannedExtensions) ? scannedExtensions.length : 0} extensions`);
+  log(`[config] extracted ${allKeys.length} default keys from ${isUnknownArray(scannedExtensions) ? scannedExtensions.length : 0} extensions`);
   return { contents: allContents, keys: allKeys };
 }
 
@@ -333,7 +334,7 @@ export function buildConfigurationInitData(runtime: ConfigurationRuntime, folder
   const settingsPath = String(runtime.env.TE2_USER_SETTINGS_PATH ?? "").trim();
   if (!settingsPath) throw new Error("TE2_USER_SETTINGS_PATH is required");
   try {
-    const parsed = JSON.parse(runtime.readTextFileSync(settingsPath));
+    const parsed: unknown = JSON.parse(runtime.readTextFileSync(settingsPath));
     userRemote = parseSettingsObject(parsed);
     runtime.log(`[config] loaded ${userRemote.keys.length} user settings from ${settingsPath}`);
   } catch (e) {
@@ -344,7 +345,7 @@ export function buildConfigurationInitData(runtime: ConfigurationRuntime, folder
   if (folder) {
     const wsSettingsPath = runtime.joinPath(String(folder), ".vscode", "settings.json");
     try {
-      const parsed = JSON.parse(runtime.readTextFileSync(wsSettingsPath));
+      const parsed: unknown = JSON.parse(runtime.readTextFileSync(wsSettingsPath));
       workspaceConfig = parseSettingsObject(parsed);
       runtime.log(`[config] loaded ${workspaceConfig.keys.length} workspace settings from ${wsSettingsPath}`);
     } catch (e) {

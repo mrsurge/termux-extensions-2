@@ -1,26 +1,24 @@
 // @ts-check
 
-/**
- * @param {{
- *   menuFileDD: HTMLElement,
- *   menuEditDD: HTMLElement,
- *   menuEditorDD: HTMLElement,
- *   menuViewDD: HTMLElement,
- *   getAgentShortcutLoadDD: () => HTMLElement | null,
- *   getAgentShortcutLoadBtn: () => HTMLElement | null,
- *   getBranchMenuHandle: () => any,
- *   menuFileBtn: HTMLElement,
- *   menuEditBtn: HTMLElement,
- *   menuEditorBtn: HTMLElement,
- *   menuViewBtn: HTMLElement,
- *   runActiveBtn: HTMLElement,
- *   stopRunProfilesBtn: HTMLElement,
- *   runCurrentFile: () => void,
- *   stopRunningProfiles: () => void,
- *   showRunProfileSelector: () => void,
- * }} deps
- */
-export function createMenuCoreController(deps: any) {
+interface Dependencies {  menuFileDD: HTMLElement,
+  menuEditDD: HTMLElement,
+  menuEditorDD: HTMLElement,
+  menuViewDD: HTMLElement,
+  getAgentShortcutLoadDD: () => HTMLElement | null,
+  getAgentShortcutLoadBtn: () => HTMLElement | null,
+  getBranchMenuHandle: () => { close(): void } | null,
+  menuFileBtn: HTMLElement,
+  menuEditBtn: HTMLElement,
+  menuEditorBtn: HTMLElement,
+  menuViewBtn: HTMLElement,
+  runActiveBtn: HTMLElement,
+  stopRunProfilesBtn: HTMLElement,
+  runCurrentFile: () => void,
+  stopRunningProfiles: () => void,
+  showRunProfileSelector: () => void,
+}
+
+export function createMenuCoreController(deps: Dependencies) {
   function closeAllMenus() {
     deps.menuFileDD.classList.remove('show');
     deps.menuEditDD.classList.remove('show');

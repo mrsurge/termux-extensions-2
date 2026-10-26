@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
 
 interface MonacoModelLike {
@@ -27,7 +28,7 @@ interface BootSnapshotLike {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }

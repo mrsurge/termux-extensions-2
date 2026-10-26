@@ -1,48 +1,47 @@
+import { objectValue } from './settings-contracts.ts';
 // @ts-check
 
-/**
- * @param {{
- *   bindMenuToggle: (el: HTMLElement, action: () => any) => void,
- *   els: {
- *     miNew: HTMLElement,
- *     miOpen: HTMLElement,
- *     miSave: HTMLElement,
- *     miSaveAs: HTMLElement,
- *     miClose: HTMLElement,
- *     miOpenSecondWindow: HTMLElement,
- *     miQuit: HTMLElement,
- *     miRunProfiles: HTMLElement,
- *     miInstallPagePreview: HTMLElement,
- *     miDebugProjects: HTMLElement,
- *     miExportDiagnostics: HTMLElement,
- *     miUndo: HTMLElement,
- *     miRedo: HTMLElement,
- *     miCut: HTMLElement,
- *     miCopy: HTMLElement,
- *     miPaste: HTMLElement,
- *     miSelectAll: HTMLElement,
- *     miFind: HTMLElement,
- *     miGoto: HTMLElement,
- *   },
- *   resetToNewFile: () => void,
- *   pickFile: () => Promise<string | null>,
- *   openFile: (path: string) => Promise<any>,
- *   saveFile: () => Promise<any> | any,
- *   saveAsDialog: () => Promise<any> | any,
- *   quitApp: () => Promise<any> | any,
- *   openInSecondWindow: () => Promise<any> | any,
- *   getCurrentPath: () => string | null,
- *   openRunProfilesModal: () => Promise<any> | any,
- *   requestBackendPagePreviewTemplateInstall: (payload: any) => Promise<any>,
- *   showProjectsDebugModal: () => void,
- *   exportDiagnosticsToFile: () => void,
- *   requestBackendEditorCommand: (payload: any) => Promise<any>,
- *   triggerEditorSearchPanel: (reason: string, opts?: any) => any,
- *   jumpToCurrentFileLine: (line: number) => Promise<any> | any,
- *   toast: (msg: string) => void,
- * }} deps
- */
-export function installBasicMenuActions(deps: any) {
+interface Dependencies {  bindMenuToggle: (el: HTMLElement, action: () => unknown) => void,
+  els: {
+    miNew: HTMLElement,
+    miOpen: HTMLElement,
+    miSave: HTMLElement,
+    miSaveAs: HTMLElement,
+    miClose: HTMLElement,
+    miOpenSecondWindow: HTMLElement,
+    miQuit: HTMLElement,
+    miRunProfiles: HTMLElement,
+    miInstallPagePreview: HTMLElement,
+    miDebugProjects: HTMLElement,
+    miExportDiagnostics: HTMLElement,
+    miUndo: HTMLElement,
+    miRedo: HTMLElement,
+    miCut: HTMLElement,
+    miCopy: HTMLElement,
+    miPaste: HTMLElement,
+    miSelectAll: HTMLElement,
+    miFind: HTMLElement,
+    miGoto: HTMLElement,
+  },
+  resetToNewFile: () => void,
+  pickFile: () => Promise<string | null>,
+  openFile: (path: string) => Promise<unknown>,
+  saveFile: () => Promise<unknown> | unknown,
+  saveAsDialog: () => Promise<unknown> | unknown,
+  quitApp: () => Promise<unknown> | unknown,
+  openInSecondWindow: () => Promise<unknown> | unknown,
+  getCurrentPath: () => string | null,
+  openRunProfilesModal: () => Promise<unknown> | unknown,
+  requestBackendPagePreviewTemplateInstall: (payload: Record<string, unknown>) => Promise<unknown>,
+  showProjectsDebugModal: () => void,
+  exportDiagnosticsToFile: () => void,
+  requestBackendEditorCommand: (payload: Record<string, unknown>) => Promise<unknown>,
+  triggerEditorSearchPanel: (reason: string, opts?: { replace?: boolean }) => unknown,
+  jumpToCurrentFileLine: (line: number) => Promise<unknown> | unknown,
+  toast: (msg: string) => void,
+}
+
+export function installBasicMenuActions(deps: Dependencies) {
   const b = deps.bindMenuToggle;
   const e = deps.els;
 
@@ -64,12 +63,12 @@ export function installBasicMenuActions(deps: any) {
       const result = await deps.requestBackendPagePreviewTemplateInstall({
         path: deps.getCurrentPath(),
       });
-      const response = result && typeof result === 'object' ? (result as Record<string, any>) : {};
+      const response = objectValue(result);
       if (response.ok === false) {
         deps.toast(typeof response.error === 'string' ? response.error : 'Failed to install Page Preview profile');
         return;
       }
-      const data = response.data && typeof response.data === 'object' ? (response.data as Record<string, any>) : {};
+      const data = objectValue(response.data);
       deps.toast(data.created === false ? 'Page Preview profile already installed' : 'Page Preview profile installed');
     } catch (error) {
       console.warn('[PagePreview] profile install failed', error);

@@ -223,7 +223,7 @@ export function createContentReplacementController(deps: Deps) {
       box.onclick = event => { event.stopPropagation(); choose(rel, index); }; node.prepend(box);
     }
     if (expanded) node.append(button('Replace', () => { void replace('hit', rel, index); }, deps.ready() && !!file.matches?.[index]?.editTarget));
-    const navigate = node.onclick;
+    const navigate: ((this: GlobalEventHandlers, event: PointerEvent) => unknown) | null = node.onclick;
     node.onclick = event => {
       if (Date.now() < ignoreClicksUntil || busy) return;
       if (selecting) choose(rel, index); else navigate?.call(node, event);

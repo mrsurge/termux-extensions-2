@@ -1,3 +1,6 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
+import type { EditorViewState } from '../../../main.ts';
+import { settingsRequest, type SettingsRequest, type SettingsNotify, type ExtensionSummary, objectValue, configProperties, type ConfigProperty } from './settings-contracts.ts';
 import { parseThemeCatalog, type RequestThemeCatalog } from '../../../src/theme_catalog.ts';
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import { createJsonTextmateField } from "./cm6-json-textmate-field.ts";
@@ -42,26 +45,26 @@ function createRawSettingsJsonField(
   };
 }
 
-/**
- * @param {{
- *   getEditorViewState: () => any,
- *   getUiPrefs: () => Record<string, unknown>,
- *   settingsModalEl: HTMLElement,
- *   themeSummaryEl: HTMLElement,
- *   cursorStyleEl: HTMLElement,
- *   extSummaryEl: HTMLElement,
- *   customSettingsInputEl: HTMLTextAreaElement,
- *   customSettingsSaveEl: HTMLButtonElement,
- *   extManagerModalEl: HTMLElement,
- *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
- *   busNotify: (event: string, payload?: any) => void,
- *   requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<any>,
- *   toast: (msg: string, ms?: number) => void,
- *   reloadEditorFrame: () => void,
- *   updatePreference: (key: string, value: unknown) => Promise<boolean>,
- * }} deps
- */
-export function createSettingsRefreshController(deps: any) {
+interface Dependencies {  getEditorViewState: () => EditorViewState | null,
+  requestThemeCatalog: RequestThemeCatalog;
+  getUiPrefs: () => Record<string, unknown>,
+  settingsModalEl: HTMLElement,
+  themeSummaryEl: HTMLElement,
+  cursorStyleEl: HTMLElement,
+  extSummaryEl: HTMLElement,
+  customSettingsInputEl: HTMLTextAreaElement,
+  customSettingsSaveEl: HTMLButtonElement,
+  extManagerModalEl: HTMLElement,
+  busRequest: SettingsRequest,
+  busNotify: SettingsNotify,
+  requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<unknown>,
+  toast: (msg: string, ms?: number) => void,
+  reloadEditorFrame: () => void,
+  updatePreference: (key: string, value: unknown) => Promise<boolean>,
+}
+
+export function createSettingsRefreshController(deps: Dependencies) {
+  const busRequest = settingsRequest(deps.busRequest);
   const requestThemeCatalog: RequestThemeCatalog = deps.requestThemeCatalog;
   let cursorStyleControl: CustomSelectHandle | null = null;
   // ── Scope tab switching ──
@@ -118,7 +121,7 @@ export function createSettingsRefreshController(deps: any) {
   // ── User settings (existing) ──
   async function loadCustomSettings() {
     try {
-      const res = await deps.busRequest(
+      const res = await busRequest(
         EXPLORER_RPC_METHODS.extensionsCustomSettingsGet,
         {},
         8000,
@@ -137,7 +140,7 @@ export function createSettingsRefreshController(deps: any) {
   async function loadWorkspaceSettings() {
     if (!workspaceSettingsField) return;
     try {
-      const res = await deps.busRequest(
+      const res = await busRequest(
         EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet,
         {},
         8000,
@@ -168,7 +171,7 @@ export function createSettingsRefreshController(deps: any) {
           deps.toast("Invalid JSON: " + (e as { message?: string }).message);
           return;
         }
-        if (typeof parsed !== "object" || Array.isArray(parsed)) {
+        if (typeof parsed !== "object" || isUnknownArray(parsed)) {
           deps.toast("Settings must be a JSON object");
           return;
         }
@@ -176,7 +179,7 @@ export function createSettingsRefreshController(deps: any) {
       saveBtn.disabled = true;
       saveBtn.textContent = "Saving…";
       try {
-        const res = await deps.busRequest(
+        const res = await busRequest(
           EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsSet,
           { settings: parsed },
           15000,
@@ -238,14 +241,14 @@ export function createSettingsRefreshController(deps: any) {
 
     try {
       if (typeof deps.busRequest === "function") {
-        const res = await deps.busRequest(
+        const res = await busRequest(
           EXPLORER_RPC_METHODS.extensionsList,
           {},
           8000,
         );
         const exts = res?.extensions || [];
-        const active = exts.filter((e: any) => e.active);
-        const user = exts.filter((e: any) => e.source === "user");
+        const active = exts.filter((e) => e.active);
+        const user = exts.filter((e) => e.source === "user");
         deps.extSummaryEl.textContent = `${active.length} active, ${user.length} user-installed, ${exts.length} total`;
       }
     } catch (_) {
@@ -305,7 +308,7 @@ export function createSettingsRefreshController(deps: any) {
           deps.toast("Invalid JSON: " + (e as { message?: string }).message);
           return;
         }
-        if (typeof parsed !== "object" || Array.isArray(parsed)) {
+        if (typeof parsed !== "object" || isUnknownArray(parsed)) {
           deps.toast("Settings must be a JSON object");
           return;
         }
@@ -313,7 +316,7 @@ export function createSettingsRefreshController(deps: any) {
       deps.customSettingsSaveEl.disabled = true;
       deps.customSettingsSaveEl.textContent = "Saving…";
       try {
-        const res = await deps.busRequest(
+        const res = await busRequest(
           EXPLORER_RPC_METHODS.extensionsCustomSettingsSet,
           { settings: parsed },
           15000,
@@ -349,9 +352,9 @@ export function createSettingsRefreshController(deps: any) {
         ? "Installing Code Server…"
         : "Stopping Code Server…";
       try {
-        const response = await deps.requestLanguageBackendSet(targetMode);
+        const response = objectValue(await deps.requestLanguageBackendSet(targetMode));
         if (!response || response.ok === false) {
-          throw new Error(response?.error || "Language backend switch failed");
+          throw new Error(typeof response.error === 'string' ? response.error : "Language backend switch failed");
         }
         deps.toast(
           targetMode === "code-server"

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 export interface ExtensionEditorNavigationRpcIds {
   MainThreadTextEditors: number;
 }
@@ -56,7 +57,7 @@ export interface ExtensionEditorNavigationRuntimeOptions {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -71,7 +72,7 @@ function positiveInteger(value: unknown): number | null {
 
 function firstSelection(value: unknown): Record<string, unknown> | null {
   if (isRecord(value)) return value;
-  if (!Array.isArray(value)) return null;
+  if (!isUnknownArray(value)) return null;
   const first = value[0];
   return isRecord(first) ? first : null;
 }
@@ -107,7 +108,7 @@ export class ExtensionEditorNavigationRuntime {
     if (message.rpcId !== this.options.rpcIds.MainThreadTextEditors) {
       return { handled: false };
     }
-    const args = Array.isArray(message.args) ? message.args : [];
+    const args = isUnknownArray(message.args) ? message.args : [];
     switch (message.method) {
       case "$tryShowTextDocument":
         return {
@@ -123,7 +124,7 @@ export class ExtensionEditorNavigationRuntime {
         return {
           handled: true,
           pending: this.runEditorOperation(args[0], "setSelections", {
-            selections: Array.isArray(args[1]) ? args[1] : [],
+            selections: isUnknownArray(args[1]) ? args[1] : [],
           }),
         };
       case "$tryRevealRange":
@@ -152,7 +153,7 @@ export class ExtensionEditorNavigationRuntime {
   openFromWorkbenchCommand(uri: unknown, options: unknown): Promise<unknown> {
     const normalizedOptions = isRecord(options)
       ? options
-      : Array.isArray(options) && isRecord(options[1])
+      : isUnknownArray(options) && isRecord(options[1])
         ? options[1]
         : {};
     return this.requestVisibleOpen(uri, normalizedOptions, false);
@@ -163,7 +164,7 @@ export class ExtensionEditorNavigationRuntime {
     if (!path || path !== this.options.activePath() || !isRecord(position) ||
         !Number.isInteger(position.lineNumber) || Number(position.lineNumber) < 1 ||
         !Number.isInteger(position.column) || Number(position.column) < 1 ||
-        !Array.isArray(locations) || locations.length > 10000) {
+        !isUnknownArray(locations) || locations.length > 10000) {
       return Promise.reject(new Error('Invalid extension navigation locations'));
     }
     const normalized = locations.map(value => {
@@ -356,7 +357,7 @@ export class ExtensionEditorNavigationRuntime {
       this.clearTimeoutFn(pending.timer);
       pending.resolve(pending.returnEditorId ? editorId : undefined);
       this.options.log(`[extension-navigation] completed ${requestId} path=${pending.path}`);
-    }).catch((error) => this.failOpen(
+    }).catch((error: unknown) => this.failOpen(
       requestId,
       error instanceof Error ? error : new Error(String(error)),
     ));

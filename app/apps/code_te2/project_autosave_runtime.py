@@ -42,7 +42,8 @@ def record_commit(project: str, path: str, base: str, digest: str, revision: int
     generation = current_project_generation(project)
     previous = _commits.get(key)
     ancestors = previous[2] if previous and previous[0] == revision and previous[1] == generation and previous[3] == base else ()
-    _commits[key] = (revision, generation, (*ancestors, base)[-8:], digest)
+    lineage: tuple[str, ...] = (*ancestors, base)
+    _commits[key] = (revision, generation, lineage[-8:], digest)
     if len(_commits) > 256:
         _commits.pop(next(iter(_commits)))
 

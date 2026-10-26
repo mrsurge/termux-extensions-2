@@ -49,7 +49,7 @@ export class ReconnectingWebSocket {
   forcedClose: boolean;
   readyState: number;
   onopen: ((event: Event) => void) | null;
-  onmessage: ((event: MessageEvent) => void) | null;
+  onmessage: ((event: MessageEvent<unknown>) => void) | null;
   onerror: ((event: Event) => void) | null;
   onclose: ((event: CloseEvent) => void) | null;
   onreconnect: ((attempt: number, delayMs: number) => void) | null;
@@ -119,7 +119,7 @@ export class ReconnectingWebSocket {
         }
       };
 
-      socket.onmessage = (event) => {
+      socket.onmessage = (event: MessageEvent<unknown>) => {
         if (this.onmessage) {
           this.onmessage(event);
         }

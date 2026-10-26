@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { buildDiagnosticMention } from '../src/diagnostics/diagnostic-mention';
 import type { DiagnosticMarker } from '../src/diagnostics/problems-panel';
 
@@ -21,7 +22,7 @@ interface MentionDeps {
 
 const bindings = new WeakSet<object>();
 function record(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+  return value !== null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown> : null;
 }
 

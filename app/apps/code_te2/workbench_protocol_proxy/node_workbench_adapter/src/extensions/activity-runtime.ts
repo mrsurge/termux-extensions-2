@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import { watch as watchDirectory, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -12,9 +13,9 @@ export interface ExtensionActivityRpcIds {
 
 export interface ExtensionActivityRequest {
   req: number;
-  rpcId?: number;
-  method?: string;
-  args?: unknown[];
+  rpcId?: number | undefined;
+  method?: string | undefined;
+  args?: unknown[] | undefined;
 }
 
 export interface ExtensionActivityRequestResult {
@@ -101,7 +102,7 @@ const DEFAULT_TAIL_BYTES = 256 * 1024;
 const DEFAULT_WATCHER_LIMIT = 8;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -218,7 +219,7 @@ function consoleMessage(entry: unknown): {
   }
   try {
     const parsed = JSON.parse(rawArguments) as unknown;
-    if (Array.isArray(parsed)) {
+    if (isUnknownArray(parsed)) {
       const messages: string[] = [];
       let detail: string | undefined;
       for (const item of parsed) {
@@ -329,7 +330,7 @@ export class ExtensionActivityRuntime {
 
   handleRequest(request: ExtensionActivityRequest): ExtensionActivityRequestResult {
     const method = request.method ?? "";
-    const args = Array.isArray(request.args) ? request.args : [];
+    const args = isUnknownArray(request.args) ? request.args : [];
     const rpcId = request.rpcId;
 
     if (
@@ -576,10 +577,10 @@ export class ExtensionActivityRuntime {
       return;
     }
     if (method === "$log") {
-      const messages = Array.isArray(args[1]) ? args[1] : [];
+      const messages = isUnknownArray(args[1]) ? args[1] : [];
       const text = messages
         .map((item) => {
-          if (!Array.isArray(item)) return "";
+          if (!isUnknownArray(item)) return "";
           const level = Number(item[0]);
           const label =
             level >= 4 ? "ERROR" : level === 3 ? "WARN" : level === 1 ? "TRACE" : "INFO";
@@ -593,23 +594,23 @@ export class ExtensionActivityRuntime {
         this.directLogBytes,
       );
       state.descriptor.updatedAt = this.nowMs();
-      const highestSeverity = messages.reduce(
+      const highestSeverity = messages.reduce<number>(
         (current, item) =>
-          Array.isArray(item) && Number.isFinite(Number(item[0]))
+          isUnknownArray(item) && Number.isFinite(Number(item[0]))
             ? Math.max(current, Number(item[0]))
             : current,
         0,
       );
       if (highestSeverity >= 3) {
         const firstMessage = messages.find(
-          (item) => Array.isArray(item) && Number(item[0]) === highestSeverity,
+          (item) => isUnknownArray(item) && Number(item[0]) === highestSeverity,
         );
         this.recordActivity(
           state.descriptor.extensionId,
           highestSeverity >= 4 ? "error" : "warning",
           highestSeverity >= 4 ? "error" : "warning",
           `${state.descriptor.label}: ${boundedText(
-            Array.isArray(firstMessage) ? firstMessage[1] : text,
+            isUnknownArray(firstMessage) ? firstMessage[1] : text,
             4 * 1024,
           )}`,
         );

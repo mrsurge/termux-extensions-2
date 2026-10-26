@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface HoverContext {
   uri: string;
   path: string;
@@ -15,7 +16,7 @@ interface HoverCommandDeps {
 const GATEWAY = 'te2.extensionHoverCommand';
 
 function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 /** Use one private command, not global registrations that shadow Monaco commands. */
@@ -37,7 +38,7 @@ export function createEditorHoverCommandRuntime(deps: HoverCommandDeps) {
     return contents.map(content => {
       if (!record(content) || typeof content.value !== 'string') return content;
       const trust = content.isTrusted;
-      const allowed = trust === true ? null : record(trust) && Array.isArray(trust.enabledCommands)
+      const allowed = trust === true ? null : record(trust) && isUnknownArray(trust.enabledCommands)
         ? trust.enabledCommands.filter((v): v is string => typeof v === 'string') : [];
       let rewritten = false;
       const value = content.value.replace(/command:([^\s)'"<>]+)/g, (original: string, suffix: string) => {
@@ -49,7 +50,7 @@ export function createEditorHoverCommandRuntime(deps: HoverCommandDeps) {
         try { if (split >= 0) args = JSON.parse(decodeURIComponent(suffix.slice(split + 1))); }
         catch { return original; }
         const token = String(++sequence);
-        targets.set(token, { command, arguments: Array.isArray(args) ? args : [args], context: { ...context }, generation: deps.getGeneration() });
+        targets.set(token, { command, arguments: isUnknownArray(args) ? args : [args], context: { ...context }, generation: deps.getGeneration() });
         rewritten = true;
         return `command:${GATEWAY}?${encodeURIComponent(JSON.stringify([token]))}`;
       });

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import {
   minimapFindMatch,
   overviewRulerFindMatchForeground,
@@ -97,7 +98,7 @@ let activeHighlight: SearchHighlightPayload | null = null;
 let activeApplyToken = 0;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
+  return value !== null && typeof value === "object" && !isUnknownArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
@@ -256,7 +257,7 @@ export function replaceCodeInspectorHighlights(
   editorValue: unknown,
   rangesValue: unknown,
 ): void {
-  const ranges = Array.isArray(rangesValue)
+  const ranges = isUnknownArray(rangesValue)
     ? rangesValue
         .map(normalizeDecorationRange)
         .filter((range): range is MonacoRangeLike => range !== null)

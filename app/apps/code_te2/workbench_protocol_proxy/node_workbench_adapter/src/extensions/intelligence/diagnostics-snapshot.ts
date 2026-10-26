@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import { Buffer } from "node:buffer";
 
 export interface DiagnosticsSnapshotStats {
@@ -23,7 +24,7 @@ const DEFAULT_MAX_RESOURCES = 512;
 const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function estimateBytes(resource: unknown, markers: unknown[]): number {
@@ -71,17 +72,17 @@ export class DiagnosticsSnapshotStore {
       return changed;
     }
     if (!isRecord(event) || event.type !== "diagnostics/changeMany") return false;
-    const args = Array.isArray(event.args) ? event.args : [];
+    const args = isUnknownArray(event.args) ? event.args : [];
     const owner = typeof args[0] === "string" ? args[0].trim() : "";
-    const pairs = Array.isArray(args[1]) ? args[1] : [];
+    const pairs = isUnknownArray(args[1]) ? args[1] : [];
     if (!owner) return false;
 
     let changed = false;
     for (const pair of pairs) {
-      if (!Array.isArray(pair) || pair.length < 2) continue;
+      if (!isUnknownArray(pair) || pair.length < 2) continue;
       const resource = pair[0];
       const resourceKey = this.uriToString(resource);
-      const markers = Array.isArray(pair[1]) ? pair[1].slice() : [];
+      const markers = isUnknownArray(pair[1]) ? pair[1].slice() : [];
       if (!resourceKey) continue;
       const key = `${owner}\u0000${resourceKey}`;
       const previous = this.entries.get(key);

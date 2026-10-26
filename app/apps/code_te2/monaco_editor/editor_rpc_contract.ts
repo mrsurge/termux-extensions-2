@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 export const JSONRPC_VERSION = "2.0" as const;
 export const EDITOR_RPC_EVENT = "rpc" as const;
 
@@ -236,7 +237,7 @@ export function buildEditorRpcNotificationEnvelope(
 export function isJsonRpcSuccessEnvelope(
   value: unknown,
 ): value is JsonRpcSuccessEnvelope {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!value || typeof value !== "object" || isUnknownArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
     record.jsonrpc === JSONRPC_VERSION && "id" in record && "result" in record
@@ -246,7 +247,7 @@ export function isJsonRpcSuccessEnvelope(
 export function isJsonRpcErrorEnvelope(
   value: unknown,
 ): value is JsonRpcErrorEnvelope {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!value || typeof value !== "object" || isUnknownArray(value)) return false;
   const record = value as Record<string, unknown>;
   return record.jsonrpc === JSONRPC_VERSION && "error" in record;
 }
@@ -254,7 +255,7 @@ export function isJsonRpcErrorEnvelope(
 export function isJsonRpcNotificationEnvelope(
   value: unknown,
 ): value is JsonRpcNotificationEnvelope {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!value || typeof value !== "object" || isUnknownArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
     record.jsonrpc === JSONRPC_VERSION &&

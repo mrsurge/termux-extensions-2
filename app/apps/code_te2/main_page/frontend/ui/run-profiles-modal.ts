@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import {
   createDeclarativeForm,
   createDeclarativeModalShell,
@@ -18,7 +19,7 @@ interface RunProfilesModalDeps {
 }
 
 function isRecord(value: unknown): value is UnknownRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !isUnknownArray(value);
 }
 
 function asRecord(value: unknown): UnknownRecord {
@@ -26,7 +27,7 @@ function asRecord(value: unknown): UnknownRecord {
 }
 
 function asProfiles(value: unknown): UnknownRecord[] {
-  if (!Array.isArray(value)) return [];
+  if (!isUnknownArray(value)) return [];
   return value.filter(isRecord).map((item) => ({
     saveDrafts: "included",
     showSaveWarning: true,
@@ -61,7 +62,7 @@ function defaultProfile(index: number): UnknownRecord {
 }
 
 function configFromJson(value: unknown): UnknownRecord {
-  if (Array.isArray(value)) {
+  if (isUnknownArray(value)) {
     return { version: 1, profiles: asProfiles(value) };
   }
   if (!isRecord(value)) {
@@ -99,7 +100,7 @@ function normalizeResponse(result: unknown): UnknownRecord {
 
 function contractFromResponse(data: UnknownRecord): DeclarativeFormContract {
   const contract = asRecord(data.profileContract);
-  const fields = Array.isArray(contract.fields) ? contract.fields : [];
+  const fields = isUnknownArray(contract.fields) ? contract.fields : [];
   return {
     fields: fields.filter(
       isRecord,

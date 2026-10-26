@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import type { ProviderDocument } from "../provider-registry";
 
 export interface StructurePendingOptions {
@@ -51,7 +52,7 @@ export interface StructureSingleParams {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -176,7 +177,7 @@ export async function provideDocumentSymbols(runtime: StructureRuntime, params: 
   let lastError: unknown = null;
   for (const reply of results) {
     if (!reply) continue;
-    if (replyType(reply) === 9 && Array.isArray(replyResult(reply))) {
+    if (replyType(reply) === 9 && isUnknownArray(replyResult(reply))) {
       merged = merged.concat(replyResult(reply) as unknown[]);
     } else if (replyType(reply) === 11) {
       lastError = replyError(reply);
@@ -214,7 +215,7 @@ export async function provideDocumentSymbolsSingle(
   const reply = await promise;
 
   const symbolCount =
-    replyType(reply) === 9 && Array.isArray(replyResult(reply))
+    replyType(reply) === 9 && isUnknownArray(replyResult(reply))
       ? (replyResult(reply) as unknown[]).length
       : "n/a";
   runtime.log(`[symbols] response path=${params.path} lang=${params.languageId} type=${replyType(reply)} count=${symbolCount}`);
@@ -292,7 +293,7 @@ export async function provideFoldingRanges(runtime: StructureRuntime, params: un
     if (!reply) continue;
     if (replyType(reply) === 9) {
       sawJson = true;
-      if (Array.isArray(replyResult(reply))) {
+      if (isUnknownArray(replyResult(reply))) {
         sawArray = true;
         merged = merged.concat(replyResult(reply) as unknown[]);
       }
@@ -308,7 +309,7 @@ export async function provideFoldingRanges(runtime: StructureRuntime, params: un
   }
 
   if (sawArray) {
-    runtime.log(`[folding] merged ${merged.length} ranges from ${results.filter((reply) => reply && replyType(reply) === 9 && Array.isArray(replyResult(reply))).length}/${handles.length} providers`);
+    runtime.log(`[folding] merged ${merged.length} ranges from ${results.filter((reply) => reply && replyType(reply) === 9 && isUnknownArray(replyResult(reply))).length}/${handles.length} providers`);
     return { ok: true, result: merged };
   }
   if (sawJson) {
@@ -339,12 +340,12 @@ export async function provideFoldingRangesSingle(
   const reply = await promise;
 
   const rangeCount =
-    replyType(reply) === 9 && Array.isArray(replyResult(reply))
+    replyType(reply) === 9 && isUnknownArray(replyResult(reply))
       ? (replyResult(reply) as unknown[]).length
       : (replyType(reply) === 9 && replyResult(reply) == null ? "null" : "n/a");
   runtime.log(`[folding] response path=${params.path} lang=${params.languageId} type=${replyType(reply)} count=${rangeCount}`);
   if (replyType(reply) === 9) {
-    return { ok: true, result: Array.isArray(replyResult(reply)) ? replyResult(reply) : null };
+    return { ok: true, result: isUnknownArray(replyResult(reply)) ? replyResult(reply) : null };
   }
   if (replyType(reply) === 11) {
     runtime.log("[folding] error reply:", replyError(reply));

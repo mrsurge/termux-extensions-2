@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import { EXPLORER_RPC_METHODS, type ExplorerRpcMethod } from '../rpc/contract.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 import { getErrorMessage } from '../utils/errors.ts';
@@ -87,11 +88,11 @@ export function createExplorerGitFooterUtils(
     const detached = status.detached === true;
     const ahead = typeof status.ahead === 'number' ? status.ahead : 0;
     const behind = typeof status.behind === 'number' ? status.behind : 0;
-    const stagedCount = Array.isArray(status.staged) ? status.staged.length : 0;
-    const unstagedCount = Array.isArray(status.unstaged)
+    const stagedCount = isUnknownArray(status.staged) ? status.staged.length : 0;
+    const unstagedCount = isUnknownArray(status.unstaged)
       ? status.unstaged.length
       : 0;
-    const untrackedCount = Array.isArray(status.untracked)
+    const untrackedCount = isUnknownArray(status.untracked)
       ? status.untracked.length
       : 0;
 

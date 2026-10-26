@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import http from "node:http";
 import v8 from "node:v8";
 import path from "node:path";
@@ -7,27 +8,27 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   EditorWbaRequestContext,
   EditorWbaSocketServer,
-} from "./editor-socket.mjs";
+} from "./editor-socket.ts";
 import type { EventBridgeRuntime } from "./event-bridge";
 import type {
   AdapterServerState as DispatchServerState,
   HeapSnapshotResult,
   WorkbenchLike,
 } from "./request-dispatch";
-import { formatErrorMessage } from "./error-format.mjs";
-import { sendWebviewResourceResponse } from "./webview-resource-response.mjs";
-import { createStaticAssetLoader, PipeOutputWriter, runtimeIo } from "./runtime-io.mjs";
-import { WbaRuntimeDebug, completionTrace, runtimeDebugEnabled } from "./runtime-debug.mjs";
+import { formatErrorMessage } from "./error-format.ts";
+import { sendWebviewResourceResponse } from "./webview-resource-response.ts";
+import { createStaticAssetLoader, PipeOutputWriter, runtimeIo } from "./runtime-io.ts";
+import { WbaRuntimeDebug, completionTrace, runtimeDebugEnabled } from "./runtime-debug.ts";
 
 // Reserve stdout before dynamic imports: their initialization logs must not
 // corrupt the MessagePack pipe, even when optional configuration is absent.
-console.log = (...args) => console.error(...args);
+console.log = (...args: unknown[]) => console.error(...args);
 
-const { WorkbenchClient } = await import("../client/workbench-client.mjs");
-const bridgeMod = await import("./event-bridge.mjs");
-const dispatchMod = await import("./request-dispatch.mjs");
-const editorSocketMod = await import("./editor-socket.mjs");
-const stdioMod = await import("./stdio-protocol.mjs");
+const { WorkbenchClient } = await import("../client/workbench-client.ts");
+const bridgeMod = await import("./event-bridge.ts");
+const dispatchMod = await import("./request-dispatch.ts");
+const editorSocketMod = await import("./editor-socket.ts");
+const stdioMod = await import("./stdio-protocol.ts");
 
 const {
   buildStatusResult: buildBridgeStatusResult,
@@ -112,7 +113,7 @@ if (!WEBVIEW_RECONSTRUCTION_STORAGE_PATH) {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function asJsonRpcEnvelope(value: unknown): JsonRpcEnvelope {
@@ -164,12 +165,12 @@ function installSyncTrace(): void {
 
   // JSON.parse
   try {
-    const origParse = JSON.parse;
-    JSON.parse = function te2Parse(str, ...rest) {
+    const origParse: (text: string, reviver?: (this: unknown, key: string, value: unknown) => unknown) => unknown = JSON.parse;
+    JSON.parse = function te2Parse(str: string, reviver?: (this: unknown, key: string, value: unknown) => unknown): unknown {
       const start = Date.now();
       const s = typeof str === "string" ? str : "";
       try {
-        return origParse.call(this, str, ...rest);
+        return origParse.call(this, str, reviver);
       } finally {
         const dur = Date.now() - start;
         const bytes = s ? Buffer.byteLength(s, "utf8") : 0;
@@ -207,7 +208,7 @@ function installSyncTrace(): void {
         if (dur >= SYNC_TRACE_MIN_MS || bytes >= SYNC_TRACE_MIN_BYTES) {
           let kind: string = typeof value;
           if (value && typeof value === "object")
-            kind = Array.isArray(value) ? "array" : "object";
+            kind = isUnknownArray(value) ? "array" : "object";
           log({
             op: "JSON.stringify",
             dur_ms: dur,
@@ -225,7 +226,7 @@ function installSyncTrace(): void {
     const origConcat = Buffer.concat;
     Buffer.concat = function te2Concat(list, totalLength) {
       const start = Date.now();
-      let out = null;
+      let out: ReturnType<typeof Buffer.concat> | null = null;
       try {
         out = origConcat.call(this, list, totalLength);
         return out;
@@ -235,7 +236,7 @@ function installSyncTrace(): void {
         let inBytes = 0;
         try {
           if (Number.isFinite(totalLength)) inBytes = Number(totalLength) || 0;
-          else if (Array.isArray(list))
+          else if (isUnknownArray(list))
             inBytes = list.reduce((a, b) => a + (b?.length ?? 0), 0);
         } catch {}
         if (dur >= SYNC_TRACE_MIN_MS || outBytes >= SYNC_TRACE_MIN_BYTES) {
@@ -344,7 +345,7 @@ function bodyResponse(
 }
 
 function httpOrigin(value: unknown): string {
-  const raw = Array.isArray(value) ? value[0] : value;
+  const raw = isUnknownArray(value) ? value[0] : value;
   if (typeof raw !== "string" || !raw.trim()) return "";
   try {
     const parsed = new URL(raw);
@@ -362,7 +363,9 @@ async function readJson(
 ): Promise<unknown | null> {
   const chunks: Buffer[] = [];
   let total = 0;
-  for await (const chunk of req) {
+  const stream: AsyncIterable<unknown, unknown, unknown> = req;
+  for await (const chunk of stream) {
+    if (typeof chunk !== 'string' && !(chunk instanceof Uint8Array)) throw new Error('Invalid HTTP body chunk');
     const b = Buffer.from(chunk);
     total += b.length;
     if (total > maxBytes) throw new Error("request body too large");

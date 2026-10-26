@@ -1,3 +1,4 @@
+import { isUnknownArray, recordValue } from '../../../src/rpc/value-types.ts';
 import type { SidebarAppDockSlot } from "./types.ts";
 import {
   isAndroidNativePage,
@@ -90,11 +91,11 @@ function containsLegacyCodeTe2Identity(value: unknown): boolean {
     LEGACY_CODE_TE2_IDENTITY.lastIndex = 0;
     return LEGACY_CODE_TE2_IDENTITY.test(value);
   }
-  if (Array.isArray(value)) {
+  if (isUnknownArray(value)) {
     return value.some(containsLegacyCodeTe2Identity);
   }
   if (value && typeof value === "object") {
-    return Object.entries(value).some(
+    return Object.entries(recordValue(value)).some(
       ([key, item]) =>
         containsLegacyCodeTe2Identity(key) ||
         containsLegacyCodeTe2Identity(item),
@@ -110,7 +111,7 @@ function normalizeId(value: unknown): string {
 }
 
 function uniqueIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
+  if (!isUnknownArray(value)) return [];
   const result: string[] = [];
   const seen = new Set<string>();
   for (const item of value) {
@@ -144,7 +145,7 @@ export function emptySidebarPresentationState(): SidebarClientPresentationState 
 export function normalizeSidebarPresentationState(
   value: unknown,
 ): SidebarClientPresentationState {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!value || typeof value !== "object" || isUnknownArray(value)) {
     return emptySidebarPresentationState();
   }
   const raw = value as Record<string, unknown>;
@@ -155,7 +156,7 @@ export function normalizeSidebarPresentationState(
   const rawPresentations =
     raw.presentations &&
     typeof raw.presentations === "object" &&
-    !Array.isArray(raw.presentations)
+    !isUnknownArray(raw.presentations)
       ? (raw.presentations as Record<string, unknown>)
       : {};
   const presentations: Record<string, SidebarPresentationMode> = {};
@@ -407,7 +408,7 @@ function normalizedProjectPath(value: unknown): string {
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return value && typeof value === "object" && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : {};
 }
@@ -484,7 +485,7 @@ function emptyPresentationProjectStore(): SidebarPresentationProjectStore {
 function normalizePresentationProjectStore(
   value: unknown,
 ): SidebarPresentationProjectStore {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!value || typeof value !== "object" || isUnknownArray(value)) {
     return emptyPresentationProjectStore();
   }
   const raw = value as Record<string, unknown>;
@@ -492,7 +493,7 @@ function normalizePresentationProjectStore(
     raw.version !== SIDEBAR_PRESENTATION_STORE_VERSION
     || !raw.projects
     || typeof raw.projects !== "object"
-    || Array.isArray(raw.projects)
+    || isUnknownArray(raw.projects)
   ) {
     return emptyPresentationProjectStore();
   }

@@ -1,4 +1,5 @@
-import { completionTimeouts } from "../../protocol/completion-timeouts.mjs";
+import { isUnknownArray } from '../../protocol/value-types.ts';
+import { completionTimeouts } from "../../protocol/completion-timeouts.ts";
 
 export interface CompletionWarmupDocument {
   path: string;
@@ -92,12 +93,12 @@ export async function warmCompletionProvider(
   if (!isRecord(reply) || reply.type !== 9) throw new Error("Completion warm-up failed");
   const dto = isRecord(reply.result) ? reply.result : null;
   try {
-    return { itemCount: Array.isArray(dto?.b) ? dto.b.length : 0, incomplete: dto?.c === true };
+    return { itemCount: isUnknownArray(dto?.b) ? dto.b.length : 0, incomplete: dto?.c === true };
   } finally {
     if (typeof dto?.x === "number") rpc.release(handle, dto.x);
   }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !isUnknownArray(value);
 }

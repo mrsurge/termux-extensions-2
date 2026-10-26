@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 export interface AdapterServerSessionState {
   connected: boolean;
   ready: boolean;
@@ -61,7 +62,7 @@ const BACKEND_PIPE_EVENT_TYPES = new Set([
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -92,21 +93,22 @@ function truncateEvent(runtime: EventBridgeRuntime, ev: unknown): unknown {
       out[key] = `${value.slice(0, runtime.eventTruncStrMax)}…(truncated ${value.length - runtime.eventTruncStrMax} chars)`;
     }
   }
-  if (Array.isArray(out.args) && out.args.length > runtime.eventTruncArrMax) {
+  if (isUnknownArray(out.args) && out.args.length > runtime.eventTruncArrMax) {
     out.args = [
       ...out.args.slice(0, runtime.eventTruncArrMax),
       `…(truncated ${out.args.length - runtime.eventTruncArrMax} items)`,
     ];
   }
   try {
-    if (Array.isArray(out.args)) {
+    if (isUnknownArray(out.args)) {
       for (let index = 0; index < out.args.length; index += 1) {
         const arg = out.args[index];
-        const addedDocuments = isRecord(arg) && Array.isArray(arg.addedDocuments) ? arg.addedDocuments : null;
+        if (!isRecord(arg)) continue;
+        const addedDocuments = isRecord(arg) && isUnknownArray(arg.addedDocuments) ? arg.addedDocuments : null;
         if (!addedDocuments) continue;
         const docs = addedDocuments.map((doc) =>
           isRecord(doc)
-            ? { ...doc, lines: Array.isArray(doc.lines) ? `…(${doc.lines.length} lines omitted)` : doc.lines }
+            ? { ...doc, lines: isUnknownArray(doc.lines) ? `…(${doc.lines.length} lines omitted)` : doc.lines }
             : doc,
         );
         out.args[index] = { ...arg, addedDocuments: docs };
@@ -119,12 +121,12 @@ function truncateEvent(runtime: EventBridgeRuntime, ev: unknown): unknown {
 }
 
 export function diagnosticsFromChangeMany(args: unknown): DiagnosticsUpdate | null {
-  if (!Array.isArray(args) || args.length < 2) return null;
+  if (!isUnknownArray(args) || args.length < 2) return null;
   const owner = typeof args[0] === "string" ? args[0] : "unknown";
-  const pairs = Array.isArray(args[1]) ? args[1] : [];
+  const pairs = isUnknownArray(args[1]) ? args[1] : [];
   const items: DiagnosticsItem[] = [];
   for (const pair of pairs) {
-    if (!Array.isArray(pair) || pair.length < 2) continue;
+    if (!isUnknownArray(pair) || pair.length < 2) continue;
     const uriObj = pair[0];
     let markersRaw = pair[1];
     if (isRecord(markersRaw)) {
@@ -134,7 +136,7 @@ export function diagnosticsFromChangeMany(args: unknown): DiagnosticsUpdate | nu
         markersRaw = markersRaw.markers;
       }
     }
-    const markers = Array.isArray(markersRaw) ? markersRaw : [];
+    const markers = isUnknownArray(markersRaw) ? markersRaw : [];
     const uri = uriObjToString(uriObj);
     if (!uri) continue;
     items.push({ uri, markers });
@@ -215,7 +217,7 @@ export function createWorkbenchEventHandler(runtime: EventBridgeRuntime): (ev: u
         range: !!safeEv.range,
       };
       runtime.log(
-        `[server] PUSH semantic_tokens_provider_registered lang=${String(safeEv.language ?? "")} handle=${String(safeEv.handle ?? "")} eventHandle=${String(safeEv.eventHandle ?? "none")} range=${!!safeEv.range} legendTypes=${Array.isArray(field(safeEv.legend, "tokenTypes")) ? (field(safeEv.legend, "tokenTypes") as unknown[]).length : 0}`,
+        `[server] PUSH semantic_tokens_provider_registered lang=${String(safeEv.language ?? "")} handle=${String(safeEv.handle ?? "")} eventHandle=${String(safeEv.eventHandle ?? "none")} range=${!!safeEv.range} legendTypes=${isUnknownArray(field(safeEv.legend, "tokenTypes")) ? (field(safeEv.legend, "tokenTypes") as unknown[]).length : 0}`,
       );
       runtime.writePushLine(pushPayload);
     }
@@ -225,7 +227,7 @@ export function createWorkbenchEventHandler(runtime: EventBridgeRuntime): (ev: u
         event: "completions_provider_registered",
         handle: safeEv.handle,
         language: safeEv.language,
-        triggerCharacters: Array.isArray(safeEv.triggerCharacters) ? safeEv.triggerCharacters : [],
+        triggerCharacters: isUnknownArray(safeEv.triggerCharacters) ? safeEv.triggerCharacters : [],
         supportsResolve: !!safeEv.supportsResolve,
       };
       runtime.log(
@@ -270,8 +272,8 @@ export function createWorkbenchEventHandler(runtime: EventBridgeRuntime): (ev: u
         extensionId: typeof safeEv.extensionId === "string" ? safeEv.extensionId : null,
         extensionVersion: typeof safeEv.extensionVersion === "string" ? safeEv.extensionVersion : null,
         groupId: typeof safeEv.groupId === "string" ? safeEv.groupId : null,
-        yieldsToGroupIds: Array.isArray(safeEv.yieldsToGroupIds) ? safeEv.yieldsToGroupIds : [],
-        excludesGroupIds: Array.isArray(safeEv.excludesGroupIds) ? safeEv.excludesGroupIds : [],
+        yieldsToGroupIds: isUnknownArray(safeEv.yieldsToGroupIds) ? safeEv.yieldsToGroupIds : [],
+        excludesGroupIds: isUnknownArray(safeEv.excludesGroupIds) ? safeEv.excludesGroupIds : [],
         displayName: typeof safeEv.displayName === "string" ? safeEv.displayName : null,
         debounceDelayMs: typeof safeEv.debounceDelayMs === "number" ? safeEv.debounceDelayMs : null,
         eventHandle: safeEv.eventHandle ?? null,
@@ -282,7 +284,7 @@ export function createWorkbenchEventHandler(runtime: EventBridgeRuntime): (ev: u
       runtime.writePushLine(pushPayload);
     }
 
-    if (isRecord(safeEv) && safeEv.type === "diagnostics/changeMany" && Array.isArray(safeEv.args)) {
+    if (isRecord(safeEv) && safeEv.type === "diagnostics/changeMany" && isUnknownArray(safeEv.args)) {
       const normalized = diagnosticsFromChangeMany(safeEv.args);
       runtime.log(
         `[server] diagnostics/changeMany -> norm=${normalized ? `owner=${normalized.owner} items=${normalized.items.length} markerCounts=[${normalized.items.map((item) => (item.markers || []).length).join(",")}]` : "null"}`,

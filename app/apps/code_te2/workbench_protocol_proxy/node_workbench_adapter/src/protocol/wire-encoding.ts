@@ -1,3 +1,4 @@
+import { isUnknownArray } from './value-types.ts';
 type JsonCompatible = null | boolean | number | string | JsonCompatible[] | { [key: string]: JsonCompatible };
 type JsonInput = JsonCompatible | unknown;
 
@@ -33,7 +34,7 @@ function isSerializableBuffersArgument(
 ): value is SerializableBuffersArgument {
   return !!value && typeof value === "object"
     && (value as { __te2SerializableBuffers?: unknown }).__te2SerializableBuffers === true
-    && Array.isArray((value as { buffers?: unknown }).buffers);
+    && isUnknownArray((value as { buffers?: unknown }).buffers);
 }
 
 export interface DecodedExtHostRpc {
@@ -130,7 +131,7 @@ export function encodeMgmtValue(value: unknown): Uint8Array {
   if (typeof value === "number" && Number.isFinite(value)) {
     return concatBytes([byte(6), writeVqlUnsigned(value | 0)]);
   }
-  if (Array.isArray(value)) {
+  if (isUnknownArray(value)) {
     const parts: Uint8Array[] = [byte(4), writeVqlUnsigned(value.length)];
     for (const item of value) parts.push(encodeMgmtValue(item));
     return concatBytes(parts);
@@ -163,7 +164,7 @@ export function encodeExtRequestMixedArgs(input: ExtRequestEncodeInput): Uint8Ar
   const type = input.cancellable ? 4 : 3;
   const methodBytes = bytesFromString(input.method);
   if (methodBytes.length > 255) throw new Error("method too long");
-  const args = Array.isArray(input.args) ? input.args : [];
+  const args = isUnknownArray(input.args) ? input.args : [];
   const parts: Uint8Array[] = [
     byte(type),
     u32be(input.req),
@@ -376,7 +377,9 @@ export function decodeExtHostRpc(payload: Uint8Array, options: DecodeExtHostRpcO
         };
       }
       const argsRaw = stringFromBytes(readBytes(argsRawLen));
-      const args = argsRaw ? JSON.parse(argsRaw) : [];
+      const decodedArgs: unknown = argsRaw ? JSON.parse(argsRaw) : [];
+      if (!isUnknownArray(decodedArgs)) throw new Error('Extension RPC arguments must be an array');
+      const args = decodedArgs;
       return { kind: "ext", type: msgType, req, rpcId, method, args, argsRawLen, cancellable: msgType === 2 };
     }
 

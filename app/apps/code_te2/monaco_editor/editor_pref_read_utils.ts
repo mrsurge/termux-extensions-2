@@ -1,7 +1,8 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 type PrefsLike = unknown;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }
@@ -15,7 +16,7 @@ export function getEditorPrefs(cachedPrefs: PrefsLike): Record<string, unknown> 
 export function getBooleanPref(cachedPrefs: PrefsLike, key: string): boolean {
   try {
     const prefs = getEditorPrefs(cachedPrefs);
-    const editorPrefs = prefs && typeof prefs.editor === 'object' && prefs.editor && !Array.isArray(prefs.editor)
+    const editorPrefs = prefs && typeof prefs.editor === 'object' && prefs.editor && !isUnknownArray(prefs.editor)
       ? prefs.editor as Record<string, unknown>
       : null;
     if (editorPrefs && typeof editorPrefs[key] === 'boolean') return editorPrefs[key] as boolean;

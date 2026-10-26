@@ -1,16 +1,18 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
+import { settingsRequest, type SettingsRequest, type SettingsNotify, type ExtensionSummary, objectValue, configProperties, type ConfigProperty } from './settings-contracts.ts';
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import {
   createJsonTextmateField,
   type JsonTextmateFieldHandle,
 } from "./cm6-json-textmate-field.ts";
 
-type ExtConfigValues = Record<string, any>;
-type ExtConfigSchema = Record<string, any>;
+type ExtConfigValues = Record<string, unknown>;
+type ExtConfigSchema = unknown;
 
 interface ExtConfigMenuOption {
   id: string;
   label: string;
-  value?: any;
+  value?: unknown;
 }
 
 interface ExtConfigMenuHandle {
@@ -21,28 +23,28 @@ interface ExtConfigMenuHandle {
   destroy: () => void;
 }
 
-function isPlainObject(value: any): value is Record<string, any> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
-function schemaTypeIncludes(prop: any, typeName: string): boolean {
+function schemaTypeIncludes(prop: ConfigProperty, typeName: string): boolean {
   const rawType = prop?.type;
   return (
     rawType === typeName ||
-    (Array.isArray(rawType) && rawType.includes(typeName))
+    (isUnknownArray(rawType) && rawType.includes(typeName))
   );
 }
 
-function schemaAnyOfIncludesType(prop: any, typeName: string): boolean {
+function schemaAnyOfIncludesType(prop: ConfigProperty, typeName: string): boolean {
   return (
-    Array.isArray(prop?.anyOf) &&
-    prop.anyOf.some((branch: any) => {
+    isUnknownArray(prop?.anyOf) &&
+    prop.anyOf.some((branch) => {
       return schemaTypeIncludes(branch, typeName);
     })
   );
 }
 
-function schemaAllowsObject(prop: any): boolean {
+function schemaAllowsObject(prop: ConfigProperty): boolean {
   return (
     schemaTypeIncludes(prop, "object") ||
     schemaAnyOfIncludesType(prop, "object") ||
@@ -50,7 +52,7 @@ function schemaAllowsObject(prop: any): boolean {
   );
 }
 
-function formatConfigValue(value: any): string {
+function formatConfigValue(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "object") {
     try {
@@ -62,7 +64,7 @@ function formatConfigValue(value: any): string {
   return String(value);
 }
 
-function sameConfigValue(left: any, right: any): boolean {
+function sameConfigValue(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   try {
     return JSON.stringify(left) === JSON.stringify(right);
@@ -71,10 +73,10 @@ function sameConfigValue(left: any, right: any): boolean {
   }
 }
 
-function collectEnumOptions(prop: any): any[] {
-  const options: any[] = [];
+function collectEnumOptions(prop: ConfigProperty): unknown[] {
+  const options: unknown[] = [];
   const seen = new Set<string>();
-  const addOption = (value: any) => {
+  const addOption = (value: unknown) => {
     let key = "";
     try {
       key = JSON.stringify(value);
@@ -86,18 +88,18 @@ function collectEnumOptions(prop: any): any[] {
     options.push(value);
   };
 
-  if (Array.isArray(prop?.enum)) {
+  if (isUnknownArray(prop?.enum)) {
     prop.enum.forEach(addOption);
   }
-  if (Array.isArray(prop?.anyOf)) {
-    prop.anyOf.forEach((branch: any) => {
-      if (Array.isArray(branch?.enum)) branch.enum.forEach(addOption);
+  if (isUnknownArray(prop?.anyOf)) {
+    prop.anyOf.forEach((branch: ConfigProperty) => {
+      if (isUnknownArray(branch?.enum)) branch.enum.forEach(addOption);
     });
   }
   return options;
 }
 
-function parseJsonRawValue(rawValue: string): { ok: boolean; value: any } {
+function parseJsonRawValue(rawValue: string): { ok: boolean; value: unknown } {
   const raw = rawValue.trim();
   if (!raw) return { ok: true, value: null };
   try {
@@ -137,7 +139,7 @@ function createExtConfigMenu(options: {
   button.setAttribute("aria-expanded", "false");
   root.appendChild(button);
 
-  const menuOptions = Array.isArray(options.options) ? options.options : [];
+  const menuOptions = isUnknownArray(options.options) ? options.options : [];
   let selectedId = options.value;
   let menuState: { menu: HTMLElement; cleanup: () => void } | null = null;
 
@@ -248,21 +250,20 @@ function createExtConfigMenu(options: {
   };
 }
 
-/**
- * @param {{
- *   modalEl: HTMLElement,
- *   titleEl: HTMLElement,
- *   formEl: HTMLElement,
- *   closeBtn: HTMLElement,
- *   cancelBtn: HTMLElement,
- *   saveBtn: HTMLButtonElement,
- *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
- *   refreshExtManager: () => Promise<any> | void,
- *   reloadEditorFrame: () => void,
- *   toast: (msg: string, ms?: number) => void
- * }} deps
- */
-export function createSettingsConfigModalController(deps: any) {
+interface Dependencies {  modalEl: HTMLElement,
+  titleEl: HTMLElement,
+  formEl: HTMLElement,
+  closeBtn: HTMLElement,
+  cancelBtn: HTMLElement,
+  saveBtn: HTMLButtonElement,
+  busRequest: SettingsRequest,
+  refreshExtManager: () => Promise<unknown> | void,
+  reloadEditorFrame: () => void,
+  toast: (msg: string, ms?: number) => void
+}
+
+export function createSettingsConfigModalController(deps: Dependencies) {
+  const busRequest = settingsRequest(deps.busRequest);
   let extConfigExtId = "";
   let extConfigValues: ExtConfigValues = {};
   let extConfigScope = "user";
@@ -277,7 +278,7 @@ export function createSettingsConfigModalController(deps: any) {
     value: string;
     rows?: number;
     placeholder?: string;
-    onValidValue: (value: any) => void;
+    onValidValue: (value: unknown) => void;
   }): JsonTextmateFieldHandle {
     const editor = createJsonTextmateField({
       value: options.value,
@@ -297,20 +298,20 @@ export function createSettingsConfigModalController(deps: any) {
     extId: string,
     displayName: string,
     schema: ExtConfigSchema,
-    currentValues: ExtConfigValues,
+    currentValues: unknown,
     scope = "user",
   ) {
     const document: Document = (deps.formEl as HTMLElement).ownerDocument;
     cleanupFieldControls();
     extConfigExtId = extId;
     extConfigScope = scope;
-    extConfigValues = { ...(currentValues || {}) };
+    extConfigValues = { ...objectValue(currentValues) };
     const scopeLabel =
       extConfigScope === "workspace" ? " (Workspace)" : " (User)";
     deps.titleEl.textContent = `Configure: ${displayName || extId}${scopeLabel}`;
     deps.formEl.innerHTML = "";
 
-    const props: ExtConfigSchema = schema?.properties || schema || {};
+    const props = configProperties(schema);
     const propKeys = Object.keys(props);
     if (!propKeys.length) {
       const msg = document.createElement("div");
@@ -373,7 +374,7 @@ export function createSettingsConfigModalController(deps: any) {
               ? prop.default
               : {};
           const enumMenuOptions: ExtConfigMenuOption[] = enumOptions.map(
-            (opt: any, index: number) => ({
+            (opt: unknown, index: number) => ({
               id: `enum:${index}`,
               label: formatConfigValue(opt),
               value: opt,
@@ -383,7 +384,7 @@ export function createSettingsConfigModalController(deps: any) {
             id: "__json_object__",
             label: "Custom JSON object",
           });
-          const enumMatchIndex = enumOptions.findIndex((opt: any) =>
+          const enumMatchIndex = enumOptions.findIndex((opt: unknown) =>
             sameConfigValue(curVal, opt),
           );
           const initialSelection =
@@ -434,12 +435,12 @@ export function createSettingsConfigModalController(deps: any) {
           syncMixedEditor(false);
           fieldRow.appendChild(picker.element);
           fieldRow.appendChild(jsonEditor.element);
-        } else if (prop.enum && Array.isArray(prop.enum)) {
+        } else if (prop.enum && isUnknownArray(prop.enum)) {
           const wrap = document.createElement("div");
           wrap.style.display = "flex";
           wrap.style.flexDirection = "column";
           wrap.style.gap = "4px";
-          prop.enum.forEach((opt: any) => {
+          prop.enum.forEach((opt: unknown) => {
             const optLabel = document.createElement("label");
             optLabel.style.display = "flex";
             optLabel.style.alignItems = "center";
@@ -492,16 +493,17 @@ export function createSettingsConfigModalController(deps: any) {
           const itemType = itemSchema.type || "string";
 
           // Normalize current value to a proper JS array
-          let arr: any[] = [];
-          if (Array.isArray(curVal)) {
+          let arr: unknown[] = [];
+          if (isUnknownArray(curVal)) {
             arr = curVal.slice();
           } else if (typeof curVal === "string" && curVal.trim()) {
             try {
-              const p = JSON.parse(curVal);
-              if (Array.isArray(p)) arr = p;
+              const p: unknown = JSON.parse(curVal);
+              if (isUnknownArray(p)) arr = p;
             } catch (_) {}
           }
-          extConfigValues[key] = arr.slice();
+          const arrayValues = arr.slice();
+          extConfigValues[key] = arrayValues;
 
           const arrayContainer = document.createElement("div");
           arrayContainer.className = "ext-cfg-array";
@@ -511,13 +513,13 @@ export function createSettingsConfigModalController(deps: any) {
 
           let activeEdit: { cancel: () => void } | null = null;
 
-          function itemToStr(val: any): string {
+          function itemToStr(val: unknown): string {
             if (val == null) return "";
             if (typeof val === "object") return JSON.stringify(val);
             return String(val);
           }
 
-          function parseItem(raw: string): any {
+          function parseItem(raw: string): unknown {
             const s = raw.trim();
             if (itemType === "number" || itemType === "integer") {
               const n = Number(s);
@@ -539,7 +541,7 @@ export function createSettingsConfigModalController(deps: any) {
 
             const valSpan = document.createElement("span");
             valSpan.className = "ext-cfg-array-val";
-            valSpan.textContent = itemToStr(extConfigValues[key][idx]);
+            valSpan.textContent = itemToStr(arrayValues[idx]);
             row.appendChild(valSpan);
 
             const acts = document.createElement("span");
@@ -562,7 +564,7 @@ export function createSettingsConfigModalController(deps: any) {
             delBtn.title = "Remove";
             delBtn.addEventListener("click", () => {
               if (activeEdit) activeEdit.cancel();
-              extConfigValues[key].splice(idx, 1);
+              arrayValues.splice(idx, 1);
               rebuild();
             });
 
@@ -579,14 +581,14 @@ export function createSettingsConfigModalController(deps: any) {
             const input = document.createElement("input");
             input.type = "text";
             input.className = "lsp-rootrel-input ext-cfg-arr-input";
-            input.value = itemToStr(extConfigValues[key][idx]);
+            input.value = itemToStr(arrayValues[idx]);
 
             const acts = document.createElement("span");
             acts.className = "ext-cfg-array-acts";
 
             const doConfirm = () => {
               const v = input.value.trim();
-              if (v) extConfigValues[key][idx] = parseItem(v);
+              if (v) arrayValues[idx] = parseItem(v);
               activeEdit = null;
               rebuild();
             };
@@ -630,7 +632,7 @@ export function createSettingsConfigModalController(deps: any) {
 
           function rebuild() {
             rowsEl.innerHTML = "";
-            (extConfigValues[key] as any[]).forEach((_, i) => {
+            arrayValues.forEach((_, i) => {
               rowsEl.appendChild(buildRow(i));
             });
           }
@@ -657,7 +659,7 @@ export function createSettingsConfigModalController(deps: any) {
 
             const doAdd = () => {
               const v = input.value.trim();
-              if (v) extConfigValues[key].push(parseItem(v));
+              if (v) arrayValues.push(parseItem(v));
               activeEdit = null;
               addRow.remove();
               addBtn.style.display = "";
@@ -748,7 +750,7 @@ export function createSettingsConfigModalController(deps: any) {
           // Workspace scope: merge changed keys into .vscode/settings.json
           let wsSettings: ExtConfigValues = {};
           try {
-            const getRes = await deps.busRequest(
+            const getRes = await busRequest(
               EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet,
               {},
               5000,
@@ -761,14 +763,14 @@ export function createSettingsConfigModalController(deps: any) {
               v === undefined ||
               v === null ||
               v === "" ||
-              (Array.isArray(v) && v.length === 0)
+              (isUnknownArray(v) && v.length === 0)
             ) {
               delete wsSettings[k];
             } else {
               wsSettings[k] = v;
             }
           }
-          const res = await deps.busRequest(
+          const res = await busRequest(
             EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsSet,
             {
               settings: wsSettings,
@@ -784,7 +786,7 @@ export function createSettingsConfigModalController(deps: any) {
           }
         } else {
           // User scope: write schema values into the shared User settings map.
-          const res = await deps.busRequest(
+          const res = await busRequest(
             EXPLORER_RPC_METHODS.extensionsConfigure,
             {
               ext_id: extConfigExtId,

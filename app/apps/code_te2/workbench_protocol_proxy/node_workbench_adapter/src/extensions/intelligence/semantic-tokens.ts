@@ -1,8 +1,9 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import {
   semanticTextFingerprint,
   type SemanticProjectionDocument,
   type SemanticProjectionFullResult,
-} from "./semantic-token-projections.mjs";
+} from "./semantic-token-projections.ts";
 import type { ProviderDocument } from "../provider-registry";
 
 export interface SemanticPendingOptions {
@@ -121,7 +122,7 @@ interface SemanticSyncCacheEntry {
 const semanticSyncByPath = new Map<string, SemanticSyncCacheEntry>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -231,7 +232,7 @@ async function syncTextIfProvided(
 }
 
 function toNumberArray(value: unknown): number[] {
-  if (Array.isArray(value)) {
+  if (isUnknownArray(value)) {
     return value.map((item) => numberFrom(item));
   }
   if (ArrayBuffer.isView(value)) {
@@ -259,7 +260,7 @@ export function parseSemanticTokensDto(dto: unknown): SemanticParsedResult {
   if (field(dto, "type") === 2 || field(dto, "edits") || field(dto, "deltas")) {
     const rawEdits = field(dto, "deltas") ?? field(dto, "edits");
     const edits: SemanticParsedDeltaEdit[] = [];
-    if (Array.isArray(rawEdits)) {
+    if (isUnknownArray(rawEdits)) {
       for (const edit of rawEdits) {
         const normalized: SemanticParsedDeltaEdit = {
           start: numberFrom(field(edit, "start")),

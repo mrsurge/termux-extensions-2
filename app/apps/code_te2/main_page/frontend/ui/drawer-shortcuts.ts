@@ -1,27 +1,27 @@
 
-/**
- * @param {{
- *   bindMenuToggle: (el: Element, handler: Function) => void,
- *   requireEl: (selector: string) => HTMLElement,
- *   consoleDrawer: { show: Function, hide: Function },
- *   mobileSecondEditor?: { show: Function, hide: Function },
- *   extensionActivityPanel: { show: Function, hide: Function },
- *   codeInspectorPanel: { show: Function, hide: Function },
- *   toggleTerminal: () => void,
- *   openDrawer: () => void,
- *   closeDrawer: () => void,
- *   isDrawerOpen: () => boolean,
- *   activateTerminal: () => Promise<void>,
- *   setFontScale: (preset: 'small'|'medium'|'large') => void,
- *   triggerEditorSearchPanel: (reason?: string, opts?: any) => Promise<any>,
- *   hostToast: (msg: string) => void,
- *   jumpToCurrentFileLine: (line: number) => Promise<any>,
- *   saveFile: () => void,
- *   resetToNewFile: () => void,
- *   openPickedFile: () => void
- * }} deps
- */
-export function initDrawerAndShortcuts(deps: any) {
+import { recordValue } from '../../../src/rpc/value-types.ts';
+
+interface Dependencies {  bindMenuToggle: (el: HTMLElement, handler: () => void) => void,
+  requireEl: (selector: string) => HTMLElement,
+  consoleDrawer: { show: () => void, hide: () => void },
+  mobileSecondEditor?: { show: () => void, hide: () => void },
+  extensionActivityPanel: { show: () => void, hide: () => void },
+  codeInspectorPanel: { show: () => void, hide: () => void },
+  toggleTerminal: () => void,
+  openDrawer: () => void,
+  closeDrawer: () => void,
+  isDrawerOpen: () => boolean,
+  activateTerminal: () => Promise<void>,
+  setFontScale: (preset: 'small'|'medium'|'large') => void,
+  triggerEditorSearchPanel: (reason?: string, opts?: { replace?: boolean }) => Promise<unknown>,
+  hostToast: (msg: string) => void,
+  jumpToCurrentFileLine: (line: number) => Promise<unknown>,
+  saveFile: () => void,
+  resetToNewFile: () => void,
+  openPickedFile: () => void
+}
+
+export function initDrawerAndShortcuts(deps: Dependencies) {
   {
     const tabBar = document.querySelector<HTMLElement>('.drawer-tab-bar');
     const terminalHeader = document.querySelector<HTMLElement>('.terminal-header');
@@ -101,7 +101,7 @@ export function initDrawerAndShortcuts(deps: any) {
       if (tab) activateTab(tab, true);
     });
     document.addEventListener('te2:drawer-visibility-changed', (event) => {
-      const detail = event instanceof CustomEvent ? event.detail : null;
+      const detail = event instanceof CustomEvent ? recordValue(event.detail) : {};
       syncStatusToggle(detail?.open === true);
     });
     syncStatusToggle();

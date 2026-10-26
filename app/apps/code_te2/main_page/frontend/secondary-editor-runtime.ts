@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 import { bootInlineEditorHost } from '../../monaco_editor/inline_host.ts';
 import { bootHistoricalDiff, type HistoricalEditorView } from '../../monaco_editor/historical_monaco_boot.ts';
 import { SecondaryContentLifecycle } from './secondary-content-lifecycle.ts';
@@ -356,12 +357,12 @@ function createPresentationBridge(): SecondaryPresentationBridge {
       }, origin);
     },
     onCommand(listener) {
-      const onMessage = (event: MessageEvent): void => {
+      const onMessage = (event: MessageEvent<unknown>): void => {
         if (event.source !== window.parent || event.origin !== origin) return;
         const data = asRecord(event.data);
         if (data.channel !== 'te2.secondaryEditor.command') return;
         const command = data.command;
-        if (!command || typeof command !== 'object' || Array.isArray(command)) return;
+        if (!command || typeof command !== 'object' || isUnknownArray(command)) return;
         listener(command as SecondaryCommand);
       };
       window.addEventListener('message', onMessage);
@@ -371,7 +372,7 @@ function createPresentationBridge(): SecondaryPresentationBridge {
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : {};
 }
@@ -803,13 +804,13 @@ export async function bootSecondaryEditorRuntime(
         secondaryContent: params.secondaryContent,
       }).then(() => {
         if (shouldClosePresentation) void setMode('closed');
-      }).catch((error) => setStatus(`Content unavailable: ${errorMessage(error)}`));
+      }).catch((error: unknown) => setStatus(`Content unavailable: ${errorMessage(error)}`));
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
       setStatus('Switching project…');
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitched) {
       void requestHostState().then(() => {
         if (!contentLifecycle.historical) setStatus('');
-      }).catch((error) => {
+      }).catch((error: unknown) => {
         console.warn('[second_editor] project state refresh failed', error);
       });
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorNotify) {
@@ -826,7 +827,7 @@ export async function bootSecondaryEditorRuntime(
     ensureSocketIoLoaded,
     onConnect: () => {
       if (bootComplete) historicalView?.updatePreferences(historicalPreferences, true);
-      if (bootComplete) void requestHostState().catch((error) => {
+      if (bootComplete) void requestHostState().catch((error: unknown) => {
         setStatus(`State unavailable: ${errorMessage(error)}`);
       });
     },
@@ -844,7 +845,7 @@ export async function bootSecondaryEditorRuntime(
       if (command.type === 'open' && command.requestId) {
         presentationBridge.publishOpenResult(command.requestId, true, command.path);
       }
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       const message = errorMessage(error);
       if ((command.type === 'open' || command.type === 'history') && command.requestId) {
         presentationBridge.publishOpenResult(command.requestId, false, currentPath, message);
@@ -872,7 +873,7 @@ export async function bootSecondaryEditorRuntime(
       UI_IPC_RPC_METHODS.hostEditorIssuesCommand,
       { action: 'next' },
       8_000,
-    ).catch((error) => {
+    ).catch((error: unknown) => {
       console.warn('[second_editor] issue navigation failed', error);
     });
   });
@@ -890,8 +891,8 @@ export async function bootSecondaryEditorRuntime(
     if (action === 'save') void save();
     else if (action === 'save-as') void saveAs();
     else if (action === 'discard') void discardDraft();
-    else if (action === 'history-find') void historicalView?.find().catch((error) => host.toast(errorMessage(error)));
-    else if (action === 'history-copy') void historicalView?.copy().catch((error) => host.toast(errorMessage(error)));
+    else if (action === 'history-find') void historicalView?.find().catch((error: unknown) => host.toast(errorMessage(error)));
+    else if (action === 'history-copy') void historicalView?.copy().catch((error: unknown) => host.toast(errorMessage(error)));
   });
   root.querySelector('.te2-secondary-editor-close')?.addEventListener('click', () => {
     void closeSecondaryEditor();

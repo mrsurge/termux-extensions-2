@@ -19,16 +19,57 @@
 //
 // The bridge is idempotent — calling initConsoleBridge() twice is safe.
 
-const LEVELS = ['log', 'info', 'warn', 'error', 'debug'];
+import { objectValue } from './ui/settings-contracts.ts';
+
+type ConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+interface BridgeSocket {
+  connected?: boolean;
+  emit(event: string, payload: Record<string, unknown>): void;
+  on(event: string, handler: (payload: unknown) => void): void;
+  off?(event: string, handler: (payload: unknown) => void): void;
+  disconnect?(): void;
+  volatile?: { emit(event: string, payload: Record<string, unknown>): void };
+}
+interface BridgeOptions {
+  socket?: BridgeSocket;
+  workerId?: string;
+  workerLabel?: string;
+  uniquePerWindow?: boolean;
+  workerIdPrefix?: string;
+  workerOwnerLength?: number;
+  baseUrl?: string;
+  socketPath?: string;
+  namespace?: string;
+  forwardLogs?: boolean;
+  qualifiedIdentity?: boolean;
+  clientInstanceId?: string;
+  prepare?: () => Promise<unknown>;
+}
+interface BridgeHandle {
+  socket: BridgeSocket | null;
+  workerId: string | null;
+  destroy: () => void;
+}
+declare global {
+  interface Window {
+    __te2BuiltinConsoleEnabled?: boolean;
+    te2DebugConsole?: {
+      enable(): Promise<BridgeHandle | null>;
+      disable(): void;
+      status: typeof getConsoleBridgeStatus;
+    };
+  }
+}
+const LEVELS: ConsoleLevel[] = ['log', 'info', 'warn', 'error', 'debug'];
 let _bridgeActive = false;
-let _bridgeSocket = null;
-let _workerId = null;
-let _workerLabel = null;
-let _originals = {};
-let _pendingEvals = new Map();
+let _bridgeSocket: BridgeSocket | null = null;
+let _workerId: string | null = null;
+let _workerLabel: string | null = null;
+let _originals: Partial<Record<ConsoleLevel, (...args: unknown[]) => void>> = {};
+const _pendingEvals = new Map<string, { timeoutHandle: ReturnType<typeof setTimeout>; reject: (reason: Error) => void }>();
 let _ownsSocket = false;
-let _socketHandlers = {};
-let _windowHandlers = {};
+let _socketHandlers: Partial<Record<'eval' | 'evalCancel' | 'registered' | 'connect' | 'disconnect', (payload: unknown) => void>> = {};
+let _windowHandlers: { error?: (event: ErrorEvent) => void; unhandledrejection?: (event: PromiseRejectionEvent) => void } = {};
 let _logsForwarded = false;
 
 export function getConsoleBridgeStatus() {
@@ -49,9 +90,9 @@ function _emitBridgeStatus() {
   } catch (_) {}
 }
 
-function _safeSerialize(x) {
+function _safeSerialize(x: unknown) {
   const seen = new WeakSet();
-  return JSON.stringify(x, (_k, v) => {
+  return JSON.stringify(x, (_k: string, v: unknown) => {
     if (typeof v === 'bigint') return `BigInt(${v.toString()})`;
     if (v instanceof Error) return { name: v.name, message: v.message, stack: v.stack };
     if (typeof v === 'object' && v !== null) {
@@ -62,9 +103,9 @@ function _safeSerialize(x) {
   });
 }
 
-function _serializeArg(a) {
+function _serializeArg(a: unknown): unknown {
   if (a === undefined) return null;
-  try { return JSON.parse(_safeSerialize(a)); }
+  try { const encoded = _safeSerialize(a); return encoded === undefined ? String(a) : JSON.parse(encoded) as unknown; }
   catch { return String(a); }
 }
 
@@ -82,13 +123,13 @@ function _randomWorkerSuffix(length = 8) {
   return suffix;
 }
 
-function _sanitizeWorkerLabel(value) {
+function _sanitizeWorkerLabel(value: string) {
   const raw = String(value || '').trim();
   const normalized = raw.replace(/[^a-zA-Z0-9._:-]+/g, '_').replace(/^_+|_+$/g, '');
   return normalized || 'worker';
 }
 
-function _socketEndpoint(baseUrl, namespace) {
+function _socketEndpoint(baseUrl?: string, namespace?: string) {
   const normalizedNamespace = String(namespace || '/te2_console').startsWith('/')
     ? String(namespace || '/te2_console')
     : `/${String(namespace || '/te2_console')}`;
@@ -96,7 +137,7 @@ function _socketEndpoint(baseUrl, namespace) {
   return normalizedBase ? `${normalizedBase}${normalizedNamespace}` : normalizedNamespace;
 }
 
-function _perWindowWorkerId(label, prefix = '', ownerLength = 8) {
+function _perWindowWorkerId(label: string, prefix = '', ownerLength = 8) {
   const configuredPrefix = String(prefix || '').trim();
   const base = _sanitizeWorkerLabel(configuredPrefix || label);
   const size = Math.max(1, Math.min(32, Number(ownerLength) || 8));
@@ -117,7 +158,7 @@ function _perWindowWorkerId(label, prefix = '', ownerLength = 8) {
   }
 }
 
-function _emitLog(level, rawArgs) {
+function _emitLog(level: ConsoleLevel, rawArgs: unknown[]) {
   if (!_logsForwarded || !_bridgeSocket || !_bridgeSocket.connected) return;
   const emitter = _bridgeSocket.volatile && typeof _bridgeSocket.volatile.emit === 'function'
     ? _bridgeSocket.volatile
@@ -133,10 +174,11 @@ function _emitLog(level, rawArgs) {
 
 function _patchConsole() {
   for (const level of LEVELS) {
-    _originals[level] = console[level].bind(console);
-    console[level] = (...args) => {
+    const original: (...args: unknown[]) => void = console[level].bind(console);
+    _originals[level] = original;
+    console[level] = (...args: unknown[]) => {
       try { _emitLog(level, args); } catch (_) { /* never break caller */ }
-      return _originals[level](...args);
+      original(...args);
     };
   }
 }
@@ -152,7 +194,7 @@ function _hookErrors() {
   window.addEventListener('unhandledrejection', _windowHandlers.unhandledrejection);
 }
 
-function _cleanupEval(reqId) {
+function _cleanupEval(reqId: string) {
   const pending = _pendingEvals.get(reqId);
   if (pending) {
     clearTimeout(pending.timeoutHandle);
@@ -162,20 +204,21 @@ function _cleanupEval(reqId) {
 
 function _hookEval() {
   if (!_bridgeSocket) return;
-  _socketHandlers.eval = async ({ reqId, code, timeoutSeconds }) => {
-    const timeoutMs = (timeoutSeconds || 20) * 1000 + 2000;
-    let timeoutHandle;
-    let rejectTimeout;
-    const timeoutPromise = new Promise((_, reject) => {
-      rejectTimeout = reject;
-      timeoutHandle = setTimeout(
+  _socketHandlers.eval = async (payload: unknown) => {
+    const { reqId, code, timeoutSeconds } = objectValue(payload);
+    if (typeof reqId !== 'string' || typeof code !== 'string') return;
+    const socket = _bridgeSocket;
+    if (!socket) return;
+    const timeoutMs = (typeof timeoutSeconds === 'number' && timeoutSeconds > 0 ? timeoutSeconds : 20) * 1000 + 2000;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const timeoutHandle = setTimeout(
         () => reject(new Error('eval_timeout')),
         timeoutMs,
       );
+      _pendingEvals.set(reqId, { timeoutHandle, reject });
     });
-    _pendingEvals.set(reqId, { timeoutHandle, reject: rejectTimeout });
     try {
-      let result;
+      let result: unknown;
       try { result = (0, eval)(code); }
       catch (synErr) {
         if (synErr instanceof SyntaxError) result = (0, eval)('(' + code + ')');
@@ -183,7 +226,7 @@ function _hookEval() {
       }
       const value = await Promise.race([Promise.resolve(result), timeoutPromise]);
       _cleanupEval(reqId);
-      _bridgeSocket.emit('console:evalResult', {
+      socket.emit('console:evalResult', {
         workerId: _workerId,
         reqId,
         ok: true,
@@ -191,10 +234,10 @@ function _hookEval() {
       });
     } catch (err) {
       _cleanupEval(reqId);
-      const errorType = err?.message === 'eval_timeout' ? 'eval_timeout'
-        : err?.message === 'eval_cancelled' ? 'eval_cancelled'
+      const errorType = err instanceof Error && err.message === 'eval_timeout' ? 'eval_timeout'
+        : err instanceof Error && err.message === 'eval_cancelled' ? 'eval_cancelled'
         : undefined;
-      _bridgeSocket.emit('console:evalResult', {
+      socket.emit('console:evalResult', {
         workerId: _workerId,
         reqId,
         ok: false,
@@ -203,7 +246,9 @@ function _hookEval() {
       });
     }
   };
-  _socketHandlers.evalCancel = ({ reqId }) => {
+  _socketHandlers.evalCancel = (payload: unknown) => {
+    const { reqId } = objectValue(payload);
+    if (typeof reqId !== 'string') return;
     const pending = _pendingEvals.get(reqId);
     if (pending) {
       clearTimeout(pending.timeoutHandle);
@@ -234,9 +279,9 @@ function _hookEval() {
 // Built-in callers opt into this policy; the agnostic API below stays unchanged.
 // Registration, identity and eval stay connected; only automatic forwarding is
 // optional. The explicit logging override is page-lifetime only.
-let _builtinOptions = null;
-let _builtinOverride = null;
-let _builtinPromise = null;
+let _builtinOptions: BridgeOptions | null = null;
+let _builtinOverride: boolean | null = null;
+let _builtinPromise: Promise<BridgeHandle | null> | null = null;
 
 function _builtinEnabled() {
   return _builtinOverride ?? (window.__te2BuiltinConsoleEnabled === true);
@@ -246,7 +291,7 @@ function _startBuiltinBridge() {
   if (!_builtinOptions) return Promise.resolve(null);
   if (_builtinPromise) return _builtinPromise;
   const pending = Promise.resolve().then(async () => {
-    await _builtinOptions.prepare?.();
+    await _builtinOptions?.prepare?.();
     return initConsoleBridge({ ..._builtinOptions, forwardLogs: _builtinEnabled() });
   });
   _builtinPromise = pending;
@@ -265,7 +310,7 @@ function _startBuiltinBridge() {
  * @param {object} [opts]
  * @param {() => Promise<void>} [opts.prepare]
  */
-export function initBuiltinConsoleBridge(opts = {}) {
+export function initBuiltinConsoleBridge(opts: BridgeOptions = {}) {
   _builtinOptions = opts;
   window.te2DebugConsole = Object.freeze({
     enable() {
@@ -281,7 +326,7 @@ export function initBuiltinConsoleBridge(opts = {}) {
   return _startBuiltinBridge();
 }
 
-export function initConsoleBridge(opts = {}) {
+export function initConsoleBridge(opts: BridgeOptions = {}): BridgeHandle | null {
   if (_bridgeActive) {
     if (typeof opts.forwardLogs === 'boolean') _setLogForwarding(opts.forwardLogs);
     return { socket: _bridgeSocket, workerId: _workerId, destroy: destroyConsoleBridge };
@@ -311,7 +356,7 @@ export function initConsoleBridge(opts = {}) {
       console.warn('[console_bridge] window.io not available — bridge not started');
       return null;
     }
-    _bridgeSocket = io(_socketEndpoint(opts.baseUrl, opts.namespace), {
+    const candidate = io(_socketEndpoint(opts.baseUrl, opts.namespace), {
       path: opts.socketPath || '/te2_console_ws/socket.io',
       transports: ['websocket'],
       query: {
@@ -321,6 +366,15 @@ export function initConsoleBridge(opts = {}) {
         workerLabel: _workerLabel,
       },
     });
+    if (!candidate || typeof candidate.on !== 'function' || typeof candidate.emit !== 'function') return null;
+    _bridgeSocket = {
+      get connected() { return candidate.connected; },
+      emit: (event, payload) => candidate.emit?.(event, payload),
+      on: (event, handler) => candidate.on?.(event, handler),
+      off: (event, handler) => candidate.off?.(event, handler),
+      disconnect: () => candidate.disconnect?.(),
+      volatile: candidate.volatile,
+    };
     _ownsSocket = true;
   }
 
@@ -335,7 +389,8 @@ export function initConsoleBridge(opts = {}) {
     clientInstanceId: opts.clientInstanceId || query.get('clientInstanceId') || '',
     presentationId: query.get('presentationId') || '',
   };
-  _socketHandlers.registered = (data) => {
+  _socketHandlers.registered = (payload: unknown) => {
+    const data = objectValue(payload);
     if (data?.requestedWorkerId !== requestedWorkerId || typeof data.workerId !== 'string') return;
     _workerId = data.workerId;
     _emitBridgeStatus();
@@ -343,7 +398,7 @@ export function initConsoleBridge(opts = {}) {
   _bridgeSocket.on('console:registered', _socketHandlers.registered);
   // Reconnect uses the original identity, not a retired runtime handle.
   _socketHandlers.connect = () => {
-    _bridgeSocket.emit('console:register', registration);
+    _bridgeSocket?.emit('console:register', registration);
     _emitBridgeStatus();
   };
   _bridgeSocket.on('connect', _socketHandlers.connect);
@@ -374,7 +429,7 @@ export function initConsoleBridge(opts = {}) {
 /**
  * Toggle automatic forwarding without touching registration or eval.
  */
-function _setLogForwarding(enabled) {
+function _setLogForwarding(enabled: boolean) {
   if (enabled === _logsForwarded) return;
   _logsForwarded = enabled;
   if (enabled) {
@@ -385,9 +440,8 @@ function _setLogForwarding(enabled) {
       if (_originals[level]) console[level] = _originals[level];
     }
     _originals = {};
-    for (const [event, handler] of Object.entries(_windowHandlers)) {
-      window.removeEventListener(event, handler);
-    }
+    if (_windowHandlers.error) window.removeEventListener('error', _windowHandlers.error);
+    if (_windowHandlers.unhandledrejection) window.removeEventListener('unhandledrejection', _windowHandlers.unhandledrejection);
     _windowHandlers = {};
   }
   _emitBridgeStatus();

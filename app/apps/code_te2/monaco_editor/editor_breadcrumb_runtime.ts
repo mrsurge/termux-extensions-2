@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { EDITOR_RPC_METHODS } from "./editor_rpc_contract.ts";
 import { renderIcon } from '/static/js/file_icons.js';
 
@@ -32,6 +33,12 @@ interface BreadcrumbEditorLike {
 interface BreadcrumbIconModule {
   ensureLoaded(): void | Promise<unknown>;
   getIcon: (...args: unknown[]) => unknown;
+}
+
+function isBreadcrumbIconModule(value: unknown): value is BreadcrumbIconModule {
+  return value !== null && typeof value === 'object' &&
+    'ensureLoaded' in value && typeof value.ensureLoaded === 'function' &&
+    'getIcon' in value && typeof value.getIcon === 'function';
 }
 
 interface BreadcrumbIconResult {
@@ -149,11 +156,11 @@ function asNumber(value: unknown, fallback: number): number {
 }
 
 function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
+  return isUnknownArray(value) ? (value as T[]) : [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === "object" && !Array.isArray(value)
+  return value != null && typeof value === "object" && !isUnknownArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
@@ -203,16 +210,17 @@ function initBreadcrumbElement(doc: Document): HTMLElement | null {
 }
 
 function loadBreadcrumbIcons(
-  dynamicImportFn: (path: string) => Promise<BreadcrumbIconModule>,
+  dynamicImportFn: (path: string) => Promise<unknown>,
   onLoaded: (getIcon: (...args: unknown[]) => unknown) => void,
   onError?: ((error: unknown) => void) | null,
 ): Promise<void> {
   return dynamicImportFn("/static/js/file_icons.js")
     .then(async (mod) => {
+      if (!isBreadcrumbIconModule(mod)) throw new Error('Invalid breadcrumb icon module');
       await mod.ensureLoaded();
       onLoaded(mod.getIcon);
     })
-    .catch((error) => {
+    .catch((error: unknown) => {
       if (typeof onError === "function") onError(error);
     });
 }
@@ -248,14 +256,14 @@ function unwrapBreadcrumbSymbols(result: unknown): unknown[] {
   if (envelope) {
     symbols = envelope.result ?? envelope.symbols ?? [];
   }
-  return Array.isArray(symbols) ? symbols : [];
+  return isUnknownArray(symbols) ? symbols : [];
 }
 
 function symbolRangeToLineBounds(
   rangeLike: BreadcrumbSymbolRangeLike,
 ): BreadcrumbLineBounds | null {
   if (!rangeLike) return null;
-  if (Array.isArray(rangeLike) && rangeLike.length >= 3) {
+  if (isUnknownArray(rangeLike) && rangeLike.length >= 3) {
     return {
       startLine: Number(rangeLike[0]) + 1,
       endLine: Number(rangeLike[2]) + 1,
@@ -310,7 +318,7 @@ function findBreadcrumbSymbolChain(
   if (typeof line !== "number" || !Number.isFinite(line)) return [];
 
   const chain: BreadcrumbSymbolLike[] = [];
-  let current = Array.isArray(sourceSymbols) ? sourceSymbols : [];
+  let current = isUnknownArray(sourceSymbols) ? sourceSymbols : [];
   while (current.length > 0) {
     let found: BreadcrumbSymbolLike | null = null;
     for (const symbol of current) {
@@ -325,7 +333,7 @@ function findBreadcrumbSymbolChain(
     }
     if (!found) break;
     chain.push(found);
-    current = Array.isArray(found.children) ? found.children : [];
+    current = isUnknownArray(found.children) ? found.children : [];
   }
   return chain;
 }
@@ -398,7 +406,7 @@ function shouldRenderBreadcrumbSymbolChain(
   cursorLine: number | undefined,
 ): boolean {
   return !!(
-    Array.isArray(sourceSymbols) &&
+    isUnknownArray(sourceSymbols) &&
     sourceSymbols.length > 0 &&
     typeof cursorLine === "number" &&
     cursorLine > 0
@@ -410,7 +418,7 @@ function getBreadcrumbSymbolPosition(symRange: BreadcrumbSymbolRangeLike): {
   col: number;
 } {
   if (!symRange) return { line: 1, col: 1 };
-  if (Array.isArray(symRange) && symRange.length >= 2) {
+  if (isUnknownArray(symRange) && symRange.length >= 2) {
     return {
       line: Number(symRange[0]) + 1,
       col: Number(symRange[1]) + 1,
@@ -635,7 +643,7 @@ export function createEditorBreadcrumbRuntime(
     element = initBreadcrumbElement(doc);
     bindEditor();
     loadBreadcrumbIcons(
-      (path: string) => import(path),
+      (path: string): Promise<unknown> => import(path),
       (nextGetIcon: (...args: unknown[]) => unknown) => {
         getIcon = (name: string, theme: Record<string, string>) =>
           nextGetIcon(name, theme);
@@ -742,7 +750,7 @@ export function createEditorBreadcrumbRuntime(
         );
         render(currentCursorLine());
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         if (reason !== "content")
           console.warn("[BC] symbols request failed:", error);
       });

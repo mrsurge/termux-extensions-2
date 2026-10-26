@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 export interface CompletionProviderRegisteredPayload {
   language?: string;
   selector?: unknown;
@@ -14,7 +15,7 @@ interface CompletionProviderRegistrationLike {
 }
 
 function asCompletionProviderRegisteredPayload(value: unknown): CompletionProviderRegisteredPayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as CompletionProviderRegisteredPayload
     : null;
 }
@@ -30,7 +31,7 @@ export function handleCompletionProviderRegistered(
   const handleKey = String(handle).trim();
   if (!handleKey) return;
 
-  const triggerCharacters = Array.isArray(typedData?.triggerCharacters)
+  const triggerCharacters = isUnknownArray(typedData?.triggerCharacters)
     ? typedData!.triggerCharacters.map(String).filter(Boolean)
     : [];
 

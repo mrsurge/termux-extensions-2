@@ -436,6 +436,23 @@ def test_backend_autosave_rebases_typing_during_write_and_delayed_mirror(environ
     asyncio.run(run())
 
 
+def test_commit_lineage_retains_only_eight_recent_ancestors(environment):
+    project = str(environment[0][0])
+    path = str(environment[0][0] / 'lineage.txt')
+    for index in range(12):
+        runtime.record_commit(project, path, f'hash-{index}', f'hash-{index + 1}', 1)
+
+    for index in range(12):
+        base = f'hash-{index}'
+        expected = 'hash-12' if index >= 4 else base
+        assert runtime.rebase_mirror(project, path, base, 'hash-12', 1) == expected
+
+    # An unrelated base starts a fresh lineage rather than adopting old commits.
+    runtime.record_commit(project, path, 'external', 'saved', 1)
+    assert runtime.rebase_mirror(project, path, 'hash-11', 'saved', 1) == 'hash-11'
+    assert runtime.rebase_mirror(project, path, 'external', 'saved', 1) == 'saved'
+
+
 def test_backend_autosave_failure_keeps_draft_and_never_replays(environment):
     async def run():
         projects, _, _, _ = environment

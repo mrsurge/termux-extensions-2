@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import {
   EXPLORER_RPC_METHODS,
   type ExplorerRpcMethod,
@@ -55,7 +56,7 @@ interface ExplorerChromeControllerDeps {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function isProjectChoice(value: unknown): value is ExplorerProjectChoice {

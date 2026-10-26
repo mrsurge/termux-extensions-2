@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -32,7 +33,7 @@ export interface WebviewReconstructionWrite {
 }
 
 function isRecord(value: unknown): value is JsonObject {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function boundedId(value: unknown, label: string): string {
@@ -62,7 +63,7 @@ function revisionNumber(value: unknown): number {
 }
 
 function storageEntries(value: unknown): WebviewStorageEntries {
-  if (!Array.isArray(value))
+  if (!isUnknownArray(value))
     throw new TypeError("webview localStorage must be an entry array");
   if (value.length > MAX_STORAGE_ENTRIES) {
     throw new RangeError(
@@ -71,7 +72,7 @@ function storageEntries(value: unknown): WebviewStorageEntries {
   }
   const entries: WebviewStorageEntries = [];
   for (const item of value) {
-    if (!Array.isArray(item) || item.length !== 2) {
+    if (!isUnknownArray(item) || item.length !== 2) {
       throw new TypeError("webview localStorage entries must be string pairs");
     }
     const key = item[0];

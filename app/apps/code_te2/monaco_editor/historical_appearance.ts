@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import type * as Monaco from '../../../static/vendor/monaco-editor-core/esm/vs/editor/editor.api';
 import { buildMonacoOptionsFromPrefsState } from './editor_monaco_options_utils.ts';
 import { ensureThemeRegistryState } from './editor_theme_registry_state_utils.ts';
@@ -7,7 +8,7 @@ import { monacoThemeName } from './editor_theme_name_utils.ts';
 import type { RequestThemeCatalog } from '../src/theme_catalog.ts';
 
 function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+  return value !== null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown> : {};
 }
 
@@ -71,7 +72,7 @@ export function createHistoricalThemeApplier(
         const response = await fetchTheme(url, refresh ? { cache: 'no-store' } : undefined);
         if (!response.ok) throw new Error(`Historical theme failed: ${response.status}`);
         const value: unknown = await response.json();
-        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid historical theme: ${theme}`);
+        if (!value || typeof value !== 'object' || isUnknownArray(value)) throw new Error(`Invalid historical theme: ${theme}`);
         const json = themeJsonWithUiTheme(value as Record<string, unknown>, entries[resolved]?.uiTheme);
         // The existing converter produces Monaco theme data with opaque rule declarations.
         return vscodeThemeToMonacoTheme(theme, json) as Monaco.editor.IStandaloneThemeData;

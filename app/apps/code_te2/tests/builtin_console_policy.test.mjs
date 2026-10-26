@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
 
 const copies = [
-  new URL('../main_page/frontend/console_bridge.js', import.meta.url),
+  new URL('../main_page/frontend/console_bridge.ts', import.meta.url),
   new URL('../../../static/js/te2_console_bridge.js', import.meta.url),
 ];
 
@@ -29,10 +29,15 @@ test('actual app-shell bootstrap projects only explicit server booleans before a
   }
 });
 
-test('shared and host copies use the identical new policy without changing existing API differences', async () => {
-  const policy = source => source.slice(source.indexOf('// Built-in callers opt into'),
-    source.indexOf('export function initConsoleBridge(opts'));
-  assert.equal(policy(await readFile(copies[0], 'utf8')), policy(await readFile(copies[1], 'utf8')));
+test('shared JS and typed host preserve the same built-in registration and logging policy', async () => {
+  const fixtures = await Promise.all(copies.map(path => fixture(path, false)));
+  for (const f of fixtures) await f.api.initBuiltinConsoleBridge(f.options);
+  const statuses = () => fixtures.map(f => JSON.stringify(f.api.getConsoleBridgeStatus()));
+  assert.equal(...statuses());
+  for (const f of fixtures) await f.window.te2DebugConsole.enable();
+  assert.equal(...statuses());
+  for (const f of fixtures) f.window.te2DebugConsole.disable();
+  assert.equal(...statuses());
 });
 
 async function fixture(path, enabled) {

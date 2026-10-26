@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 import { Window } from "happy-dom";
 
@@ -24,6 +25,121 @@ const RPC = {
   ExtHostWebviewPanels: 121,
   ExtHostWebviewViews: 123,
 };
+
+async function panelHarness(t, options = {}) {
+  const root = await reconstructionStorage(t);
+  const extension = { id: { value: "example.lifecycle" }, location: { scheme: "file", path: root } };
+  const runtime = new WebviewRuntime({
+    reconstructionStoragePath: root, rpcIds: RPC,
+    getExtensions: () => [{ id: "example.lifecycle", extensionLocation: extension.location, icon: "package.png" }],
+    getWorkspaceFolder: () => root, getActiveDocument: () => path.join(root, "source.json"),
+    activateByEvent: async () => {},
+    sendExtAwaitTerminalReply: () => ({ req: 1, promise: Promise.resolve({ type: 7 }) }),
+    sendExt: () => 1, sendExtMixed: () => 1,
+    onLifecycleEvent: () => {}, onClientNotification: () => {}, log: () => {},
+  });
+  runtime.handleMainThreadRequest({ rpcId: RPC.MainThreadWebviewPanels, method: "$createWebviewPanel",
+    args: [extension, "lifecycle-handle", "example.lifecycle", { title: "Lifecycle", webviewOptions: { enableScripts: true, ...options } }, {}] });
+  runtime.handleMainThreadRequest({ rpcId: RPC.MainThreadWebviews, method: "$setHtml",
+    args: ["lifecycle-handle", "<!doctype html><html><head></head><body><script>/* delayed application */</script></body></html>"] });
+  const surface = runtime.snapshot().surfaces[0];
+  const attached = await runtime.attach({ surfaceId: surface.surfaceId, clientInstanceId: "client_browseridentity0001",
+    windowId: "window_browseridentity0001", presentationId: "presentation_inline0001" });
+  return { runtime, root, surface, attached, proof: {
+    surfaceId: surface.surfaceId, clientInstanceId: "client_browseridentity0001", serverEpoch: attached.serverEpoch,
+    surfaceGeneration: attached.surfaceGeneration, htmlRevision: attached.htmlRevision,
+  } };
+}
+
+test("inner document waits for load and fences ready, messages and link clicks by incarnation", async t => {
+  const { runtime, surface, attached } = await panelHarness(t);
+  const html = runtime.document(surface.surfaceId, "http://127.0.0.1:8089", attached.bootstrapToken);
+  const script = /<script data-te2-webview-bridge>([\s\S]*?)<\/script>/.exec(html)[1];
+  const messages = [], events = new Map(), documentEvents = new Map();
+  const window = {
+    parent: { postMessage: value => messages.push(value) }, location: { origin: "null" },
+    addEventListener: (name, listener) => events.set(name, listener),
+    dispatchEvent: event => events.get(event.type)?.(event),
+  };
+  const document = { readyState: "loading", baseURI: "http://127.0.0.1:8089/document", addEventListener: (name, listener) => documentEvents.set(name, listener) };
+  const context = vm.createContext({ window, document, URL, MessageEvent: class { constructor(type, init) { this.type = type; Object.assign(this, init); } } });
+  vm.runInContext(script, context);
+  assert.equal(messages.length, 0, "head injection must not report ready");
+  const received = [];
+  const bridge = events.get("message");
+  events.set("message", event => {
+    if (event.data?.__te2ExtensionWebviewHost) bridge(event);
+    else received.push(event.data);
+  });
+  events.get("load")();
+  assert.equal(messages[0].kind, "ready");
+  assert.equal(messages[0].documentToken, attached.bootstrapToken);
+  const api = window.acquireVsCodeApi();
+  api.postMessage("ready");
+  assert.equal(messages.at(-1).documentToken, attached.bootstrapToken);
+  bridge({ source: window.parent, data: { __te2ExtensionWebviewHost: true, documentToken: "stale", kind: "message", value: { json: "lost" } } });
+  assert.equal(received.length, 0);
+  bridge({ source: window.parent, data: { __te2ExtensionWebviewHost: true, documentToken: attached.bootstrapToken, kind: "message", value: { json: "current" } } });
+  assert.equal(received[0].json, "current");
+  let prevented = 0;
+  const click = (href, overrides = {}) => documentEvents.get("click")({ isTrusted: true, defaultPrevented: false, button: 0,
+    composedPath: () => [{ nodeType: 1, tagName: "A", getAttribute: () => href }], preventDefault: () => prevented++, ...overrides });
+  click("file:///workspace/readme.md#L8");
+  assert.equal(messages.at(-1).kind, "link");
+  assert.equal(prevented, 1);
+  const count = messages.length;
+  click("file:///workspace/readme.md", { defaultPrevented: true });
+  click("file:///workspace/readme.md", { isTrusted: false });
+  click("#heading"); click("https://example.com"); click("javascript:bad()");
+  assert.equal(messages.length, count);
+  click("http://127.0.0.1:8089/api/app/code_te2/services/wba/webview/resource/scope/file/_/workspace/a.py");
+  assert.equal(messages.at(-1).kind, "link");
+});
+
+test("webview file and command links retain owner, revision, URI and permission guards", async t => {
+  const { runtime, root, proof } = await panelHarness(t, { enableCommandUris: ["example.allowed"] });
+  const target = runtime.linkTarget({ ...proof, href: "other%20file.md#L8C3" });
+  assert.equal(target.kind, "file");
+  assert.equal(target.uri.path, path.join(root, "other file.md"));
+  assert.deepEqual(target.options.selection, { startLineNumber: 8, startColumn: 3, endLineNumber: 8, endColumn: 3 });
+  assert.equal(runtime.linkTarget({ ...proof, href: "vscode-remote://localhost/workspace/a.py#L5" }).uri.scheme, "vscode-remote");
+  const runtimeSurface = [...runtime.runtimeSurfaces.values()][0];
+  const mapped = `/api/app/code_te2/services/wba/webview/resource/${runtimeSurface.resourceScopeToken}/file/_${root}/source.json#L3`;
+  assert.equal(runtime.linkTarget({ ...proof, href: mapped }).uri.path, path.join(root, "source.json"));
+  assert.throws(() => runtime.linkTarget({ ...proof, href: mapped.replace(runtimeSurface.resourceScopeToken, "foreign") }), /foreign resource scope/);
+  assert.deepEqual(runtime.linkTarget({ ...proof, href: 'command:example.allowed?%5B%22hello%22%5D' }),
+    { kind: "command", command: "example.allowed", arguments: ["hello"] });
+  for (const bad of [
+    { htmlRevision: -1 }, { serverEpoch: "old" }, { surfaceGeneration: "old" }, { clientInstanceId: "" },
+    { href: "javascript:alert(1)" }, { href: "https://example.com" }, { href: "file://other-host/a.py" },
+    { href: "file:///bad%00path" }, { href: "command:example.denied" }, { href: "command:example.allowed?%7B%7D" },
+  ]) assert.throws(() => runtime.linkTarget({ ...proof, href: "file:///workspace/a.py", ...bad }));
+  runtime.dispose({ surfaceId: proof.surfaceId });
+  assert.throws(() => runtime.linkTarget({ ...proof, href: "file:///workspace/a.py" }));
+});
+
+test("panel ThemeIcons are not files and missing image declarations use the package icon", async t => {
+  const { runtime, root, surface } = await panelHarness(t);
+  await fs.writeFile(path.join(root, "package.png"), "fixture image");
+  runtime.handleMainThreadRequest({ rpcId: RPC.MainThreadWebviewPanels, method: "$setIconPath",
+    args: ["lifecycle-handle", { id: "markdown" }] });
+  assert.equal(runtime.snapshot().surfaces[0].iconId, "markdown");
+  assert.equal(runtime.snapshot().surfaces[0].iconUrl, "");
+  runtime.handleMainThreadRequest({ rpcId: RPC.MainThreadWebviewPanels, method: "$setIconPath",
+    args: ["lifecycle-handle", { dark: { scheme: "file", path: path.join(root, "missing.png") } }] });
+  const projected = runtime.snapshot().surfaces[0];
+  assert.equal(projected.iconId, "");
+  assert.match(projected.iconUrl, /package.png$/);
+  const resource = await runtime.resource(surface.surfaceId, "", "file", "_", path.join(root, "package.png").slice(1));
+  assert.equal(Buffer.from(resource.body).toString(), "fixture image");
+});
+
+test("a document bootstrap cannot serve newer HTML under an older revision receipt", async t => {
+  const { runtime, surface, attached } = await panelHarness(t);
+  runtime.handleMainThreadRequest({ rpcId: RPC.MainThreadWebviews, method: "$setHtml",
+    args: ["lifecycle-handle", "<html><body>newer</body></html>"] });
+  assert.throws(() => runtime.document(surface.surfaceId, "http://127.0.0.1:8089", attached.bootstrapToken), /revision changed/);
+});
 
 async function reconstructionStorage(t) {
   const base =
@@ -366,7 +482,7 @@ test("activity-bar webview contribution resolves lazily per client behind one wo
   assert.match(document, /http:\/\/127\.0\.0\.1:8089/);
   assert.doesNotMatch(document, /icon\.svg%3Frevision/);
   assert.doesNotMatch(document, /https:\/\/\*\.vscode-cdn\.net/);
-  const activityScopeToken = /\/webview\/resource\/([^/]+)\//.exec(
+  const activityScopeToken = /\/webview\/resource\/([0-9a-f-]{36})\//.exec(
     document,
   )?.[1];
   assert.ok(activityScopeToken);
@@ -435,7 +551,7 @@ test("activity-bar webview contribution resolves lazily per client behind one wo
     "http://127.0.0.1:8089",
     panelAttachment.bootstrapToken,
   );
-  const panelScopeToken = /\/webview\/resource\/([^/]+)\//.exec(
+  const panelScopeToken = /\/webview\/resource\/([0-9a-f-]{36})\//.exec(
     panelDocument,
   )?.[1];
   assert.equal(
@@ -799,8 +915,10 @@ test("wrapper preserves its live document across transport resume and reloads on
   const initialFrameWindow = frame.contentWindow;
   initialFrameWindow.__te2LiveDomSentinel = { preserved: true };
   const deliveredToDocument = [];
-  initialFrameWindow.postMessage = (message) =>
+  initialFrameWindow.postMessage = ({ documentToken, ...message }) => {
+    assert.equal(documentToken, new URL(frame.src).searchParams.get("bootstrapToken"));
     deliveredToDocument.push(message);
+  };
   assert.equal(attachResults[0].action, "reload");
   assert.equal(attachResults[0].reason, "initial_attach");
   assert.equal(attachResults[0].bootstrapReplayComplete, true);
@@ -812,10 +930,14 @@ test("wrapper preserves its live document across transport resume and reloads on
     window.dispatchEvent(
       new window.MessageEvent("message", {
         source: frame.contentWindow,
-        data: { __te2ExtensionWebview: true, kind, value },
+        data: { __te2ExtensionWebview: true,
+          documentToken: new URL(frame.src).searchParams.get("bootstrapToken"), kind, value },
       }),
     );
   };
+  window.dispatchEvent(new window.MessageEvent("message", { source: frame.contentWindow,
+    data: { __te2ExtensionWebview: true, documentToken: "old-document", kind: "ready", value: null } }));
+  assert.equal(deliveredToDocument.length, 0, "stale ready must not flush current startup data");
   dispatchFrameMessage("ready", null);
   assert.deepEqual(
     JSON.parse(JSON.stringify(deliveredToDocument)).filter(
@@ -1014,6 +1136,8 @@ test("wrapper preserves its live document across transport resume and reloads on
     runtime.snapshot().surfaces[0].htmlRevision,
   );
   assert.ok(attachResults[3].bootstrapToken);
+  assert.equal(window.document.getElementById("te2-status").hidden, false);
+  dispatchFrameMessage("ready", null);
   assert.equal(window.document.getElementById("te2-status").hidden, true);
 
   socket.connected = false;
@@ -1202,6 +1326,7 @@ test("staggered view activation publishes progress without claiming complete mem
   }));
   runtime.providers.set('fast', {});
   runtime.providers.set('slow', {});
+  assert.equal(runtime.snapshot().membershipComplete, false, 'cold resync cannot prune saved slots');
   const pending = runtime.activatePrimaryViews();
   await waitFor(() => events.length > 0, 'fast view must publish before slow activation finishes');
   assert.equal(events[0].surfaces.length, 1);
@@ -1211,6 +1336,8 @@ test("staggered view activation publishes progress without claiming complete mem
   await pending;
   assert.equal(events.at(-1).surfaces.length, 2);
   assert.equal(events.at(-1).membershipComplete, true);
+  runtime.clear('disconnect');
+  assert.equal(runtime.snapshot().membershipComplete, false, 'a new session must reestablish membership');
 });
 
 for (const boundary of ['activation', 'provider']) {

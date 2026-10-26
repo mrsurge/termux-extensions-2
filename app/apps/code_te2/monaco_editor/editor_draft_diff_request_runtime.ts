@@ -30,7 +30,7 @@ export function createEditorDraftDiffRequestRuntime(deps: EditorDraftDiffRequest
               reason: reason || '',
             },
             { timeoutMs: 12000 },
-          ).catch((error) => {
+          ).catch((error: unknown) => {
             console.warn('[DraftDiff] editor.draftDiff.get failed', error);
           });
         } catch (_) {}

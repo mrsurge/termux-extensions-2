@@ -1,3 +1,4 @@
+import { isUnknownArray } from './src/rpc/value-types.ts';
 // /data/data/com.termux/files/home/mrselect/app/apps/code_te2/main.ts
 // app/apps/code_te2/main.ts
 // Inline Monaco editor integration
@@ -13,7 +14,7 @@ import { installDiagnosticsLatencyProbe } from './src/diagnostics/latency-probe.
 import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
 import { installComparisonStatus } from './main_page/frontend/ui/comparison-status.ts';
 import { createCodeInspectorPanel } from './main_page/frontend/ui/code-inspector.ts';
-import { getConsoleBridgeStatus, initBuiltinConsoleBridge as initConsoleBridge } from './main_page/frontend/console_bridge.js';
+import { getConsoleBridgeStatus, initBuiltinConsoleBridge as initConsoleBridge } from './main_page/frontend/console_bridge.ts';
 import { HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename, formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename, setMenuChecked, FONT_SCALE_PRESETS, requireEl } from './main_page/frontend/core/utils.ts';
 import { createAppContext } from './main_page/frontend/core/app-context.ts';
 import { initVirtualKeyboardAdjustments } from './main_page/frontend/ui/virtual-keyboard.ts';
@@ -96,9 +97,11 @@ interface HostBridge {
 // The shared shell may retain its overlay until this initializer resolves.
 export const managesStartupReveal = true;
 
-interface EditorViewState extends UnknownRecord {
+export interface EditorViewState extends UnknownRecord {
   autoSave?: boolean;
   theme?: string;
+  readOnly?: boolean;
+  cursorStyle?: string;
 }
 
 interface EditorState extends UnknownRecord {
@@ -196,7 +199,7 @@ function _isMobileLayout() {
 }
 
 function asUnknownRecord(value: unknown): UnknownRecord {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as UnknownRecord) : {};
+  return value && typeof value === 'object' && !isUnknownArray(value) ? (value as UnknownRecord) : {};
 }
 
 // ---- host/api contract (injected by framework) ----
@@ -629,7 +632,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   // Preferences are managed by backend; frontend displays state only (no caching)
 
   let editorState: EditorState | null = null;
-  let branchMenuHandle: unknown = null;
+  let branchMenuHandle: { close(): void } | null = null;
   function buildSidebarMentionPayload(payload: UnknownRecord): UnknownRecord {
     const target = sidebarShortcuts?.getMentionTarget?.();
     if (!target) {
@@ -840,7 +843,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         // its existing DOM z-index can receive the initial pointer event.
         width: Math.max(0, rect.width - sidebarResizeOverlap),
         height: rect.height,
-      }, visible).catch((error) => {
+      }, visible).catch((error: unknown) => {
         console.warn('[second_editor] native placement failed', error);
       });
     };
@@ -1325,7 +1328,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   // Watcher UI
-  initWatcherUI(appContext);
+  initWatcherUI({ host });
 
   sidebarShortcuts = initSidebarShortcutsSafe({
     initSidebarShortcuts,
@@ -1608,7 +1611,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     requestBackendLanguageBackendSet: (payload?: UnknownRecord) => uiIpcConnections.requestBackendLanguageBackendSet(payload),
     spinnerSetStep: (title: string, failed?: boolean) => hostStateRuntime.spinnerSetStep(title, failed),
     initBranchMenu,
-    setBranchMenuHandle: (handle: unknown) => {
+    setBranchMenuHandle: (handle) => {
       branchMenuHandle = handle;
     },
     waitForInitialUiPrefs: (ms?: number) => hostUiPrefsRuntime.waitForInitialUiPrefs(ms),

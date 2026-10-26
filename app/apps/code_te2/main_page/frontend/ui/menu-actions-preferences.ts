@@ -1,27 +1,26 @@
 // @ts-check
+import type { EditorViewState } from '../../../main.ts';
 
-/**
- * @param {{
- *   bindMenuToggle: (el: HTMLElement, action: () => any) => void,
- *   els: {
- *     miToggleLines: HTMLElement,
- *     miToggleShading: HTMLElement,
- *     miToggleIndentGuides: HTMLElement,
- *     miToggleSyntax: HTMLElement,
- *     miToggleCloseBrackets: HTMLElement,
- *     miToggleAutocomplete: HTMLElement,
- *     miToggleInlayHints: HTMLElement,
- *     miToggleWrap: HTMLElement,
- *     miToggleColorPicker: HTMLElement,
- *     miToggleMinimap: HTMLElement,
- *     miToggleStickyScroll: HTMLElement,
- *   },
- *   getEditorViewState: () => any,
- *   updatePreference: (key: string, value: any) => Promise<boolean>,
- *   toast: (msg: string) => void,
- * }} deps
- */
-export function installSimplePreferenceMenuActions(deps: any) {
+interface Dependencies {  bindMenuToggle: (el: HTMLElement, action: () => unknown) => void,
+  els: {
+    miToggleLines: HTMLElement,
+    miToggleShading: HTMLElement,
+    miToggleIndentGuides: HTMLElement,
+    miToggleSyntax: HTMLElement,
+    miToggleCloseBrackets: HTMLElement,
+    miToggleAutocomplete: HTMLElement,
+    miToggleInlayHints: HTMLElement,
+    miToggleWrap: HTMLElement,
+    miToggleColorPicker: HTMLElement,
+    miToggleMinimap: HTMLElement,
+    miToggleStickyScroll: HTMLElement,
+  },
+  getEditorViewState: () => EditorViewState | null,
+  updatePreference: (key: string, value: unknown) => Promise<boolean>,
+  toast: (msg: string) => void,
+}
+
+export function installSimplePreferenceMenuActions(deps: Dependencies) {
   const t = deps.bindMenuToggle;
   const s = () => deps.getEditorViewState();
 

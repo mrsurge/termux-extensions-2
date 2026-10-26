@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import {
   firstDiffLine,
   formatDiffBaseLabel,
@@ -62,7 +63,7 @@ interface ExplorerChangesResultsRendererDeps {
 }
 
 function normalizeChangesPayload(data: unknown): ExplorerChangesPayload {
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
+  if (data && typeof data === 'object' && !isUnknownArray(data)) {
     return data as ExplorerChangesPayload;
   }
   return {};
@@ -123,7 +124,7 @@ export function createExplorerChangesResultsRenderer(
     const hunksOnly = readCheckboxValue('fe-changes-filter-hunks');
     const query = readInputValue('fe-changes-filter-input').toLowerCase();
 
-    let entries = Array.isArray(lastChangesData.changes)
+    let entries = isUnknownArray(lastChangesData.changes)
       ? lastChangesData.changes
       : [];
 
@@ -134,9 +135,9 @@ export function createExplorerChangesResultsRenderer(
           const nextChange: ExplorerChangeEntry = { ...change };
 
           if (hunksOnly) {
-            const matchingHunks = (Array.isArray(change.hunks) ? change.hunks : []).filter(
+            const matchingHunks = (isUnknownArray(change.hunks) ? change.hunks : []).filter(
               (hunk) =>
-                (Array.isArray(hunk.lines) ? hunk.lines : []).some((line) =>
+                (isUnknownArray(hunk.lines) ? hunk.lines : []).some((line) =>
                   (line.text || '').toLowerCase().includes(query),
                 ),
             );
@@ -155,9 +156,9 @@ export function createExplorerChangesResultsRenderer(
           if (filenameMatch) return nextChange;
 
           if (!filenameOnly) {
-            const hunks = Array.isArray(change.hunks) ? change.hunks : [];
+            const hunks = isUnknownArray(change.hunks) ? change.hunks : [];
             for (const hunk of hunks) {
-              const lines = Array.isArray(hunk.lines) ? hunk.lines : [];
+              const lines = isUnknownArray(hunk.lines) ? hunk.lines : [];
               for (const line of lines) {
                 if ((line.text || '').toLowerCase().includes(query)) {
                   return nextChange;
@@ -171,7 +172,7 @@ export function createExplorerChangesResultsRenderer(
         .filter((entry): entry is ExplorerChangeEntry => entry !== null);
     }
 
-    const originalEntries = Array.isArray(lastChangesData.changes)
+    const originalEntries = isUnknownArray(lastChangesData.changes)
       ? lastChangesData.changes
       : [];
     renderChangesList(
@@ -195,7 +196,7 @@ export function createExplorerChangesResultsRenderer(
       return;
     }
 
-    const entries = Array.isArray(data.changes) ? data.changes : [];
+    const entries = isUnknownArray(data.changes) ? data.changes : [];
     const baseInfo = data.base || deps.getGitDiffBase();
     const headView = (): boolean => (baseInfo.ref || 'HEAD') === 'HEAD' &&
       (deps.getGitDiffBase().ref || 'HEAD') === 'HEAD';
@@ -397,7 +398,7 @@ export function createExplorerChangesResultsRenderer(
       staging.className = 'fe-search-change-staging';
       staging.hidden = true;
       meta.appendChild(staging);
-      const hunks = Array.isArray(change.hunks) ? change.hunks : [];
+      const hunks = isUnknownArray(change.hunks) ? change.hunks : [];
       const stats = changeStatistics(change);
       const { added, deleted } = stats || { added: 0, deleted: 0 };
       for (const [kind, count, sign] of [['added', added, '+'], ['deleted', deleted, '-']] as const) {
@@ -528,7 +529,7 @@ export function createExplorerChangesResultsRenderer(
           let oldLine = typeof hunk.oldStart === 'number' ? hunk.oldStart : 0;
           let newLine = typeof hunk.newStart === 'number' ? hunk.newStart : 0;
 
-          const lines = Array.isArray(hunk.lines) ? hunk.lines : [];
+          const lines = isUnknownArray(hunk.lines) ? hunk.lines : [];
           lines.forEach((line, index) => {
             const row = document.createElement('div');
             row.className = 'fe-search-diff-row';

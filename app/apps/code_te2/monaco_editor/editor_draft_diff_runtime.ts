@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface MonacoRangeCtorLike {
   new (startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number): unknown;
 }
@@ -100,7 +101,7 @@ function asNumber(value: unknown, fallback: number): number {
 }
 
 function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? value as T[] : [];
+  return isUnknownArray(value) ? value as T[] : [];
 }
 
 function normalizeDeletedText(value: string): string {

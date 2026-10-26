@@ -1,6 +1,7 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import type { ProviderDocument } from "../provider-registry";
-import { completionTrace } from "../../server/runtime-debug.mjs";
-import { completionTimeouts } from "../../protocol/completion-timeouts.mjs";
+import { completionTrace } from "../../server/runtime-debug.ts";
+import { completionTimeouts } from "../../protocol/completion-timeouts.ts";
 
 export interface CompletionPendingOptions {
   timeoutMs: number;
@@ -59,7 +60,7 @@ interface CompletionSyncCacheEntry {
 const completionSyncByPath = new Map<string, CompletionSyncCacheEntry>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {

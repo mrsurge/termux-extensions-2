@@ -13,6 +13,38 @@ const ELECTRON_SECONDARY = "client_222222222222";
 const MOBILE_PRIMARY = "client_333333333333";
 const MOBILE_SECONDARY = "client_444444444444";
 
+test("webview file-link dispatch uses the requesting client facade and existing navigation owner", async () => {
+  const { client, root, mainPath, painPath } = await createHarness();
+  try {
+    await open(client, ELECTRON_PRIMARY, mainPath, "link_a", 1);
+    await open(client, MOBILE_PRIMARY, painPath, "link_b", 1);
+    const runtime = client._webviews;
+    runtime.handleMainThreadRequest({ rpcId: 45, method: "$createWebviewPanel", args: [
+      { id: { value: "example.links" }, location: { scheme: "file", path: root } },
+      "link-panel", "example.links", { title: "Link", webviewOptions: {} }, {},
+    ] });
+    const surface = runtime.snapshot().surfaces[0];
+    const attached = await runtime.attach({ surfaceId: surface.surfaceId, clientInstanceId: ELECTRON_PRIMARY,
+      windowId: "window_browseridentity0001", presentationId: "presentation_links" });
+    const seen = [];
+    client._extensionEditorNavigation.openFromWorkbenchCommand = async (uri, options) => {
+      seen.push({ uri, options, client: client._projectedClientInstanceId });
+      return { ok: true };
+    };
+    const result = await client.webviewOpenLink({ surfaceId: surface.surfaceId, clientInstanceId: ELECTRON_PRIMARY,
+      serverEpoch: attached.serverEpoch, surfaceGeneration: attached.surfaceGeneration,
+      htmlRevision: attached.htmlRevision, href: `file://${mainPath}#L2C1` });
+    assert.deepEqual(result, { ok: true });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].client, ELECTRON_PRIMARY);
+    assert.equal(seen[0].uri.path, mainPath);
+    assert.equal(seen[0].options.selection.startLineNumber, 2);
+  } finally {
+    client._resetSessionCaches("test_cleanup");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("editor property deltas preserve client, generation, ranges, selections and options", async () => {
   const { client, calls, root, mainPath, painPath } = await createHarness();
   try {

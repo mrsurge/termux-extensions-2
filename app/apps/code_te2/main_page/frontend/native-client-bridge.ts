@@ -1,3 +1,5 @@
+import { recordValue } from '../../src/rpc/value-types.ts';
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 import { generateUuid } from './uuid.ts';
 
 export type AndroidNativeRenderer = "gecko" | "cefrium";
@@ -49,7 +51,7 @@ export function requestCefriumNative(
       onSuccess(response: string): void {
         try {
           const result: unknown = JSON.parse(response);
-          if (!result || typeof result !== "object" || Array.isArray(result)) {
+          if (!result || typeof result !== "object" || isUnknownArray(result)) {
             throw new Error("Cefrium native bridge returned an invalid response");
           }
           const record = result as Record<string, unknown>;
@@ -76,9 +78,9 @@ function requestGeckoSidebarPresentation(
       window.removeEventListener("message", onMessage);
       reject(new Error("Gecko Sidebar presentation bridge timed out"));
     }, 10_000);
-    function onMessage(event: MessageEvent): void {
+    function onMessage(event: MessageEvent<unknown>): void {
       if (event.source !== window || event.origin !== window.location.origin) return;
-      const data = event.data;
+      const data = recordValue(event.data);
       if (
         !data ||
         data.channel !== GECKO_NATIVE_PRESENTATION_RESPONSE ||
@@ -88,7 +90,7 @@ function requestGeckoSidebarPresentation(
       }
       window.clearTimeout(timeout);
       window.removeEventListener("message", onMessage);
-      const result = data.result;
+      const result = recordValue(data.result);
       if (!result || typeof result !== "object" || result.ok !== true) {
         reject(
           new Error(

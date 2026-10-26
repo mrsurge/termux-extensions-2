@@ -1,3 +1,5 @@
+import { shortcutPreferences } from './preference-values.ts';
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 // app/apps/code_te2/main_page/frontend/sidebar-shortcuts/runtime.ts
 // Sidebar app-window/plain-entry iframe stack orchestration (kept out of main.js).
 //
@@ -9,6 +11,7 @@
 
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import { generateUuid } from '../uuid.ts';
+import { extensionSurfaceReady } from './surface-readiness.ts';
 import { applySidebarWindowIdentity, readSidebarWindowIdentity, type SidebarWindowIdentity } from './qualified-identity.ts';
 import { bindDockOverflowScroll } from "./dock-scroll.ts";
 import { DockedSelection, bindDockedFocus } from "./docked-selection.ts";
@@ -453,11 +456,11 @@ export function initSidebarShortcuts(
 
   async function _ensureAppsCache(force: boolean = false) {
     _setFrameworkEventsEnabled(true);
-    if (!force && Array.isArray(_appsCache)) {
+    if (!force && isUnknownArray(_appsCache)) {
       return _appsCache;
     }
     await _ensureAppsStateReady();
-    return Array.isArray(_appsCache) ? _appsCache : [];
+    return isUnknownArray(_appsCache) ? _appsCache : [];
   }
 
   async function _ensureRunningCache(force: boolean = false) {
@@ -541,10 +544,10 @@ export function initSidebarShortcuts(
     const payload = shellPayload(evt);
 
     if (type === "apps_snapshot" || type === "catalog_snapshot") {
-      const catalog = Array.isArray(payload?.catalog)
+      const catalog = isUnknownArray(payload?.catalog)
         ? (payload.catalog as FrameworkAppManifest[])
         : [];
-      const runningIds = Array.isArray(payload?.running_ids)
+      const runningIds = isUnknownArray(payload?.running_ids)
         ? payload.running_ids.map((id) => _normStr(id)).filter((id) => !!id)
         : [];
       _appsCache = catalog;
@@ -591,7 +594,7 @@ export function initSidebarShortcuts(
     )
       return;
 
-    let ws = null;
+    let ws: WebSocket | null = null;
     try {
       ws = new WebSocket(_frameworkEventsUrl());
     } catch (_) {
@@ -604,7 +607,7 @@ export function initSidebarShortcuts(
       _frameworkEventsBackoffMs = 600;
     });
 
-    ws.addEventListener("message", (ev) => {
+    ws.addEventListener("message", (ev: MessageEvent<unknown>) => {
       _handleFrameworkShellEvent(ev?.data);
     });
 
@@ -645,10 +648,10 @@ export function initSidebarShortcuts(
 
   function _findAppManifest(appId: unknown) {
     const id = _normStr(appId);
-    if (!id || !Array.isArray(_appsCache)) {
+    if (!id || !isUnknownArray(_appsCache)) {
       _warnAppDiscovery("manifest:find:skipped", {
         appId: id,
-        hasAppsCache: Array.isArray(_appsCache),
+        hasAppsCache: isUnknownArray(_appsCache),
       });
       return null;
     }
@@ -866,7 +869,7 @@ export function initSidebarShortcuts(
     el.textContent = "";
 
     const i =
-      icon && typeof icon === "object" && !Array.isArray(icon)
+      icon && typeof icon === "object" && !isUnknownArray(icon)
         ? (icon as ShortcutIcon)
         : null;
     if (i && i.kind === "emoji") {
@@ -1128,9 +1131,15 @@ export function initSidebarShortcuts(
     return _normStr(_extensionWebviewSurface(sc).dto) === "ExtensionWebviewSurface";
   }
 
+  function _extensionSurfaceReady(sc: SidebarShortcut): boolean {
+    // Consult the latest backend projection, not a pre-await shortcut snapshot.
+    const slot = _findAppDockSlot(_normStr(sc.host_id));
+    return extensionSurfaceReady(sc, slot);
+  }
+
   function _appReadinessStatus(appId: unknown): string {
     const id = _normStr(appId);
-    if (!id || !Array.isArray(_appsCache)) return "";
+    if (!id || !isUnknownArray(_appsCache)) return "";
     const app = _appsCache.find((item) => item && _normStr(item.id) === id);
     const readiness = asRecord(app?.readiness);
     const raw = _normStr(readiness.status).toLowerCase();
@@ -1169,7 +1178,7 @@ export function initSidebarShortcuts(
       const entry = _appDockSlotToEntry(activeWindow);
       if (entry) return entry;
     }
-    const list = Array.isArray(shortcuts)
+    const list = isUnknownArray(shortcuts)
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
     const explicitUrlId = _normStr(_clientActiveShortcutId);
@@ -1195,7 +1204,7 @@ export function initSidebarShortcuts(
   }
 
   function _pickMruShortcut(shortcuts: SidebarShortcut[] | null) {
-    return pickMruShortcutFromModel(Array.isArray(shortcuts) ? shortcuts : []);
+    return pickMruShortcutFromModel(isUnknownArray(shortcuts) ? shortcuts : []);
   }
 
   function _resolveDockedShortcut(
@@ -1246,7 +1255,7 @@ export function initSidebarShortcuts(
       const entry = _appDockSlotToEntry(activeWindow);
       if (entry) return { active: entry, activeId: entry.key };
     }
-    const list = Array.isArray(shortcuts)
+    const list = isUnknownArray(shortcuts)
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
     const active = _resolveActive(uiPrefs, list);
@@ -1325,7 +1334,7 @@ export function initSidebarShortcuts(
     active: SidebarShortcut | null,
   ) {
     if (!sidebarHeaderIconEl || !sidebarHeaderTitleEl) return;
-    const resolvedShortcuts = Array.isArray(shortcuts)
+    const resolvedShortcuts = isUnknownArray(shortcuts)
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
@@ -1349,7 +1358,7 @@ export function initSidebarShortcuts(
   }
 
   function _collectHeaderItems(resolvedShortcuts: SidebarShortcut[]) {
-    const list = Array.isArray(resolvedShortcuts) ? resolvedShortcuts : [];
+    const list = isUnknownArray(resolvedShortcuts) ? resolvedShortcuts : [];
     return list.filter((sc) => !!sc).map((sc) => ({ ...sc }));
   }
 
@@ -1361,9 +1370,7 @@ export function initSidebarShortcuts(
     if (_lastShortcutUsageKey === nextId && now - _lastShortcutUsageStamp < 800)
       return;
 
-    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
-      ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS]
-      : [];
+    const raw = shortcutPreferences(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]);
     const idx = raw.findIndex((sc) => {
       if (!sc || typeof sc !== "object") return false;
       const id = _normStr(sc.id);
@@ -1424,9 +1431,7 @@ export function initSidebarShortcuts(
     shortcut: SidebarShortcut | null,
   ): SidebarShortcut | null {
     if (!shortcut) return null;
-    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
-      ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS]
-      : [];
+    const raw = shortcutPreferences(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]);
     const nextVersion = String(Date.now());
     let changed = false;
     const next = raw.map((sc) => {
@@ -1691,6 +1696,7 @@ export function initSidebarShortcuts(
   ): Promise<boolean> {
     const bridge = _electronSurfaceBridge();
     if (!bridge || !_usesElectronPersistentSurface(sc)) return false;
+    if (!_extensionSurfaceReady(sc)) return false;
     if (entry.placePromise) return await entry.placePromise;
     const pending = (async () => {
       if (!entry.url) {
@@ -1703,6 +1709,7 @@ export function initSidebarShortcuts(
           true,
         );
       }
+      if (!_extensionSurfaceReady(sc)) return false;
       const result = await bridge.placeSidebarSurface(
         _detachedSurfaceDescriptor(sc, entry.url, entry.presentationId),
         _nativeSurfaceBounds(entry),
@@ -1752,6 +1759,7 @@ export function initSidebarShortcuts(
     const bridge = _electronSurfaceBridge();
     const hostId = _normStr(sc.host_id);
     if (!bridge || !hostId) return false;
+    if (!_extensionSurfaceReady(sc)) return false;
     const existing = _detachPromises.get(hostId);
     if (existing) {
       const ready = await existing;
@@ -1799,6 +1807,7 @@ export function initSidebarShortcuts(
         presentationUrl,
         runtime,
       );
+      if (!_extensionSurfaceReady(sc)) return false;
       const result = await bridge.detachSidebarSurface(
         _detachedSurfaceDescriptor(sc, loadUrl, presentationId),
         { focus },
@@ -2320,7 +2329,7 @@ export function initSidebarShortcuts(
             await _restartActiveFrameworkShortcut();
           }
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           toast(errorMessage(error, "Failed to open Sidebar refresh menu"));
         });
       return;
@@ -2360,9 +2369,7 @@ export function initSidebarShortcuts(
   function _findRawShortcutIndex(
     sc: SidebarShortcut | SidebarShortcutPreference | null,
   ) {
-    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
-      ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS]
-      : [];
+    const raw = shortcutPreferences(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]);
     const key = _normStr(sc?.key);
     const id = _normStr(sc?.id);
     const url = _normStr(sc?.url);
@@ -2378,14 +2385,12 @@ export function initSidebarShortcuts(
   }
 
   function _persistHeaderOrder(orderedKeys: unknown) {
-    const order = Array.isArray(orderedKeys)
+    const order = isUnknownArray(orderedKeys)
       ? orderedKeys.map((key) => _normStr(key)).filter((key) => !!key)
       : [];
     if (!order.length) return;
 
-    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
-      ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS]
-      : [];
+    const raw = shortcutPreferences(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]);
     if (!raw.length) return;
 
     const records: Array<{ key: string; entry: SidebarShortcutPreference }> =
@@ -2436,7 +2441,7 @@ export function initSidebarShortcuts(
 
   function _persistDockOrder(orderedKeys: unknown): boolean {
     const hostIds: string[] = [];
-    if (Array.isArray(orderedKeys)) {
+    if (isUnknownArray(orderedKeys)) {
       for (const key of orderedKeys) {
         const slot = _findAppDockSlot(key);
         if (!slot) return false;
@@ -2457,9 +2462,7 @@ export function initSidebarShortcuts(
     sc: SidebarShortcut | SidebarShortcutPreference | null,
     options: UnknownRecord = {},
   ) {
-    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
-      ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS]
-      : [];
+    const raw = shortcutPreferences(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]);
     const idx = _findRawShortcutIndex(sc);
     if (idx < 0) return;
     const next = raw.slice();
@@ -2756,7 +2759,7 @@ export function initSidebarShortcuts(
   ) {
     if (!sidebarHeaderIconMenuEl || !anchorEl || !sc) return;
     if (hasElectronSidebarMenu()) {
-      void _openNativeHeaderIconMenu(anchorEl, sc).catch((error) => {
+      void _openNativeHeaderIconMenu(anchorEl, sc).catch((error: unknown) => {
         toast(errorMessage(error, "Failed to open Sidebar menu"));
       });
       return;
@@ -3313,7 +3316,7 @@ export function initSidebarShortcuts(
     }
     fixedControls.replaceChildren();
 
-    const resolvedShortcuts = Array.isArray(shortcuts)
+    const resolvedShortcuts = isUnknownArray(shortcuts)
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
@@ -3562,7 +3565,7 @@ export function initSidebarShortcuts(
           if (nativeMenuOpen) return;
           nativeMenuOpen = true;
           void _openNativeHeaderIconMenu(btn, sc)
-            .catch((error) => toast(errorMessage(error, "Failed to open Sidebar menu")))
+            .catch((error: unknown) => toast(errorMessage(error, "Failed to open Sidebar menu")))
             .finally(() => { nativeMenuOpen = false; });
           return;
         }
@@ -3758,6 +3761,13 @@ export function initSidebarShortcuts(
       sidebarSetupPlaceholder.querySelector(".sidebar-setup__hint");
     if (!titleEl || !hintEl) return;
 
+    if (mode === "waiting_extension") {
+      titleEl.textContent = "Waiting for extension view...";
+      hintEl.textContent = `${_normStr(shortcut?.label) || "Extension"} will load when its workbench surface is ready.`;
+      sidebarSetupPlaceholder.dataset.mode = mode;
+      return;
+    }
+
     if (mode === "loading") {
       const label =
         _normStr(shortcut?.label) || _normStr(shortcut?.app_id) || "app";
@@ -3794,7 +3804,11 @@ export function initSidebarShortcuts(
         : !!_resolveActive(uiPrefs)?.url;
 
     if (hasActive) _setSetupPlaceholderMode("setup", null);
-    else _setSetupPlaceholderMode(mode, shortcut);
+    else _setSetupPlaceholderMode(
+      shortcut && _isExtensionWebviewEntry(shortcut) && !_extensionSurfaceReady(shortcut)
+        ? "waiting_extension" : mode,
+      shortcut,
+    );
 
     if (hasActive) {
       sidebarSetupPlaceholder.style.display = "none";
@@ -3959,6 +3973,7 @@ export function initSidebarShortcuts(
     options: ShortcutIframeLoadOptions = {},
   ) {
     if (!sc || !entry || !entry.iframe) return false;
+    if (!_extensionSurfaceReady(sc)) return false;
     const url = _shortcutFrameUrl(sc, entry, options);
     if (!url) return false;
     const forceReload = !!options.forceReload;
@@ -3968,6 +3983,7 @@ export function initSidebarShortcuts(
       entry.presentationId,
       true,
     );
+    if (!_extensionSurfaceReady(sc)) return false;
     const runtimeMetadata = runProfileRuntimeMetadata(sc);
     if (
       sc.kind === SHORTCUT_KIND_URL &&
@@ -4050,7 +4066,7 @@ export function initSidebarShortcuts(
   function _ensureRunningFrameworkShortcutIframesLoaded(
     shortcutsOverride: SidebarShortcut[] | null = null,
   ) {
-    const shortcuts = Array.isArray(shortcutsOverride)
+    const shortcuts = isUnknownArray(shortcutsOverride)
       ? shortcutsOverride
       : _collectVisibleShortcuts(_latestUiPrefs || {});
     const runningSet = _runningCache instanceof Set ? _runningCache : null;
@@ -4171,7 +4187,7 @@ export function initSidebarShortcuts(
     const stack = sidebarIframeStack;
     if (!stack) return;
 
-    const resolvedShortcuts = Array.isArray(shortcuts)
+    const resolvedShortcuts = isUnknownArray(shortcuts)
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
     const desiredKeys = new Set(resolvedShortcuts.map((sc) => sc.key));
@@ -4553,7 +4569,7 @@ export function initSidebarShortcuts(
     const id = _normStr(appId);
     _editingAppId = id;
     if (shortcutAppBtn) shortcutAppBtn.dataset.value = id;
-    const found = Array.isArray(appsList)
+    const found = isUnknownArray(appsList)
       ? appsList.find((a) => a && a.id === id)
       : null;
     if (shortcutAppLabel)
@@ -4594,13 +4610,13 @@ export function initSidebarShortcuts(
       });
     }
     const running = new Set(
-      (Array.isArray(apps) ? apps : [])
+      (isUnknownArray(apps) ? apps : [])
         .filter((a) => !!a?.running)
         .map((a) => _normStr(a?.id))
         .filter(Boolean),
     );
     _logAppDiscovery("app-menu:render:data", {
-      appsCount: Array.isArray(apps) ? apps.length : 0,
+      appsCount: isUnknownArray(apps) ? apps.length : 0,
       runningCount: running instanceof Set ? running.size : 0,
       current,
     });
@@ -4803,7 +4819,7 @@ export function initSidebarShortcuts(
     if (shortcutEmojiInput) shortcutEmojiInput.value = "";
 
     const icon =
-      e.icon && typeof e.icon === "object" && !Array.isArray(e.icon)
+      e.icon && typeof e.icon === "object" && !isUnknownArray(e.icon)
         ? (e.icon as ShortcutIcon)
         : null;
     if (icon && icon.kind === "emoji" && shortcutEmojiInput) {
@@ -4836,13 +4852,13 @@ export function initSidebarShortcuts(
       _normStr(_latestUiPrefs?.[UI_PREF_KEY_ACTIVE]);
     const hasActive = !!(
       activeId &&
-      Array.isArray(nextList) &&
+      isUnknownArray(nextList) &&
       nextList.some((sc) => sc && (sc.id === activeId || sc.url === activeId))
     );
     if (!hasActive) {
       const activateDefault = options.activateDefault !== false;
       const defaultActive =
-        activateDefault && Array.isArray(nextList) && nextList.length
+        activateDefault && isUnknownArray(nextList) && nextList.length
           ? _normStr(nextList[0].id) || _normStr(nextList[0].url)
           : "";
       _setClientActiveShortcut(defaultActive, {
@@ -4855,7 +4871,7 @@ export function initSidebarShortcuts(
   function _renderShortcutsList() {
     if (!shortcutsListEl) return;
     shortcutsListEl.innerHTML = "";
-    const shortcuts = Array.isArray(_shortcutsCache)
+    const shortcuts = isUnknownArray(_shortcutsCache)
       ? _shortcutsCache.slice()
       : [];
     if (!shortcuts.length) {
@@ -5169,7 +5185,7 @@ export function initSidebarShortcuts(
 
     const display =
       _normStr(_latestUiPrefs?.[UI_PREF_KEY_TOGGLE_DISPLAY]) || "icon";
-    const shortcuts = Array.isArray(_shortcutsCache) ? _shortcutsCache : [];
+    const shortcuts = isUnknownArray(_shortcutsCache) ? _shortcutsCache : [];
     const appDockEntries = _collectAppDockEntries();
 
     if (!shortcuts.length && !appDockEntries.length) {
@@ -5313,9 +5329,7 @@ export function initSidebarShortcuts(
     try {
       _applyToggleDisplay(_latestUiPrefs);
       _applyHeaderDisplayMode(_latestUiPrefs);
-      _shortcutsCache = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
-        ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS].slice()
-        : [];
+      _shortcutsCache = shortcutPreferences(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]);
     } finally {
       _settingsUiMutating = false;
     }
@@ -5361,7 +5375,7 @@ export function initSidebarShortcuts(
     );
     if (needsFrameworkState) {
       _setFrameworkEventsEnabled(true);
-      if (!Array.isArray(_appsCache) || !_runningCachePrimed) {
+      if (!isUnknownArray(_appsCache) || !_runningCachePrimed) {
         void Promise.all([
           _ensureAppsCache(false),
           _ensureRunningCache(false),
@@ -5392,7 +5406,7 @@ export function initSidebarShortcuts(
     }
 
     // One-turn migration tolerance for the earlier draft array shape.
-    return Array.isArray(payload.windows)
+    return isUnknownArray(payload.windows)
       ? payload.windows.filter(
           (item): item is SidebarAppDockSlot =>
             !!item && typeof item === "object",
@@ -5843,7 +5857,7 @@ export function initSidebarShortcuts(
           const state = asRecord(payload.state);
           if (
             (state.slots && typeof state.slots === "object") ||
-            Array.isArray(state.windows)
+            isUnknownArray(state.windows)
           ) {
             _applyAppDockLedgerPayload(state);
           }
@@ -5861,7 +5875,7 @@ export function initSidebarShortcuts(
       });
       _sidebarEventListenerBound = true;
       const runtimeWindow = window as unknown as SidebarRuntimeEventWindow;
-      const pendingEvents = Array.isArray(
+      const pendingEvents = isUnknownArray(
         runtimeWindow.__codeTe2PendingSidebarEvents,
       )
         ? runtimeWindow.__codeTe2PendingSidebarEvents.splice(0)

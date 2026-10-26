@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface VscodeLanguageDefinitionLike {
   aliases?: string[];
   extensions?: string[];
@@ -17,10 +18,10 @@ export function registerVscodeLanguageId(
       try {
         monacoRef.languages.register({
           id: langId,
-          aliases: Array.isArray(langDef.aliases) ? langDef.aliases : undefined,
-          extensions: Array.isArray(langDef.extensions) ? langDef.extensions : undefined,
-          filenames: Array.isArray(langDef.filenames) ? langDef.filenames : undefined,
-          mimetypes: Array.isArray(langDef.mimetypes) ? langDef.mimetypes : undefined,
+          aliases: isUnknownArray(langDef.aliases) ? langDef.aliases : undefined,
+          extensions: isUnknownArray(langDef.extensions) ? langDef.extensions : undefined,
+          filenames: isUnknownArray(langDef.filenames) ? langDef.filenames : undefined,
+          mimetypes: isUnknownArray(langDef.mimetypes) ? langDef.mimetypes : undefined,
         });
       } catch (_) {}
     }

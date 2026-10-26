@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 export interface ExplorerDiagnosticCounts {
   errors: number;
   warnings: number;
@@ -27,7 +28,7 @@ export interface ExplorerTreeDecorationsController {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function getDiagnosticCounts(value: unknown): ExplorerDiagnosticCounts {
@@ -287,14 +288,14 @@ export function createExplorerTreeDecorationsController(
       const value = actualNodes[li.dataset.rel || '.'];
       const actual = isRecord(value) ? value : {};
       li.dataset.actualGitStatus = typeof actual.gitStatus === 'string' ? actual.gitStatus : '';
-      li.dataset.actualGitFlags = Array.isArray(actual.gitFlags) ? actual.gitFlags.filter((flag): flag is string => typeof flag === 'string').join(',') : '';
+      li.dataset.actualGitFlags = isUnknownArray(actual.gitFlags) ? actual.gitFlags.filter((flag): flag is string => typeof flag === 'string').join(',') : '';
       li.classList.toggle('fe-actual-git-warning', Boolean(li.dataset.actualGitStatus && !['clean', 'ignored'].includes(li.dataset.actualGitStatus)));
     });
     Object.entries(nodes).forEach(([rel, decoration]) => {
       if (!isRecord(decoration)) return;
       const status =
         typeof decoration.gitStatus === 'string' ? decoration.gitStatus : '';
-      const flags = Array.isArray(decoration.gitFlags)
+      const flags = isUnknownArray(decoration.gitFlags)
         ? decoration.gitFlags.filter(
             (flag): flag is string =>
               typeof flag === 'string' && flag.length > 0,
@@ -333,7 +334,7 @@ export function createExplorerTreeDecorationsController(
     const normalizedProjectPath = projectPath.replace(/\/+$/, '');
     const summary: ExplorerDiagnosticsSummary = {};
     Object.entries(explorerDiagDetail).forEach(([absPath, markers]) => {
-      if (!Array.isArray(markers) || markers.length === 0) return;
+      if (!isUnknownArray(markers) || markers.length === 0) return;
       const rel =
         normalizedProjectPath &&
         absPath.startsWith(`${normalizedProjectPath}/`)

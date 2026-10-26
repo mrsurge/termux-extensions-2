@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface MonacoLanguageRegistryLike {
   register?(language: Record<string, unknown>): void;
 }
@@ -34,7 +35,7 @@ interface EditorWorkbenchLanguageCatalogRuntimeDeps {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }
@@ -42,9 +43,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function extractLanguagesPayload(value: unknown): unknown[] | null {
   const record = asRecord(value);
   if (!record) return null;
-  if (Array.isArray(record.languages)) return record.languages;
+  if (isUnknownArray(record.languages)) return record.languages;
   const inner = asRecord(record.result);
-  if (inner && Array.isArray(inner.languages)) return inner.languages;
+  if (inner && isUnknownArray(inner.languages)) return inner.languages;
   return null;
 }
 
@@ -72,7 +73,7 @@ export function createEditorWorkbenchLanguageCatalogRuntime(
       try {
         const response = await deps.fetchLanguageCatalog();
         const languages = extractLanguagesPayload(response);
-        if (!Array.isArray(languages) || !languages.length) return false;
+        if (!isUnknownArray(languages) || !languages.length) return false;
 
         languageByExtension.clear();
         languageByFilename.clear();

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../protocol/value-types.ts';
 import type { ProviderDocument } from "../provider-registry";
 
 export interface DocumentColorPendingOptions {
@@ -52,7 +53,7 @@ const documentColorSyncByPath = new Map<
 >();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -158,7 +159,7 @@ async function ensureDocumentColorTextSynced(
 function colorTupleFromValue(
   value: unknown,
 ): [number, number, number, number] | null {
-  if (Array.isArray(value) && value.length >= 4) {
+  if (isUnknownArray(value) && value.length >= 4) {
     return [
       finiteNumber(value[0]),
       finiteNumber(value[1]),
@@ -227,7 +228,7 @@ function normalizeColorPresentation(
   const out: Record<string, unknown> = { label };
   const textEdit = normalizeTextEdit(record.textEdit);
   if (textEdit) out.textEdit = textEdit;
-  if (Array.isArray(record.additionalTextEdits)) {
+  if (isUnknownArray(record.additionalTextEdits)) {
     const edits = record.additionalTextEdits
       .map(normalizeTextEdit)
       .filter((item): item is Record<string, unknown> => !!item);
@@ -326,7 +327,7 @@ export async function provideDocumentColors(
           timeoutResult: null,
         },
       );
-      return promise.catch((error) => {
+      return promise.catch((error: unknown) => {
         runtime.warn("[documentColors] provider failed", error);
         return null;
       });
@@ -339,7 +340,7 @@ export async function provideDocumentColors(
     if (replyType(reply) === 9) {
       succeeded += 1;
       const raw = replyResult(reply);
-      if (!Array.isArray(raw)) continue;
+      if (!isUnknownArray(raw)) continue;
       for (const item of raw) {
         const normalized = normalizeRawColorInfo(item);
         if (normalized) colors.push(normalized);
@@ -406,7 +407,7 @@ export async function provideColorPresentations(
           timeoutResult: null,
         },
       );
-      return promise.catch((error) => {
+      return promise.catch((error: unknown) => {
         runtime.warn("[colorPresentations] provider failed", error);
         return null;
       });
@@ -419,7 +420,7 @@ export async function provideColorPresentations(
     if (replyType(reply) === 9) {
       succeeded += 1;
       const raw = replyResult(reply);
-      if (!Array.isArray(raw)) continue;
+      if (!isUnknownArray(raw)) continue;
       for (const item of raw) {
         const normalized = normalizeColorPresentation(item);
         if (normalized) presentations.push(normalized);

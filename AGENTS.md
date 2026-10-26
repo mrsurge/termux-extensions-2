@@ -214,6 +214,27 @@ development fallback; installed Python packages must not depend on it.
 
 ## Build And Validation
 
+### No Any escape hatches
+
+- Owned TypeScript and Python code must not introduce explicit or inferred
+  `any`/`Any`, including nested generic arguments, arrays, dictionaries, return
+  types, callbacks, parameters, fields and class members. TypeScript `strict`
+  and `noImplicitAny` still allow explicit `any`; ordinary mypy strict also
+  permits some Any sources. A passing compiler alone does not enforce this rule.
+- Trace types to producers and consumers. Reuse concrete DTOs and dependency
+  interfaces. Receive genuinely untrusted data as `unknown` (Python `object`)
+  and narrow/validate at the boundary before accessing it. Do not replace Any
+  with broad casts, unchecked generic return assertions, `Function`, suppression
+  comments, blanket module shims or new exclusions to silence diagnostics.
+- Source imports must resolve to the actual typed implementation. Generated
+  runtime extensions and third-party declarations must not silently erase types.
+  Keep copied upstream internals unchanged unless explicitly in scope; expose
+  only the required typed, checked boundary to owned code.
+- Validate both Code TE2 frontend and WBA projects, including explicit Any and
+  inferred Any propagation. For Python changes use the project's strict mypy
+  settings plus relevant disallow-any checks; do not claim whole-tree safety from
+  a subset check. Report any remaining failures and unvalidated boundaries.
+
 For Code TE2 frontend source changes:
 
 ```bash

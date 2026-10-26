@@ -415,7 +415,19 @@ TE2 host/inline-editor frontend bundling for `code_te2` uses `esbuild` (with Typ
 - Scripts: `app/apps/code_te2/package.json`
   - `npm run build` -> production bundle (minified, sourcemaps)
   - `npm run build:watch` -> watch mode (non-minified)
-  - `npm run typecheck` -> TypeScript checking only
+  - `npm run typecheck` -> both frontend and WBA compiler checks plus compiler-backed
+    explicit/inferred Any rejection in owned source (nested members, generics,
+    returns and callback/parameter types included). Copied upstream/library
+    internals are outside the ownership gate; their values consumed by owned
+    declarations remain checked. `typecheck:frontend` and `typecheck:wba` run
+    the individual ordinary compiler checks for diagnosis.
+
+Owned WBA source imports its actual `.ts` implementation contracts. The
+`scripts/wba-runtime-imports.mjs` build plugin rewrites only real static/dynamic
+relative module specifiers to `.mjs` for unbundled runtime output; HTML/JS strings
+inside webview documents are not rewritten. Legacy adjacent `.d.mts` re-export
+shims are no longer the source-import typing authority. Host console bridge source
+is `main_page/frontend/console_bridge.ts`; the generic shared app bridge stays JS.
 
 Current build output:
 - Host bundle: `static/dist/host.js` (entry: `main.ts`, format: ESM)
@@ -2758,7 +2770,7 @@ main_page bridge --console:log--> framework TE2 console --console:log/replay/eva
 | `app/te2_runtime_mounts.py` | Mounts `/te2_console_ws/socket.io`. |
 | `app/libs/native_console_owner.py` | Private console owner API used by native MCP. |
 | `app/cli/console_cli.py` | `te2 console` CLI implementation. |
-| `app/apps/code_te2/main_page/frontend/console_bridge.js` | Code TE2 browser console monkey-patcher; emits `console:log` and handles `console:eval` / `console:evalCancel`. |
+| `app/apps/code_te2/main_page/frontend/console_bridge.ts` | Typed Code TE2 browser console monkey-patcher; emits `console:log` and handles `console:eval` / `console:evalCancel`. |
 | `app/apps/code_te2/main_page/frontend/host-console-drawer.ts` | vConsole drawer client; registers as `role: "drawer"` on `/te2_console`. |
 
 ### Event protocol
@@ -4783,6 +4795,50 @@ Provider activation and shared membership discovery do not call `$resolveWebview
 Workspace switch disposes every old client runtime before creating membership for the new workspace. Provider registrations survive that switch because the extension host survives; full WBA reset, provider unregister, and stale/empty snapshots remove membership and every associated runtime. A browser presentation disconnect does not dispose its provider runtime. Secondary-Sidebar views, custom editors, and chat-session APIs remain deferred. Multiple Codex conversations still require the extension's panel/custom-editor identities; multiple client handles for the single activity view do not manufacture conversation surfaces.
 
 Ordinary extension webview panels use the same secure document runtime but have a distinct lifecycle. WBA implements the Code Server 4.130 `MainThreadWebviewPanels` and `ExtHostWebviewPanels` actors, retains panel title/icon/column/context-retention metadata, publishes each panel as temporary Sidebar membership, and reports view-state changes to the extension host. Panel Close crosses the host UI IPC lane into WBA and truly disposes the extension-host panel; it never reuses the activity-view hidden state.
+
+Saved Sidebar extension slots are presentation membership, not runtime readiness.
+`get_sidebar_window_state()` overlays process-local WBA surface admission as
+`readiness`; this proof is never persisted. Embedded, native Electron and detached
+mounts require the matching current surface, while waiting preserves local
+visibility/order/placement. Adapter reset and non-authoritative disconnect snapshots
+invalidate admission without deleting saved slots. Initial WBA resync snapshots
+remain non-pruning until primary-view activation completes; individual confirmed
+surfaces may load during partial activation.
+
+Document startup readiness is distinct from installing the injected head API.
+The bridge reports ready after the document load event; the wrapper retains its
+loading overlay and queues extension messages until then. Every inner/outer
+message carries that document's bootstrap token as an incarnation fence (not an
+authorization credential); stale-document ready/state/message/link events cannot
+flush or mutate the replacement. Bootstrap tokens also pin the HTML revision:
+an intervening HTML update cannot serve newer HTML under an older receipt.
+Transport resume preserves the live document and token; actual document reload
+uses the existing ordered, revision-scoped startup journal. Extension-authored
+handshakes, such as JSON Crack's React-ready message, remain ordinary messages.
+This is not an extension-specific timeout, graph-layout workaround or claim that
+all asynchronous application initialization is complete at document load.
+
+Trusted unhandled file/command anchor clicks are forwarded from the sandbox to
+`vscode.webview.openLink` on its authenticated WBA connection. Existing
+extension-handled clicks, local fragments and HTTP/mail links are not swallowed.
+WBA verifies the current surface/runtime/epoch/generation/HTML revision, then
+uses the requesting client's existing editor facade and navigation owner.
+Relative files resolve against a panel's creation-time source document, or the
+current client document for activity views; supported numeric fragments preserve
+line/column. Existing backend project/open permission rules remain authoritative.
+Mapped asWebviewUri file links are decoded only through that runtime's current
+resource-scope token; foreign scopes reject rather than navigating the iframe or
+interpreting an HTTP route as a filesystem path.
+Command URIs require the webview's enableCommandUris policy and normal extension
+command admission; this is not an unrestricted command or external opener API.
+
+Webview icons distinguish ThemeIcon ids from file resources. Sidebar renders the
+typed codicon projection using its existing font rather than requesting a file
+named `$(markdown)`. Missing contributed image paths fall back to the admitted
+extension's declared package icon, whose field survives catalog sanitization;
+there are no extension-id exceptions or filesystem scans. File icons retain
+existing realpath/resource-root checks. Matching Python/mypyc icon projection,
+WBA and host assets are required for activation; no native client rebuild.
 
 Code Server's management scan remains extension-admission authority, but its
 DTOs are not assumed to retain every manifest contribution. WBA overlays

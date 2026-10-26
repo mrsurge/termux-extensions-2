@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface ExtensionNavigationEditorLike {
   focus?(): void;
   setSelections?(selections: Record<string, number>[]): void;
@@ -19,7 +20,7 @@ interface ExtensionNavigationRuntimeDeps {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === "object" && !Array.isArray(value);
+  return value != null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function positiveInteger(value: unknown, fallback = 1): number {
@@ -105,7 +106,7 @@ export function createEditorExtensionNavigationRuntime(
         if (!deps.showLocations) throw new Error('Extension location display is unavailable');
         deps.showLocations(payload);
       } else if (operation === "setSelections") {
-        const selections = Array.isArray(payload.selections)
+        const selections = isUnknownArray(payload.selections)
           ? payload.selections.map(selectionFrom).filter((item): item is Record<string, number> => item != null)
           : [];
         if (!selections.length || !editor.setSelections) {

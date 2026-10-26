@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import type { CodeInspectorMode } from './editor_touch_menu_utils.ts';
 import { documentSymbolTree } from '../src/code-inspector/document-symbols.ts';
 
@@ -82,11 +83,11 @@ const LOCATION_PREVIEW_MAX_CHARS = 240;
 const LOCATION_PREVIEW_LEADING_CONTEXT = 40;
 
 function isRecord(value: unknown): value is JsonObject {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
+  return value != null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function asArray(value: unknown): JsonObject[] {
-  return Array.isArray(value)
+  return isUnknownArray(value)
     ? value.filter(isRecord)
     : [];
 }

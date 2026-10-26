@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 export interface SecondaryEditorHostState {
   secondaryContent?: unknown;
   activeProject?: string | null;
@@ -24,7 +25,7 @@ export function parseSecondaryContentPresentation(value: unknown): SecondaryCont
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+  return !!value && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string {

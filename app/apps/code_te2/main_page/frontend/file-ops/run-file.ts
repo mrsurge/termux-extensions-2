@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 interface RunFileResponse extends Record<string, unknown> {
   ok?: boolean;
   error?: string;
@@ -49,7 +50,7 @@ interface RunSelection {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+  return !!value && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function errorMessage(error: unknown): string {
@@ -63,7 +64,7 @@ function asRunFileResponse(value: unknown): RunFileResponse {
 }
 
 function runProfileCandidates(value: unknown): RunProfileCandidate[] {
-  if (!Array.isArray(value)) return [];
+  if (!isUnknownArray(value)) return [];
   return value.flatMap((item) => {
     if (!isRecord(item) || typeof item.profileId !== 'string' || !item.profileId) {
       return [];
@@ -306,7 +307,7 @@ export function createRunFileController(deps: RunFileControllerDeps) {
       return;
     }
     const data = asRunFileResponse(response.data);
-    if (Array.isArray(data.runningProfiles) || Array.isArray(data.candidates)) {
+    if (isUnknownArray(data.runningProfiles) || isUnknownArray(data.candidates)) {
       applyProjection(data);
     }
     deps.toast(resultMessage(response));

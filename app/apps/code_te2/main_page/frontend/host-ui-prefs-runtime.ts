@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 export type HostUiPrefs = Record<string, unknown>;
 
 interface SidebarShortcutsLike {
@@ -17,7 +18,7 @@ function normalizeUiPrefsPayload(payload: unknown): HostUiPrefs {
   const candidate = payload && typeof payload === 'object'
     ? (payload as HostUiPrefsPayload).ui
     : null;
-  return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+  return candidate && typeof candidate === 'object' && !isUnknownArray(candidate)
     ? { ...(candidate as HostUiPrefs) }
     : {};
 }

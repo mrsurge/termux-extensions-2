@@ -43,6 +43,16 @@ CODE_TE2_IDENTITY_FIELDS = {
 }
 
 JsonObject = dict[str, object]
+# Process-local admission only: saved presentation membership is not runtime proof.
+_extension_ready_surfaces: dict[str, dict[str, str]] = {}
+
+
+def reset_extension_webview_readiness(project_root: str | None = None) -> bool:
+    if project_root is None:
+        changed = bool(_extension_ready_surfaces)
+        _extension_ready_surfaces.clear()
+        return changed
+    return _extension_ready_surfaces.pop(project_root, None) is not None
 
 
 def _now_ms() -> int:
@@ -522,6 +532,7 @@ def _normalize_extension_webview_surface(
         "surfaceKind": surface_kind,
         "url": url,
         "iconUrl": _norm(raw.get("iconUrl") or raw.get("icon_url")),
+        "iconId": _norm(raw.get("iconId")),
         "retainContextWhenHidden": _as_bool(
             raw.get("retainContextWhenHidden")
             or raw.get("retain_context_when_hidden")
@@ -901,9 +912,20 @@ def _save_pref_state(state: JsonObject) -> JsonObject:
 def get_sidebar_window_state() -> JsonObject:
     state = _load_pref_state()
     slots = _as_object(state.get("slots"))
+    projected: JsonObject = {}
+    for host_id, raw in slots.items():
+        slot = dict(_as_object(raw))
+        surface = _as_object(slot.get("webviewSurface") or slot.get("webview_surface"))
+        if surface:
+            ready = _extension_ready_surfaces.get(_norm(surface.get("projectPath")), {})
+            slot["readiness"] = {
+                "status": "ready" if ready.get(host_id) == _norm(slot.get("url")) else "starting",
+                "source": "wba_surface",
+            }
+        projected[host_id] = slot
     return {
         "version": SIDEBAR_WINDOW_STATE_VERSION,
-        "slots": dict(slots),
+        "slots": projected,
         "catalog": list_launcher_apps(),
         "ts": _now_ms(),
     }
@@ -1013,9 +1035,15 @@ def reconcile_extension_webview_slots(
     state["slots"] = slots
     if changed:
         _save_pref_state(state)
+    previous_ready = _extension_ready_surfaces.get(normalized_project, {})
+    next_ready = {} if prune else dict(previous_ready)
+    if upsert:
+        next_ready.update({host_id: _norm(slot.get("url")) for host_id, slot in desired_slots.items()})
+    _extension_ready_surfaces[normalized_project] = next_ready
+    readiness_changed = previous_ready != next_ready
     return {
         "ok": True,
-        "changed": changed,
+        "changed": changed or readiness_changed,
         "removed": removed,
         "state": get_sidebar_window_state(),
     }

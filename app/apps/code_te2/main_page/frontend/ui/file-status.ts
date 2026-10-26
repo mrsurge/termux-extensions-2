@@ -1,14 +1,12 @@
 // @ts-check
 
-/**
- * @param {{
- *   runActiveBtn: HTMLButtonElement | null,
- *   getCurrentPath: () => string,
- *   setIndicatorInactive: (badge: HTMLElement) => void,
- *   setIssuesButtonsEnabled: (enabled: boolean) => void,
- * }} deps
- */
-export function createFileStatusController(deps: any) {
+interface Dependencies {  runActiveBtn: HTMLButtonElement | null,
+  getCurrentPath: () => string,
+  setIndicatorInactive: (badge: HTMLElement) => void,
+  setIssuesButtonsEnabled: (enabled: boolean) => void,
+}
+
+export function createFileStatusController(deps: Dependencies) {
   function updateRunButtonState() {
     if (!deps.runActiveBtn) return;
     const currentPath = deps.getCurrentPath();

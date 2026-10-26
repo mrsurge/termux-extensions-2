@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 export interface InlineCompletionProviderRegisteredPayload {
   language?: string;
   handle?: unknown;
@@ -26,7 +27,7 @@ interface InlineCompletionProviderRegistrationLike {
 }
 
 function asInlineCompletionProviderRegisteredPayload(value: unknown): InlineCompletionProviderRegisteredPayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as InlineCompletionProviderRegisteredPayload
     : null;
 }
@@ -57,8 +58,8 @@ export function handleInlineCompletionProviderRegistered(
     extensionId: stringOrNull(typedData?.extensionId),
     extensionVersion: stringOrNull(typedData?.extensionVersion),
     groupId: stringOrNull(typedData?.groupId),
-    yieldsToGroupIds: Array.isArray(typedData?.yieldsToGroupIds) ? typedData!.yieldsToGroupIds.map(String).filter(Boolean) : [],
-    excludesGroupIds: Array.isArray(typedData?.excludesGroupIds) ? typedData!.excludesGroupIds.map(String).filter(Boolean) : [],
+    yieldsToGroupIds: isUnknownArray(typedData?.yieldsToGroupIds) ? typedData!.yieldsToGroupIds.map(String).filter(Boolean) : [],
+    excludesGroupIds: isUnknownArray(typedData?.excludesGroupIds) ? typedData!.excludesGroupIds.map(String).filter(Boolean) : [],
     displayName: stringOrNull(typedData?.displayName),
     debounceDelayMs: numberOrNull(typedData?.debounceDelayMs),
     eventHandle: numberOrNull(typedData?.eventHandle),

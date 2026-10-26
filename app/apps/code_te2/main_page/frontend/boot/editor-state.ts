@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import {
   getBootSnapshotHostState,
   requestHostBootSnapshot,
@@ -42,7 +43,7 @@ function runtimeWindow(): EditorStateRuntimeWindow {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  return value && typeof value === 'object' && !isUnknownArray(value) ? value as Record<string, unknown> : null;
 }
 
 export function createEditorStateController(deps: EditorStateControllerDeps) {
@@ -69,7 +70,7 @@ export function createEditorStateController(deps: EditorStateControllerDeps) {
     if (syncPromise) return syncPromise;
     syncPromise = requestSnapshotHostState()
       .then((state) => state ? hydrateEditorState(state) : deps.getEditorState())
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Failed to fetch host snapshot state:', err);
         return deps.getEditorState();
       })
@@ -128,7 +129,7 @@ export function createEditorStateController(deps: EditorStateControllerDeps) {
 
     Object.defineProperty(window, 'currentPath', {
       get: () => deps.getCurrentPath(),
-      set: (value) => {
+      set: (value: unknown) => {
         if (typeof value === 'string' && value) {
           if (typeof deps.reconcileCurrentPath === 'function') {
             deps.reconcileCurrentPath(value);

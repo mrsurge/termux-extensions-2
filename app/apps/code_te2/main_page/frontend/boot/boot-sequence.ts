@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import {
   getBootSnapshotHostState,
   getBootSnapshotCodeInspector,
@@ -26,7 +27,7 @@ interface BootSequenceDeps {
   ensureWorkbenchAdapterReady(): Promise<unknown>;
   requestBackendLanguageBackendSet(payload?: Record<string, unknown>): Promise<unknown>;
   spinnerSetStep(title: string, failed?: boolean): void;
-  initBranchMenu(): unknown;
+  initBranchMenu(): ReturnType<typeof import('../host-git-branch-menu.ts').initBranchMenu>;
   waitForInitialUiPrefs(ms?: number): Promise<Record<string, unknown>>;
   seedUiPrefsSnapshot(prefs: Record<string, unknown>): void;
   setStartupInteraction?(active: boolean): void;
@@ -49,7 +50,7 @@ interface BootSequenceDeps {
   openFile(path: string): Promise<unknown>;
   onOpenFileFailure(err: Error): void;
   onNoRestoredPath(serverState: Record<string, unknown>): void;
-  setBranchMenuHandle(handle: unknown): void;
+  setBranchMenuHandle(handle: ReturnType<typeof import('../host-git-branch-menu.ts').initBranchMenu>): void;
   requestBackendBootSnapshot(payload?: Record<string, unknown>): Promise<unknown>;
   requestBackendLanguageBootstrap?(): Promise<HostBootSnapshot | null>;
   mountInlineEditorHost(snapshot: HostBootSnapshot | null): Promise<unknown>;
@@ -70,7 +71,7 @@ async function withStartupInteraction<T>(deps: BootSequenceDeps, show: () => Pro
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }
@@ -266,7 +267,7 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
       (error: unknown) => ({ error }),
     );
 
-  await deps.initExplorerUI().catch((error) => {
+  await deps.initExplorerUI().catch((error: unknown) => {
     console.error('Failed to initialize explorer UI:', error);
   });
   traceColdBoot('host.explorer.initialized', {});
@@ -295,7 +296,7 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
       early.snapshot, getBootSnapshotUiPrefs(early.snapshot),
       { ...deps, seedUiPrefsSnapshot: () => {} },
     );
-    if (earlyWorkbench) void deps.ensureWorkbenchAdapterReady().catch((error) => {
+    if (earlyWorkbench) void deps.ensureWorkbenchAdapterReady().catch((error: unknown) => {
       console.warn('Workbench adapter readiness failed:', error);
     });
     traceColdBoot('host.language_backend.early', { wba: earlyWorkbench });
@@ -345,7 +346,7 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
     // Document display is independent of extension-host readiness. Existing WBA
     // state/baton handlers replay the active model when intelligence connects.
     // Keep the status/error observer, but never gate mounting Monaco on it.
-    void deps.ensureWorkbenchAdapterReady().catch((error) => {
+    void deps.ensureWorkbenchAdapterReady().catch((error: unknown) => {
       console.warn('Workbench adapter readiness failed:', error);
     });
   }
@@ -397,7 +398,7 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   if (fileFromUrl) {
     const abs = deps.toAbsolute(fileFromUrl, null, deps.HOME_DIR);
     if (abs !== restoredPath) {
-      await deps.openFile(abs).catch((error) => deps.onOpenFileFailure(error instanceof Error ? error : new Error(String(error))));
+      await deps.openFile(abs).catch((error: unknown) => deps.onOpenFileFailure(error instanceof Error ? error : new Error(String(error))));
     }
   } else if (!restoredPath) {
     deps.onNoRestoredPath(serverState);

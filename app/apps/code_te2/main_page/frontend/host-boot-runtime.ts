@@ -45,8 +45,8 @@ interface HostBootRuntimeDeps {
   ensureWorkbenchAdapterReady: () => Promise<unknown>;
   requestBackendLanguageBackendSet: (payload?: UnknownRecord) => Promise<unknown>;
   spinnerSetStep: (title: string, failed?: boolean) => void;
-  initBranchMenu: (deps: { requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => Promise<unknown> }) => unknown;
-  setBranchMenuHandle: (handle: unknown) => void;
+  initBranchMenu: typeof import('./host-git-branch-menu.ts').initBranchMenu;
+  setBranchMenuHandle: (handle: ReturnType<typeof import('./host-git-branch-menu.ts').initBranchMenu>) => void;
   waitForInitialUiPrefs: (ms?: number) => Promise<UnknownRecord>;
   seedUiPrefsSnapshot: (prefs: UnknownRecord) => void;
   setStartupInteraction?: (active: boolean) => void;

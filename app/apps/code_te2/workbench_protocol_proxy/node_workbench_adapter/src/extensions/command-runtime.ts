@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -76,7 +77,7 @@ interface MenuDefinition {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -296,7 +297,7 @@ export class ExtensionCommandRuntime {
       const contributes = isRecord(rawExtension.contributes) ? rawExtension.contributes : null;
       if (!extensionId || !contributes) continue;
       const extensionRoot = extensionRootFrom(rawExtension);
-      const rawCommands = Array.isArray(contributes.commands) ? contributes.commands : [];
+      const rawCommands = isUnknownArray(contributes.commands) ? contributes.commands : [];
       for (const rawCommand of rawCommands) {
         if (!isRecord(rawCommand)) continue;
         const command = stringValue(rawCommand.command);
@@ -316,7 +317,7 @@ export class ExtensionCommandRuntime {
       const rawMenus = isRecord(contributes.menus) ? contributes.menus : null;
       if (!rawMenus) continue;
       for (const [location, rawEntries] of Object.entries(rawMenus)) {
-        if (!Array.isArray(rawEntries)) continue;
+        if (!isUnknownArray(rawEntries)) continue;
         const entries = this.menus.get(location) ?? [];
         for (const rawEntry of rawEntries) {
           if (!isRecord(rawEntry)) continue;
@@ -357,7 +358,7 @@ export class ExtensionCommandRuntime {
         case "$getCommands":
           return { handled: true, replyResult: [...this.registeredCommands] };
         case "$executeCommand": {
-          const commandArgs = Array.isArray(message.args?.[1]) ? message.args?.[1] : [];
+          const commandArgs = isUnknownArray(message.args?.[1]) ? message.args?.[1] : [];
           // The extension API translates setContext to the private wire command.
           if (command === "_setContext" || command === "setContext") {
             const key = stringValue(commandArgs?.[0]);
@@ -447,8 +448,8 @@ export class ExtensionCommandRuntime {
       });
     }
     actions.sort((left, right) => {
-      const leftGroup = String(left.group ?? "").split("@", 1)[0];
-      const rightGroup = String(right.group ?? "").split("@", 1)[0];
+      const leftGroup = String(left.group ?? "").split("@", 1)[0] ?? "";
+      const rightGroup = String(right.group ?? "").split("@", 1)[0] ?? "";
       return leftGroup.localeCompare(rightGroup) || Number(left.order ?? 0) - Number(right.order ?? 0);
     });
     return { ok: true, menu: location, context, actions };
@@ -466,8 +467,8 @@ export class ExtensionCommandRuntime {
       this.options.syncSelection(params);
     }
     await this.options.activateByEvent(`onCommand:${commandId}`);
-    const explicitArguments = Array.isArray(params.arguments) ? params.arguments : null;
-    const selectedPaths = Array.isArray(params.selectedPaths)
+    const explicitArguments = isUnknownArray(params.arguments) ? params.arguments : null;
+    const selectedPaths = isUnknownArray(params.selectedPaths)
       ? params.selectedPaths
           .map(stringValue)
           .filter((item): item is string => item != null)

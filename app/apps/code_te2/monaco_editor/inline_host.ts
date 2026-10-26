@@ -374,7 +374,7 @@ export function bootInlineEditorHost(
   editorFrame: HTMLElement,
   options: InlineEditorBootOptions = {},
 ): Promise<void> {
-  const bootPromise = mountInlineEditorHost(editorFrame, options).catch((error) => {
+  const bootPromise = mountInlineEditorHost(editorFrame, options).catch((error: unknown) => {
     console.error('[inline_monaco] boot failed', error);
     renderInlineEditorError(editorFrame, error);
     throw error;

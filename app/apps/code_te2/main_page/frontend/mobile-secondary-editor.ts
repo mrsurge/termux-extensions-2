@@ -1,3 +1,4 @@
+import { recordValue } from '../../src/rpc/value-types.ts';
 import {
   mobileSecondaryShortcutVisible,
   mobileSecondaryTabVisible,
@@ -180,7 +181,7 @@ export function createMobileSecondaryEditorController(
   }
 
   function closeDrawer(): void {
-    void Promise.resolve(drawer?.close()).catch((error) => {
+    void Promise.resolve(drawer?.close()).catch((error: unknown) => {
       console.warn('[second_editor] mobile drawer close failed', error);
     });
   }
@@ -275,15 +276,16 @@ export function createMobileSecondaryEditorController(
     });
   }
 
-  function onMessage(event: MessageEvent): void {
+  function onMessage(event: MessageEvent<unknown>): void {
+    const data = recordValue(event.data);
     if (
       event.origin !== window.location.origin
       || !frame?.contentWindow
       || event.source !== frame.contentWindow
-      || !event.data
-      || event.data.channel !== 'te2.secondaryEditor.presentation'
+      || !data
+      || data.channel !== 'te2.secondaryEditor.presentation'
     ) return;
-    if (event.data.type === 'ready') {
+    if (data.type === 'ready') {
       ready = true;
       if (readyTimeout) window.clearTimeout(readyTimeout);
       readyTimeout = 0;
@@ -292,36 +294,36 @@ export function createMobileSecondaryEditorController(
       resolveReady = null;
       rejectReady = null;
       syncInputState();
-    } else if (event.data.type === 'foreground') {
-      applyForeground(typeof event.data.path === 'string' ? event.data.path : '');
-    } else if (event.data.type === 'content') {
-      const content = parseSecondaryContentPresentation(event.data.content);
+    } else if (data.type === 'foreground') {
+      applyForeground(typeof data.path === 'string' ? data.path : '');
+    } else if (data.type === 'content') {
+      const content = parseSecondaryContentPresentation(data.content);
       if (!content) return;
       applyPopulation(content.kind !== 'empty');
       if (options.tab) options.tab.title = content.kind === 'empty'
         ? 'Second Window'
         : content.kind === 'historicalDiff'
           ? `${content.label} @ ${content.commitId.slice(0, 8)} (read-only)` : content.label;
-    } else if (event.data.type === 'openResult') {
-      const requestId = typeof event.data.requestId === 'string' ? event.data.requestId : '';
+    } else if (data.type === 'openResult') {
+      const requestId = typeof data.requestId === 'string' ? data.requestId : '';
       const pending = pendingOpens.get(requestId);
       if (!pending) return;
       pendingOpens.delete(requestId);
       window.clearTimeout(pending.timeout);
-      if (event.data.ok === true) {
-        const path = typeof event.data.path === 'string' ? event.data.path : '';
+      if (data.ok === true) {
+        const path = typeof data.path === 'string' ? data.path : '';
         pending.resolve(path);
       } else {
         pending.reject(new Error(
-          typeof event.data.error === 'string' && event.data.error
-            ? event.data.error
+          typeof data.error === 'string' && data.error
+            ? data.error
             : 'Second Window file open failed',
         ));
       }
-    } else if (event.data.type === 'mode' && event.data.mode === 'collapsed') {
+    } else if (data.type === 'mode' && data.mode === 'collapsed') {
       setMobileEditorOwner(window, 'primary');
       closeDrawer();
-    } else if (event.data.type === 'mode' && event.data.mode === 'closed') {
+    } else if (data.type === 'mode' && data.mode === 'closed') {
       setMobileEditorOwner(window, 'primary');
       dismissed = true;
       selectFallbackTab();
@@ -329,12 +331,12 @@ export function createMobileSecondaryEditorController(
       destroyFrame('Second Window editor was closed');
       updateVisibility();
       closeDrawer();
-    } else if (event.data.type === 'inputFocus') {
+    } else if (data.type === 'inputFocus') {
       if (options.container.hidden || frame.hidden || !populated) return;
       setMobileEditorOwner(window, 'secondary');
-    } else if (event.data.type === 'modifiersConsumed') {
+    } else if (data.type === 'modifiersConsumed') {
       publishMobileEditorModifiersConsumed(window, 'secondary');
-    } else if (event.data.type === 'panelToggle') {
+    } else if (data.type === 'panelToggle') {
       requestMobileEditorPanelToggle(window, 'secondary');
     }
   }
@@ -364,7 +366,7 @@ export function createMobileSecondaryEditorController(
   function reconcileLayout(): void {
     updateVisibility();
     if (supported && isMobileLayout() && !frame && !dismissed) {
-      void ensureFrame().catch((error) => {
+      void ensureFrame().catch((error: unknown) => {
         options.toast(error instanceof Error ? error.message : String(error));
       });
     }
@@ -406,7 +408,7 @@ export function createMobileSecondaryEditorController(
     void Promise.resolve(drawer?.open()).then(() => {
       options.tab?.click();
       show();
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       options.toast(error instanceof Error ? error.message : String(error));
     });
   });

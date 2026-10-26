@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { buildUiUrl, fetchJsonWithBase } from "./editor_common_utils.ts";
 import {
   normalizeLanguageId,
@@ -828,7 +829,7 @@ interface MonacoBootWindowLike extends Window {
         const language = normalizeLanguage((activeModel as MonacoRuntimeModelLike).getLanguageId?.());
         if (!language) return;
         return ensureTextmateTokenization(language, currentPath);
-      }).catch(function (error) {
+      }).catch(function (error: unknown) {
         console.warn('[TextMate] projection refresh failed', error);
       });
     },
@@ -1376,7 +1377,7 @@ interface MonacoBootWindowLike extends Window {
       .then(() => {
         requestWbaActiveModelSynchronization("baton");
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.warn("[readiness] baton active model flush failed", error);
       });
   }
@@ -1491,7 +1492,7 @@ interface MonacoBootWindowLike extends Window {
             counts.semanticTokens,
         );
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.warn(
           "[providers] snapshot hydrate failed (" +
             String(reason || "unknown") +
@@ -1593,7 +1594,7 @@ interface MonacoBootWindowLike extends Window {
         }
         return workbenchRuntime
           .wbFlushActiveModelOpen("wba_ready:" + syncReason)
-          .catch((error) => {
+          .catch((error: unknown) => {
             console.warn(
               "[wba] active model open flush failed after connect",
               error,
@@ -1641,7 +1642,7 @@ interface MonacoBootWindowLike extends Window {
   function handleWbaSocketReadyForEditor(reason: string): void {
     const revision = ++wbaConnectionRevision;
     const replay = editorWorkbenchCall("resync", {}, { timeoutMs: 5000 })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.warn("[wba] reconnect resync failed", error);
         return null;
       });
@@ -2066,10 +2067,10 @@ interface MonacoBootWindowLike extends Window {
       return draftDecoIds;
     },
     setDraftDecoIds: function (value: unknown[]) {
-      draftDecoIds = Array.isArray(value) ? value : [];
+      draftDecoIds = isUnknownArray(value) ? value : [];
     },
     setDraftZoneIds: function (value: unknown[]) {
-      draftZoneIds = Array.isArray(value) ? value : [];
+      draftZoneIds = isUnknownArray(value) ? value : [];
     },
     getLastDraftZones: function () {
       return lastDraftZones;

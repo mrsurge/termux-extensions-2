@@ -2,6 +2,39 @@
 
 ## Release direction
 
+### Owned frontend/WBA no-Any cleanup — 2026-10-25
+
+Replace explicit and inferred Any in owned source, including nested structures,
+generic arguments, parameters, members, callbacks and return values. Resolve WBA
+imports directly to TS implementations, retain generated .mjs runtime output, and
+type controller/global contracts at their producers. External dynamic data stays
+unknown until checked; Array.isArray/JSON/DOM/socket defaults must not leak Any
+back into owned declarations. Gate both projects with compiler-backed checks and
+negative fixtures; preserve copied upstream and verify its integrity separately.
+Record unrelated baseline test debt, not a false whole-suite pass. No shared
+runtime restart, Android publication, version bump or commit is part of this slice.
+
+### Approved webview lifecycle, links and icons — 2026-10-25
+
+Investigate/repair JSON Crack initial rendering through document-ready, revision-
+fenced delivery, not arbitrary delays or extension patches. The injected head
+bridge currently reports ready before extension scripts execute, and readiness
+has no document-incarnation proof. Preserve the ordered startup journal, resource
+sandbox, client identity, reconnect and one-shot semantics. Compare local Code OSS
+webview load handoff; regress delayed scripts, replaced documents and queued data.
+Partial graph geometry remains a hypothesis until live testing.
+
+Add guarded webview file-link forwarding through existing WBA navigation ownership;
+respect extension-handled clicks, local fragments and enableCommandUris policy.
+No unrestricted opener/command execution or iframe navigation fallback. Support
+ThemeIcon declarations and missing contributed-image fallback to the installed
+package icon (no extension-id exceptions or filesystem scans). Live inspection
+confirms $(markdown) was fetched as a file, and Code Visualizer's declared
+media/icon.png is absent while its package icon exists. Reuse typed Sidebar icon
+projection, including additive Python DTO fields where necessary. Test/build
+frontend/WBA and Python contracts; matching activation/OTA/restarts remain separate
+approval gates. No version bump, commit, Android or framework changes in this slice.
+
 ### Approved editor ↔ extension-host properties slice — 2026-10-25
 
 After deferring shared libraries to .357, repair missing editor-to-preview scroll
@@ -1028,3 +1061,12 @@ iframe/session coverage, inspector request/event routing, threading, observer
 disposal and renderer lifecycle parity. Do not assume a speedup or slowdown.
 Preserve external CDP access where useful; no console-bridge dependency or
 debugger-policy change. Resume only with a bounded source-backed plan/approval.
+## Restored extension views: readiness admission
+
+Preserve persisted sidebar visibility/order/placement while the WBA starts.
+Backend sidebar projections carry transient per-surface readiness; saved URLs
+are not evidence that a fresh extension-host surface exists. All frontend mount
+paths wait for their matching surface confirmation and resume through normal
+sidebar-state notifications. Reset admission on WBA session loss without deleting
+saved membership. Cold resync is non-pruning until primary activation completes;
+individual available views may mount during staggered activation.

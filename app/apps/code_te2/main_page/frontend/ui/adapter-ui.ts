@@ -2,26 +2,24 @@
 import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
 import { requestExplorerRpc } from '../../../src/explorer/rpc/client.ts';
 
-/**
- * @param {{
- *   closeAllMenus: () => void,
- *   spinnerSetStep: (msg: string) => void,
- *   setWorkbenchAdapterState: (next: { readyOk: boolean, connecting: any }) => void,
- *   toast: (msg: string, ms?: number) => void
- * }} deps
- */
+interface Dependencies {  closeAllMenus: () => void,
+  spinnerSetStep: (msg: string) => void,
+  setWorkbenchAdapterState: (next: { readyOk: boolean, connecting: Promise<boolean> | null }) => void,
+  toast: (msg: string, ms?: number) => void
+}
+
 interface LspStatusPayload {
   error?: unknown;
 }
 
-interface LspStatusArgs {
+export interface LspStatusArgs {
   show?: boolean;
   languageId?: string;
   state?: string;
   payload?: LspStatusPayload;
 }
 
-export function createAdapterUiController(deps: any) {
+export function createAdapterUiController(deps: Dependencies) {
   function closeAdapterDropdown() {
     const dd = document.getElementById('fe-adapter-dd');
     if (dd) dd.classList.remove('show');

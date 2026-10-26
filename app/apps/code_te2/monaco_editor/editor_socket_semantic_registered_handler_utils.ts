@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface SemanticTokensLegendLike {
   tokenTypes?: unknown[];
   tokenModifiers?: unknown[];
@@ -21,7 +22,7 @@ export interface SemanticTokensRegisteredPayload {
 }
 
 function asSemanticTokensRegisteredPayload(value: unknown): SemanticTokensRegisteredPayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as SemanticTokensRegisteredPayload
     : null;
 }

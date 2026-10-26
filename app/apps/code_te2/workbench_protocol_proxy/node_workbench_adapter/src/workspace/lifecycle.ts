@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import type { WorkbenchDocumentRegistry } from "./document-registry";
 
 export interface LifecycleExtRpcIds {
@@ -93,7 +94,7 @@ export interface DidChangeOptions {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function field(value: unknown, key: string): unknown {
@@ -156,7 +157,7 @@ function previousPath(prevUriObj: unknown): string {
 }
 
 function isRangeArray(value: unknown): value is unknown[] {
-  return Array.isArray(value);
+  return isUnknownArray(value);
 }
 
 export async function openFile(runtime: LifecycleRuntime, params: unknown = {}): Promise<Record<string, unknown>> {
@@ -261,7 +262,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     runtime.session.activeUriObj = uriObj;
     runtime.session.activeTab = prevTab;
     runtime.session.activeGeneration = generation;
-    void runtime.activateLanguage(languageId).catch((error) => {
+    void runtime.activateLanguage(languageId).catch((error: unknown) => {
       runtime.warn(
         `[openFile] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
       );
@@ -355,7 +356,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
       false,
     );
   });
-  void runtime.activateLanguage(languageId).catch((error) => {
+  void runtime.activateLanguage(languageId).catch((error: unknown) => {
     runtime.warn(
       `[openFile] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
     );
@@ -413,7 +414,7 @@ export function didChange(
   if (runtime.state.activePath === path) {
     runtime.state.activeLanguageId = languageId;
   }
-  void runtime.activateLanguage(languageId).catch((error) => {
+  void runtime.activateLanguage(languageId).catch((error: unknown) => {
     runtime.warn(
       `[didChange] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
     );
@@ -541,7 +542,7 @@ export async function setupFileWatcher(runtime: LifecycleRuntime, workspaceRoot:
     runtime.log("[watcher] listen() called, subscription created");
     sub.event((changes) => {
       runtime.log(`[watcher] EVENT FIRED: ${JSON.stringify(changes)?.slice(0, 500)}`);
-      if (Array.isArray(changes) && changes.length > 0) {
+      if (isUnknownArray(changes) && changes.length > 0) {
         const filtered = changes.filter((change) => {
           const path = String(field(field(change, "resource"), "path") ?? field(field(change, "resource"), "fsPath") ?? "");
           if (path.includes("/.git/") && path.endsWith(".lock")) return false;
@@ -558,7 +559,7 @@ export async function setupFileWatcher(runtime: LifecycleRuntime, workspaceRoot:
         runtime.log("[watcher] ENOSPC detected, forwarding watcher/enospc");
         runtime.onEvent({ type: "watcher/enospc", ts_ms: Date.now(), message: changes });
       } else {
-        runtime.log(`[watcher] EVENT received but not array or empty: type=${typeof changes} isArr=${Array.isArray(changes)}`);
+        runtime.log(`[watcher] EVENT received but not array or empty: type=${typeof changes} isArr=${isUnknownArray(changes)}`);
       }
     });
     runtime.watcher.fsWatcherSub = sub;

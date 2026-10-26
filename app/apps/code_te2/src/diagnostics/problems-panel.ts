@@ -1,3 +1,4 @@
+import { isUnknownArray, recordValue } from '../rpc/value-types.ts';
 /**
  * Problems projection — VS Code-style diagnostic list grouped by file.
  * The DOM controller powers the Explorer's Diagnostics tab. The host uses the
@@ -78,12 +79,12 @@ function codeValue(code: DiagnosticMarker['code']): string | number | undefined 
 }
 
 function coerceProblemsDetail(value: unknown): ProblemsDetail {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  if (!value || typeof value !== 'object' || isUnknownArray(value)) return {};
   const detail: ProblemsDetail = {};
-  for (const [path, markers] of Object.entries(value)) {
-    if (!Array.isArray(markers)) continue;
+  for (const [path, markers] of Object.entries(recordValue(value))) {
+    if (!isUnknownArray(markers)) continue;
     detail[path] = markers.filter((marker): marker is DiagnosticMarker => (
-      !!marker && typeof marker === 'object' && !Array.isArray(marker)
+      !!marker && typeof marker === 'object' && !isUnknownArray(marker)
     ));
   }
   return detail;
@@ -96,7 +97,7 @@ function summarizeProblems(
   const proj = (projectRoot || '').replace(/\/+$/, '');
   const summary: Record<string, { errors: number; warnings: number }> = {};
   for (const [absPath, markers] of Object.entries(detail)) {
-    if (!Array.isArray(markers) || markers.length === 0) continue;
+    if (!isUnknownArray(markers) || markers.length === 0) continue;
     const rel = proj && absPath.startsWith(`${proj}/`)
       ? absPath.slice(proj.length + 1)
       : absPath;

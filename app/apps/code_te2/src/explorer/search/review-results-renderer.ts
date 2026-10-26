@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import { EXPLORER_RPC_METHODS } from '../rpc/contract.ts';
 import {
   firstDiffLine,
@@ -50,7 +51,7 @@ interface ExplorerReviewResultsRendererDeps {
 }
 
 function normalizeReviewPayload(data: unknown): ExplorerReviewPayload {
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
+  if (data && typeof data === 'object' && !isUnknownArray(data)) {
     return data as ExplorerReviewPayload;
   }
   return {};
@@ -114,7 +115,7 @@ export function createExplorerReviewResultsRenderer(
     const target = container;
     container = document.createElement('div');
     const payload = normalizeReviewPayload(data);
-    const entries = Array.isArray(payload.results) ? payload.results : [];
+    const entries = isUnknownArray(payload.results) ? payload.results : [];
     const previousGroups = retainedGroups;
     retainedGroups = new Map();
     pruneSelection(entries);
@@ -379,7 +380,7 @@ export function createExplorerReviewResultsRenderer(
         fileBody.appendChild(warning);
       }
 
-      const hunks = Array.isArray(entry.hunks) ? entry.hunks : [];
+      const hunks = isUnknownArray(entry.hunks) ? entry.hunks : [];
       if (hunks.length) {
         const hunksContainer = document.createElement('div');
         hunksContainer.className = 'fe-search-change-hunks';
@@ -453,7 +454,7 @@ export function createExplorerReviewResultsRenderer(
           let oldLine = typeof hunk.oldStart === 'number' ? hunk.oldStart : 0;
           let newLine = typeof hunk.newStart === 'number' ? hunk.newStart : 0;
 
-          const lines = Array.isArray(hunk.lines) ? hunk.lines : [];
+          const lines = isUnknownArray(hunk.lines) ? hunk.lines : [];
           lines.forEach((line, index) => {
             const row = document.createElement('div');
             row.className = 'fe-search-diff-row';

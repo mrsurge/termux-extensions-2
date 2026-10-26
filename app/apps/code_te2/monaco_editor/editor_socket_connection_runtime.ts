@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
 import { withDiffLineNumbers } from './editor_diff_line_numbers.ts';
@@ -106,7 +107,7 @@ function asString(value: unknown): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as Record<string, unknown>
     : null;
 }
@@ -375,7 +376,7 @@ export function registerEditorSocketConnectionHandlers(
       const isCurrent = () => sequence === snapshotSequence;
       deps.queueOpenTransaction(() => isCurrent()
         ? deps.runEditorOpenTransaction(payload, isCurrent)
-        : Promise.resolve()).catch((error) => {
+        : Promise.resolve()).catch((error: unknown) => {
         console.warn('[Monaco] open apply failed', error);
       });
     } catch (error) {
@@ -405,7 +406,7 @@ export function registerEditorSocketConnectionHandlers(
       const projectedOptions = deps.buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
       const opts = diffEditor ? withDiffLineNumbers(projectedOptions) : projectedOptions;
       const nextPrefsEditor = asRecord(nextPrefs.editor);
-      let theme = null;
+      let theme: unknown = null;
       try { theme = nextPrefsEditor && nextPrefsEditor.theme ? nextPrefsEditor.theme : null; } catch (_) { theme = null; }
       try { if (opts) delete opts.theme; } catch (_) {}
 

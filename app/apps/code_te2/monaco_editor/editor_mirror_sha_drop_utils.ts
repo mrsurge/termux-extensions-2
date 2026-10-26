@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 interface MonacoModelLike {
@@ -20,7 +21,7 @@ export function shouldDropMirrorForSha(
   payloadContent: unknown,
 ): boolean {
   if (payloadSha && lastContentSha256 && String(payloadSha) === String(lastContentSha256)) return true;
-  const typedModel = model != null && typeof model === 'object' && !Array.isArray(model)
+  const typedModel = model != null && typeof model === 'object' && !isUnknownArray(model)
     ? model as MonacoModelLike
     : null;
   if (typedModel && typeof typedModel.getValue === 'function' && typedModel.getValue() === payloadContent) return true;

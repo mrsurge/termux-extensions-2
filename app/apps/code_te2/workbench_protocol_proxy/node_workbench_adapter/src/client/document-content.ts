@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import type { WorkbenchDocumentRegistry } from "../workspace/document-registry";
 
 export interface LocalFsStatsLike {
@@ -38,7 +39,7 @@ export interface DocumentContentRuntime {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {

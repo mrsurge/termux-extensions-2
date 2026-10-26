@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 // Host branch menu wiring for Code CM6.
 // Minimal branch menu wiring for Code CM6. Front-end logic stays thin
 // and delegates all Git work to backend endpoints.
@@ -34,11 +35,11 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function asBranchListResponse(value: unknown): BranchListResponse {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  if (!value || typeof value !== 'object' || isUnknownArray(value)) return {};
   const record = value as Record<string, unknown>;
   return {
     current: typeof record.current === 'string' ? record.current : undefined,
-    branches: Array.isArray(record.branches)
+    branches: isUnknownArray(record.branches)
       ? record.branches.filter((branch): branch is string => typeof branch === 'string')
       : undefined,
   };

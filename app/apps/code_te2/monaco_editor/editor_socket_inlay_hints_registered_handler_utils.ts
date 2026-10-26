@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 export interface InlayHintsProviderRegisteredPayload {
   language?: string;
   handle?: unknown;
@@ -14,7 +15,7 @@ interface InlayHintsProviderRegistrationLike {
 }
 
 function asInlayHintsProviderRegisteredPayload(value: unknown): InlayHintsProviderRegisteredPayload | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as InlayHintsProviderRegisteredPayload
     : null;
 }

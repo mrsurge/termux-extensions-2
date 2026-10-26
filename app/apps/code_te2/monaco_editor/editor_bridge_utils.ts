@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 interface MonacoRangeCtorLike {
   new (startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number): unknown;
 }
@@ -87,7 +88,7 @@ export function monacoRangeFromProtoRange(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+  return !!value && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function normalizeUriComponents(value: unknown): MonacoUriComponentsLike | undefined {
@@ -102,7 +103,7 @@ function normalizeUriComponents(value: unknown): MonacoUriComponentsLike | undef
 
 function normalizeTrusted(value: unknown): boolean | MonacoMarkdownTrustedOptionsLike | undefined {
   if (typeof value === 'boolean') return value;
-  if (!isRecord(value) || !Array.isArray(value.enabledCommands)) return undefined;
+  if (!isRecord(value) || !isUnknownArray(value.enabledCommands)) return undefined;
   if (!value.enabledCommands.every((command) => typeof command === 'string')) return undefined;
   return { enabledCommands: value.enabledCommands.slice() };
 }
@@ -148,7 +149,7 @@ export function projectMonacoHoverContents(raw: unknown): MonacoHoverProjectionL
   const out: MonacoHoverContentLike[] = [];
   const codeLanguages: string[] = [];
   const seenCodeLanguages = new Set<string>();
-  if (!Array.isArray(raw)) return { contents: out, codeLanguages };
+  if (!isUnknownArray(raw)) return { contents: out, codeLanguages };
   for (const content of raw) {
     let normalized: MonacoHoverContentLike | null = null;
     if (typeof content === 'string') {

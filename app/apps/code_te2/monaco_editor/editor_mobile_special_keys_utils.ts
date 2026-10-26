@@ -202,7 +202,7 @@ function runEditorAction(
     if (action?.run) {
       const result = action.run();
       if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
-        void Promise.resolve(result).catch((error) => {
+        void Promise.resolve(result).catch((error: unknown) => {
           console.warn(`[mobile_special_keys] ${actionId} failed`, error);
         });
       }

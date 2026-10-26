@@ -1,5 +1,6 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function errorToRecord(error: Error): Record<string, unknown> {
@@ -14,7 +15,7 @@ function errorToRecord(error: Error): Record<string, unknown> {
 function safeJson(value: unknown): string | null {
   const seen = new WeakSet<object>();
   try {
-    return JSON.stringify(value, (_key, nested) => {
+    return JSON.stringify(value, (_key: string, nested: unknown) => {
       if (typeof nested === "bigint") return nested.toString();
       if (typeof nested === "function")
         return `[Function ${nested.name || "anonymous"}]`;

@@ -60,13 +60,13 @@ function indexedStorage(): GrammarStorage {
         let admitted = 0;
         keys.forEach((k, index) => {
           // Inspect small metadata before cloning potentially large body strings.
-          const metadata = tx.objectStore('metadata').get(k);
+          const metadata: IDBRequest<unknown> = tx.objectStore('metadata').get(k);
           metadata.onsuccess = () => {
             const row = metadata.result as { bytes?: unknown } | undefined;
             if (!row || !Number.isSafeInteger(row.bytes) || (row.bytes as number) <= 0
                 || (row.bytes as number) > MAX_BODY || admitted + (row.bytes as number) > MAX_BATCH) return;
             admitted += row.bytes as number;
-            const request = tx.objectStore('bodies').get(k);
+            const request: IDBRequest<unknown> = tx.objectStore('bodies').get(k);
             request.onsuccess = () => { values[index] = request.result as unknown; };
           };
         });
@@ -76,7 +76,7 @@ function indexedStorage(): GrammarStorage {
     async write(records) {
       await transaction<void>('readwrite', (tx, done) => {
         const bodies = tx.objectStore('bodies');
-        const metadata = tx.objectStore('metadata');
+        const metadata: IDBObjectStore = tx.objectStore('metadata');
         const entries: { key: string; bytes: number; touched: number }[] = [];
         const cursor = metadata.openCursor();
         cursor.onsuccess = () => {
@@ -162,7 +162,7 @@ export function createPersistentGrammarCache(storage?: GrammarStorage): Persiste
           new Promise<Map<string, string>>((_, reject) => { timer = setTimeout(() => reject(new Error('Grammar cache read timeout')), 250); }),
         ]);
         return result;
-      } catch { disabled = true; return new Map(); }
+      } catch { disabled = true; return new Map<string, string>(); }
       finally { if (timer) clearTimeout(timer); }
     },
     write(identity, raw) {

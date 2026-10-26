@@ -1,3 +1,4 @@
+import { isUnknownArray } from './value-types.ts';
 import {
   identityRpcWireCodec,
   type RpcWireCodec,
@@ -85,7 +86,7 @@ interface PendingRequest {
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function isJsonRpcNotificationEnvelope(payload: unknown): payload is JsonRpcNotificationEnvelope {
@@ -123,7 +124,7 @@ function normalizeError(error: unknown): Error {
 }
 
 function clearSocketReplayBuffer(socket: SocketLike | null | undefined): void {
-  if (Array.isArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
+  if (isUnknownArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
 }
 
 export class JsonRpcCallError extends Error {
@@ -296,7 +297,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
           }
         });
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         const normalized = normalizeError(error);
         failInitialRequests(normalized);
         failActiveRequests(normalized);

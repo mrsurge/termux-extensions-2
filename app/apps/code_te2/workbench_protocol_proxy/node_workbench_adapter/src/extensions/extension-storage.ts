@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -12,7 +13,7 @@ export interface ExtensionMementoStoreOptions {
 }
 
 function isRecord(value: unknown): value is JsonObject {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function extensionKey(value: unknown): string {

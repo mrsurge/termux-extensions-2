@@ -1,6 +1,7 @@
-import { formatErrorMessage } from "./error-format.mjs";
-import { completionTrace } from "./runtime-debug.mjs";
-import { completionTimeouts } from "../protocol/completion-timeouts.mjs";
+import { isUnknownArray } from '../protocol/value-types.ts';
+import { formatErrorMessage } from "./error-format.ts";
+import { completionTrace } from "./runtime-debug.ts";
+import { completionTimeouts } from "../protocol/completion-timeouts.ts";
 
 export interface DispatchRequest {
   id: unknown;
@@ -190,6 +191,7 @@ export interface WorkbenchLike {
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
   webviewAttach: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   webviewMessage: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewOpenLink: (params: Record<string, unknown>) => Promise<unknown>;
   webviewState: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   webviewClientStateReset: (
     params: Record<string, unknown>,
@@ -221,7 +223,7 @@ export interface ServerDispatchRuntime {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -368,6 +370,9 @@ export async function dispatchJsonRpcRequest(
 
   if (method === "vscode.webview.message") {
     return success(id, runtime.wb.webviewMessage(params));
+  }
+  if (method === "vscode.webview.openLink") {
+    return success(id, await runtime.wb.webviewOpenLink(params));
   }
 
   if (method === "vscode.webview.state") {
@@ -1143,7 +1148,7 @@ export async function dispatchJsonRpcRequest(
         generation: params.generation,
       }));
     runtime.log(
-      `[semanticTokensRange_reply] ok=${String((result as { ok?: unknown })?.ok)} hasData=${!!field(field(result, "result"), "data")} dataLen=${Array.isArray(field(field(result, "result"), "data")) ? (field(field(result, "result"), "data") as unknown[]).length : 0}`,
+      `[semanticTokensRange_reply] ok=${String((result as { ok?: unknown })?.ok)} hasData=${!!field(field(result, "result"), "data")} dataLen=${isUnknownArray(field(field(result, "result"), "data")) ? (field(field(result, "result"), "data") as unknown[]).length : 0}`,
     );
     return success(id, result);
   }

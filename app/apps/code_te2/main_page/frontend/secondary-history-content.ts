@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 /** Strict boundary for the host-owned immutable historical content projection. */
 export type HistoricalBlobSide =
   | { state: 'absent'; path: null; id: null; text: null }
@@ -18,7 +19,7 @@ export interface SecondaryHistoryContent {
 }
 
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!value || typeof value !== 'object' || isUnknownArray(value)) {
     throw new Error('Invalid historical content object');
   }
   return value as Record<string, unknown>;

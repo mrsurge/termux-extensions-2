@@ -1,3 +1,5 @@
+import type { EditorViewState } from '../../../main.ts';
+import { settingsRequest, type SettingsRequest, type SettingsNotify, type ExtensionSummary, objectValue, configProperties, type ConfigProperty } from './settings-contracts.ts';
 // @ts-check
 
 import type { RequestThemeCatalog } from '../../../src/theme_catalog.ts';
@@ -8,56 +10,57 @@ import { createSettingsInstallController } from './settings-install.ts';
 import { createSettingsThemesController } from './settings-themes.ts';
 import { createSettingsModalsController } from './settings-modals.ts';
 
-/**
- * @param {{
- *   els: {
- *     settingsModal: HTMLElement,
- *     settingsClose: HTMLElement,
- *     settingsConsoleWorkerId: HTMLElement,
- *     settingsClientIdentity: HTMLElement,
- *     settingsClientCopy: HTMLButtonElement,
- *     settingsClientReset: HTMLButtonElement,
- *     menuEditorSettings: HTMLElement,
- *     extManagerModal: HTMLElement,
- *     extManagerClose: HTMLElement,
- *     settingsExtStrip: HTMLElement,
- *     themesModal: HTMLElement,
- *     themesClose: HTMLElement,
- *     themesList: HTMLElement,
- *     settingsThemeStrip: HTMLElement,
- *     settingsThemeSummary: HTMLElement,
- *     settingsCursorStyle: HTMLElement,
- *     extConfigModal: HTMLElement,
- *     extConfigTitle: HTMLElement,
- *     extConfigForm: HTMLElement,
- *     extConfigClose: HTMLElement,
- *     extConfigCancel: HTMLElement,
- *     extConfigSave: HTMLButtonElement,
- *     extManagerInstallBtn: HTMLButtonElement,
- *     extCustomSettingsInput: HTMLTextAreaElement,
- *     extCustomSettingsSave: HTMLButtonElement,
- *     extSummary: HTMLElement,
- *     extManagerList: HTMLElement,
- *   },
- *   closeAllMenus: () => void,
- *   getEditorViewState: () => any,
- *   getUiPrefs: () => Record<string, unknown>,
- *   setEditorTheme: (themeId: string) => void,
- *   updatePreference: (key: string, value: any) => Promise<boolean>,
- *   pickerAvailable: () => boolean,
- *   pickFile: (startPath: string) => Promise<string | null>,
- *   getStartPath: () => string,
- *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
- *   busNotify: (event: string, payload?: any) => void,
- *   requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<any>,
- *   reloadEditorFrame: () => void,
- *   getConsoleWorkerId: () => string | null,
- *   getClientIdentity: () => {clientInstanceId: string, provider: string, label: string},
- *   resetClientIdentity: () => Promise<void>,
- *   toast: (msg: string, ms?: number) => void,
- * }} deps
- */
-export function createSettingsBootstrap(deps: any) {
+interface Dependencies {  els: {
+    settingsModal: HTMLElement,
+    settingsClose: HTMLElement,
+    settingsConsoleWorkerId: HTMLElement,
+    settingsClientIdentity: HTMLElement,
+    settingsClientCopy: HTMLButtonElement,
+    settingsClientReset: HTMLButtonElement,
+    menuEditorSettings: HTMLElement,
+    extManagerModal: HTMLElement,
+    extManagerClose: HTMLElement,
+    settingsExtStrip: HTMLElement,
+    themesModal: HTMLElement,
+    themesClose: HTMLElement,
+    themesList: HTMLElement,
+    settingsThemeStrip: HTMLElement,
+    settingsThemeSummary: HTMLElement,
+    settingsCursorStyle: HTMLElement,
+    extConfigModal: HTMLElement,
+    extConfigTitle: HTMLElement,
+    extConfigForm: HTMLElement,
+    extConfigClose: HTMLElement,
+    extConfigCancel: HTMLElement,
+    extConfigSave: HTMLButtonElement,
+    extManagerInstallBtn: HTMLButtonElement,
+    extCustomSettingsInput: HTMLTextAreaElement,
+    extCustomSettingsSave: HTMLButtonElement,
+    extSummary: HTMLElement,
+    extManagerList: HTMLElement,
+  },
+  closeAllMenus: () => void,
+  getEditorViewState: () => EditorViewState | null,
+  getUiPrefs: () => Record<string, unknown>,
+  setEditorTheme: (themeId: string) => void,
+  updatePreference: (key: string, value: unknown) => Promise<boolean>,
+  pickerAvailable: () => boolean,
+  pickFile: (startPath: string) => Promise<string | null>,
+  getStartPath: () => string,
+  busRequest: SettingsRequest,
+  busNotify: SettingsNotify,
+  requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<unknown>,
+  reloadEditorFrame: () => void,
+  getConsoleWorkerId: () => string | null,
+  getClientIdentity: () => {clientInstanceId: string, provider: string, label: string},
+  resetClientIdentity: () => Promise<void>,
+  toast: (msg: string, ms?: number) => void,
+  requestThemeCatalog: RequestThemeCatalog;
+  refreshTerminalDestinationSettings: () => Promise<void>;
+}
+
+export function createSettingsBootstrap(deps: Dependencies) {
+  const busRequest = settingsRequest(deps.busRequest);
   let settingsManagerController: ReturnType<typeof createSettingsManagerController> | null = null;
   let settingsConfigModalController: ReturnType<typeof createSettingsConfigModalController> | null = null;
 
@@ -82,7 +85,7 @@ export function createSettingsBootstrap(deps: any) {
     updatePreference: deps.updatePreference,
   });
 
-  function openExtConfigModal(extId: string, displayName: string, schema: any, currentValues: any) {
+  function openExtConfigModal(extId: string, displayName: string, schema: unknown, currentValues: unknown) {
     const scope = settingsRefreshController.getActiveScope();
     settingsConfigModalController?.openExtConfigModal(extId, displayName, schema, currentValues, scope);
   }
@@ -180,14 +183,15 @@ export function createSettingsBootstrap(deps: any) {
 
   window.addEventListener('code-te2:extension-installed', (event) => {
     if (!(event instanceof CustomEvent)) return;
-    const { extension, schema } = event.detail || {};
+    const detail = objectValue(event.detail);
+    const extension = objectValue(detail.extension), schema = objectValue(detail.schema);
     if (!extension || typeof extension.id !== 'string' || !schema || typeof schema !== 'object') return;
-    if (!Object.keys(schema.properties || schema).length) return;
-    openExtConfigModal(extension.id, extension.display_name || extension.id, schema, {});
+    if (!Object.keys(configProperties(schema)).length) return;
+    openExtConfigModal(extension.id, typeof extension.display_name === 'string' ? extension.display_name : extension.id, schema, {});
   });
   window.addEventListener('code-te2:extension-configure', (event) => {
     if (!(event instanceof CustomEvent)) return;
-    const { extId, displayName } = event.detail || {};
+    const { extId, displayName } = objectValue(event.detail);
     if (typeof extId !== 'string' || !extId) return;
     void settingsManagerController.openExtensionSettings(extId,
       typeof displayName === 'string' ? displayName : extId).catch((error: unknown) => {

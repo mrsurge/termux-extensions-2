@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import type { ShellEvent, ShellEventPayload } from './types.ts';
 import { asRecord, normStr } from './utils.ts';
 
@@ -13,7 +14,7 @@ export function parseShellEvent(raw: unknown): ShellEvent | null {
   } catch (_) {
     return null;
   }
-  if (!evt || typeof evt !== 'object' || Array.isArray(evt)) return null;
+  if (!evt || typeof evt !== 'object' || isUnknownArray(evt)) return null;
   return evt as ShellEvent;
 }
 

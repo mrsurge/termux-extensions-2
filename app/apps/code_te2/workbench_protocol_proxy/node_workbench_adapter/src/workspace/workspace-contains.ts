@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import { existsSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
@@ -13,7 +14,7 @@ type Picomatch = (
   options?: PicomatchOptions,
 ) => (value: string) => boolean;
 
-const require = createRequire(import.meta.url);
+const require: (specifier: string) => unknown = createRequire(import.meta.url);
 const picomatch = require(
   "../../../../vendor/picomatch/index.js",
 ) as Picomatch;
@@ -37,7 +38,7 @@ export interface WorkspaceContainsOptions {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringField(value: unknown, key: string): string | null {
@@ -53,7 +54,7 @@ function workspaceFolderPath(value: unknown): string | null {
 }
 
 function workspaceContainsPatterns(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
+  if (!isUnknownArray(value)) return [];
   return value
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     .map((item) => item
@@ -122,7 +123,7 @@ export async function checkWorkspaceContains(
   includes: unknown,
   options: WorkspaceContainsOptions = {},
 ): Promise<boolean> {
-  const roots = Array.isArray(folders)
+  const roots = isUnknownArray(folders)
     ? folders.map((folder) => workspaceFolderPath(folder)).filter((folder): folder is string => !!folder)
     : [];
   const patterns = workspaceContainsPatterns(includes);

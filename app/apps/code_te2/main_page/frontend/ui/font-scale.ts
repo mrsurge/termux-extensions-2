@@ -1,13 +1,11 @@
 // @ts-check
 
-/**
- * @param {{
- *   presets: Record<string, number>,
- *   updatePreference: (key: string, value: any) => Promise<boolean>,
- *   toast: (msg: string, kind?: string) => void
- * }} deps
- */
-export function createFontScaleController(deps: any) {
+interface Dependencies {  presets: Record<string, number>,
+  updatePreference: (key: string, value: unknown) => Promise<boolean>,
+  toast: (msg: string, kind?: string) => void
+}
+
+export function createFontScaleController(deps: Dependencies) {
   function updateFontScaleMenuChecks(currentScale: number) {
     const items = {
       'mi-font-small': deps.presets.small,

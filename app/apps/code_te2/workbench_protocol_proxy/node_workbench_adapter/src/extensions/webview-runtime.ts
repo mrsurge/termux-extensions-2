@@ -1,15 +1,17 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import crypto from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { encodeWbaRpcMessage } from "../protocol/messagepack-codec.mjs";
+import { encodeWbaRpcMessage } from "../protocol/messagepack-codec.ts";
 import type { DecodedExtHostRpc } from "../protocol/wire-encoding";
-import { serializableBuffersArgument } from "../protocol/wire-encoding.mjs";
+import { serializableBuffersArgument } from "../protocol/wire-encoding.ts";
 import {
   WebviewReconstructionStore,
   type WebviewReconstructionRecord,
-} from "./webview-reconstruction-store.mjs";
+} from "./webview-reconstruction-store.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -27,6 +29,7 @@ interface WebviewContribution {
   viewType: string;
   title: string;
   icon: UriRecord | null;
+  iconId: string;
 }
 
 interface UriRecord extends JsonObject {
@@ -92,6 +95,8 @@ export interface ExtensionWebviewSurface extends JsonObject {
   viewColumn: number;
   iconUrl: string;
   iconResource: UriRecord | null;
+  iconId?: string;
+  sourcePath?: string;
 }
 
 export interface WebviewResource {
@@ -114,6 +119,7 @@ export interface WebviewRuntimeOptions {
   };
   getExtensions(): unknown[];
   getWorkspaceFolder(): string | null;
+  getActiveDocument?(): string | null;
   activateByEvent(event: string): Promise<unknown>;
   sendExtAwaitTerminalReply(
     rpcId: number,
@@ -152,7 +158,7 @@ const WEBVIEW_RESOURCE_HOST =
   /https:\/\/([a-z][a-z0-9+.-]*)(?:\+|%2b)([^/]*?)\.vscode-resource\.vscode-cdn\.net((?:\/(?:(?!&(?:quot|apos|#(?:0*34|0*39|x0*22|x0*27));(?=\s*[,}\]]))[^\s\"'<>\)])*)?)/gi;
 
 function isRecord(value: unknown): value is JsonObject {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string {
@@ -316,6 +322,24 @@ function extensionResourceUri(
   };
 }
 
+function themeIconId(value: unknown): string {
+  const raw = isRecord(value) ? stringValue(value.id) : stringValue(value);
+  const id = /^\$\(([a-z0-9-]+(?:~spin)?)\)$/i.exec(raw)?.[1] ?? raw;
+  return /^[a-z0-9-]+(?:~spin)?$/i.test(id) ? id : "";
+}
+
+function existingIcon(location: UriRecord | null, requested: unknown, fallback: unknown): UriRecord | null {
+  for (const raw of [requested, fallback]) {
+    const icon = uriRecord(raw) ?? extensionResourceUri(location, raw);
+    if (!icon) continue;
+    try { if (statSync(stringValue(icon.path)).isFile()) return icon; }
+    catch (error) {
+      if (!isRecord(error) || !["ENOENT", "ENOTDIR"].includes(String(error.code))) throw error;
+    }
+  }
+  return null;
+}
+
 function stableHash(value: string, length = 16): string {
   return crypto
     .createHash("sha256")
@@ -374,13 +398,14 @@ function decodeHtmlResourcePath(value: string): string {
     /&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi,
     (entity) => {
       const normalized = entity.toLowerCase();
-      const named: Record<string, string> = {
+      const entities: Record<string, string> = {
         "&amp;": "&",
         "&lt;": "<",
         "&gt;": ">",
         "&quot;": '"',
         "&apos;": "'",
-      }[normalized];
+      };
+      const named = entities[normalized];
       if (named !== undefined) return named;
       const numeric = normalized.startsWith("&#x")
         ? Number.parseInt(normalized.slice(3, -1), 16)
@@ -419,7 +444,7 @@ function rewriteResourceUrls(
   const resourceBase = `${PUBLIC_WEBVIEW_BASE}/resource/${encodeURIComponent(resourceScopeToken)}`;
   return html.replace(
     WEBVIEW_RESOURCE_HOST,
-    (_match, schemeRaw: string, authorityRaw: string, pathRaw = "/") => {
+    (_match: string, schemeRaw: string, authorityRaw: string, pathRaw: string = "/") => {
       const scheme = encodeURIComponent(decodeURIComponent(schemeRaw));
       const authority = encodeURIComponent(
         decodeWebviewAuthority(decodeURIComponent(authorityRaw)) || "_",
@@ -444,14 +469,16 @@ function inlineJson(value: unknown): string {
     .replaceAll("\u2029", "\\u2029");
 }
 
-function innerBridge(record: WebviewReconstructionRecord): string {
+function innerBridge(record: WebviewReconstructionRecord, documentToken: string, resourceOrigin: string): string {
   const initialState = inlineJson(record.vscodeState);
   const initialStorage = inlineJson(record.localStorage);
   return `<script data-te2-webview-bridge>(function(){
 let apiState=${initialState};
 let acquired=false;
 let contextMenuEnabled=false;
-function post(kind,value){window.parent.postMessage({__te2ExtensionWebview:true,kind,value},'*');}
+const documentToken=${inlineJson(documentToken)};
+const resourceOrigin=${inlineJson(webviewResourceOrigin(resourceOrigin))};
+function post(kind,value){window.parent.postMessage({__te2ExtensionWebview:true,documentToken,kind,value},'*');}
 function contextValues(target){
   const result={};const nodes=[];
   for(let node=target;node&&node.nodeType===1;node=node.parentElement)nodes.push(node);
@@ -491,6 +518,7 @@ window.addEventListener('message',function(event){
   if(event.source!==window.parent)return;
   const data=event.data;
   if(!data||data.__te2ExtensionWebviewHost!==true)return;
+  if(data.documentToken!==documentToken)return;
   if(data.kind==='contextMenuPolicy'){contextMenuEnabled=data.value?.enabled===true;return;}
   if(data.kind==='message')window.dispatchEvent(new MessageEvent('message',{
     data:data.value,
@@ -504,7 +532,21 @@ document.addEventListener('contextmenu',function(event){
   const target=event.target&&event.target.nodeType===1?event.target:null;
   post('contextmenu',{x:Number(event.clientX)||0,y:Number(event.clientY)||0,context:contextValues(target),hasSelection:!!String(window.getSelection?.()||''),editable:!!target?.closest?.('input,textarea,[contenteditable="true"],[contenteditable=""]')});
 },true);
-post('ready',null);
+document.addEventListener('click',function(event){
+  if(!event.isTrusted||event.defaultPrevented||event.button!==0)return;
+  const anchor=event.composedPath().find(node=>node&&node.nodeType===1&&String(node.tagName).toLowerCase()==='a');
+  const href=anchor?.getAttribute('href');
+  if(!href||href.startsWith('#'))return;
+  let mapped=false;
+  try{const url=new URL(href,document.baseURI);mapped=url.origin===resourceOrigin&&url.pathname.startsWith('${PUBLIC_WEBVIEW_BASE}/resource/');}catch{}
+  if(!mapped&&/^(?:https?:|mailto:|tel:)/i.test(href))return;
+  if(!mapped&&/^[a-z][a-z0-9+.-]*:/i.test(href)&&! /^(?:file:|vscode-remote:|command:)/i.test(href))return;
+  event.preventDefault();post('link',{href});
+});
+// Head injection establishes the API, not application readiness. Match the
+// document load handoff, after deferred/module scripts have installed listeners.
+if(document.readyState==='complete')post('ready',null);
+else window.addEventListener('load',()=>post('ready',null),{once:true});
 })();</script>`;
 }
 
@@ -523,6 +565,7 @@ function transformWebviewHtml(
   html: string,
   resourceOrigin: string,
   record: WebviewReconstructionRecord,
+  documentToken: string,
 ): string {
   let transformed = rewriteResourceUrls(resourceScopeToken, html || "");
   transformed = transformed.replace(
@@ -534,7 +577,7 @@ function transformWebviewHtml(
     "__TE2_WEBVIEW_RESOURCE_ORIGIN__",
     webviewResourceOrigin(resourceOrigin),
   );
-  const bootstrap = `${webviewThemeStyle()}${innerBridge(record)}`;
+  const bootstrap = `${webviewThemeStyle()}${innerBridge(record, documentToken, resourceOrigin)}`;
   if (/<head(?:\s[^>]*)?>/i.test(transformed)) {
     return transformed.replace(
       /<head(?:\s[^>]*)?>/i,
@@ -557,7 +600,7 @@ const surfaceId=${safeSurfaceId};
 const status=document.getElementById('te2-status');
 const frame=document.getElementById('te2-webview');
 const contextMenu=document.getElementById('te2-context-menu');
-const pending=new Map();let nextId=1;let ready=false;let queued=[];let loadRevision=0;
+const pending=new Map();let nextId=1;let ready=false;let queued=[];let loadRevision=0;let documentToken='';
 let disposed=false;let reconciling=false;let reconcileRevision=0;let bufferedEvents=[];
 let serializeBuffers=false;
 let webviewId='';let webviewContextMenuContributed=false;let activeContextMenuContext={};
@@ -583,7 +626,7 @@ function rpc(method,params){return new Promise((resolve,reject)=>{if(!socket.con
 function rejectPending(error){for(const waiter of pending.values())waiter.reject(error);pending.clear();}
 function serialize(value){if(!serializeBuffers)return {jsonMessage:JSON.stringify(value)??'null',buffers:[]};const buffers=[];const seen=new WeakSet();const jsonMessage=JSON.stringify(value,(_key,item)=>{if(item&&typeof item==='object'){if(seen.has(item))throw new TypeError('Cannot serialize cyclic webview message');seen.add(item);if(item instanceof ArrayBuffer){const index=buffers.push(new Uint8Array(item))-1;return {$$vscode_array_buffer_reference$$:true,index};}if(ArrayBuffer.isView(item)){const index=buffers.push(new Uint8Array(item.buffer))-1;return {$$vscode_array_buffer_reference$$:true,index,view:{type:item.constructor.name,byteLength:item.byteLength,byteOffset:item.byteOffset}};}}return item;})??'null';return {jsonMessage,buffers};}
 function deserialize(jsonMessage,buffers){const arrays=(buffers||[]).map(bytes=>{const copy=new Uint8Array(bytes).slice();return copy.buffer;});return JSON.parse(jsonMessage,(_key,item)=>{if(!item||item.$$vscode_array_buffer_reference$$!==true)return item;const buffer=arrays[item.index];if(!item.view)return buffer;const ctor=globalThis[item.view.type];return typeof ctor==='function'?new ctor(buffer,item.view.byteOffset,item.view.byteLength/ctor.BYTES_PER_ELEMENT):buffer;});}
-function deliver(kind,value){if(!ready){queued.push([kind,value]);return;}frame.contentWindow.postMessage({__te2ExtensionWebviewHost:true,kind,value},'*');}
+function deliver(kind,value){if(!ready){queued.push([kind,value]);return;}frame.contentWindow.postMessage({__te2ExtensionWebviewHost:true,documentToken,kind,value},'*');}
 function closeContextMenu(){contextMenu.hidden=true;contextMenu.replaceChildren();activeContextMenuContext={};}
 function primitiveContext(value){const result={};if(!value||typeof value!=='object'||Array.isArray(value))return result;for(const [key,item] of Object.entries(value)){if(typeof item==='string'||typeof item==='boolean'||(typeof item==='number'&&Number.isFinite(item))||item===null)result[key]=item;}return result;}
 async function openContextMenu(request){
@@ -596,11 +639,11 @@ function persist(){reconstructionDirty=true;void flushReconstruction().catch(err
 function attachParams(){const params={surfaceId,clientInstanceId,windowId,presentationId};if(transport.loaded){Object.assign(params,{serverEpoch:transport.serverEpoch,surfaceGeneration:transport.surfaceGeneration,loadedHtmlRevision:transport.htmlRevision,lastServerSequence:transport.lastServerSequence});}return params;}
 async function attach(){return await rpc('vscode.webview.attach',attachParams());}
 function adoptReconstruction(snapshot,preserveLocal){const record=snapshot.reconstruction||{};const local={vscodeState:reconstruction.vscodeState,localStorage:reconstruction.localStorage};reconstruction={revision:Number(record.revision||0),writerLease:String(record.writerLease||''),vscodeState:preserveLocal?local.vscodeState:record.vscodeState,localStorage:preserveLocal?local.localStorage:(Array.isArray(record.localStorage)?record.localStorage:[])};}
-async function load(snapshot){const currentLoad=++loadRevision;const token=String(snapshot.bootstrapToken||'');if(!token)throw new Error('WBA reload response omitted its bootstrap token');closeContextMenu();ready=false;queued=[];serializeBuffers=snapshot.serializeBuffersForPostMessage===true;adoptReconstruction(snapshot,false);reconstructionDirty=false;const sandbox=[snapshot.options?.enableScripts?'allow-scripts':'',snapshot.options?.enableForms?'allow-forms':'','allow-downloads','allow-popups','allow-popups-to-escape-sandbox'].filter(Boolean).join(' ');frame.setAttribute('sandbox',sandbox);const documentUrl=new URL('./'+encodeURIComponent(surfaceId)+'/document',window.location.href);documentUrl.searchParams.set('revision',String(snapshot.htmlRevision||0));documentUrl.searchParams.set('resourceOrigin',window.location.origin);documentUrl.searchParams.set('bootstrapToken',token);if(currentLoad!==loadRevision)return;frame.src=documentUrl.href;frame.hidden=false;}
+async function load(snapshot){const currentLoad=++loadRevision;const token=String(snapshot.bootstrapToken||'');if(!token)throw new Error('WBA reload response omitted its bootstrap token');closeContextMenu();ready=false;queued=[];documentToken=token;serializeBuffers=snapshot.serializeBuffersForPostMessage===true;adoptReconstruction(snapshot,false);reconstructionDirty=false;const sandbox=[snapshot.options?.enableScripts?'allow-scripts':'',snapshot.options?.enableForms?'allow-forms':'','allow-downloads','allow-popups','allow-popups-to-escape-sandbox'].filter(Boolean).join(' ');frame.setAttribute('sandbox',sandbox);const documentUrl=new URL('./'+encodeURIComponent(surfaceId)+'/document',window.location.href);documentUrl.searchParams.set('revision',String(snapshot.htmlRevision||0));documentUrl.searchParams.set('resourceOrigin',window.location.origin);documentUrl.searchParams.set('bootstrapToken',token);if(currentLoad!==loadRevision)return;frame.src=documentUrl.href;frame.hidden=false;}
 function bufferServerEvent(event){bufferedEvents.push(event);if(bufferedEvents.length>512)bufferedEvents=bufferedEvents.slice(-512);}
 function applyServerEvent(event,fromResume=false){if(disposed||!event||event.surfaceId!==surfaceId)return;if(event.clientInstanceId&&event.clientInstanceId!==clientInstanceId)return;if(reconciling&&!fromResume){bufferServerEvent(event);return;}const epoch=String(event.serverEpoch||'');const generation=String(event.surfaceGeneration||'');const revision=Number(event.htmlRevision);const sequence=Number(event.sequence);if(!Number.isSafeInteger(sequence))return;if(transport.loaded&&epoch===transport.serverEpoch&&generation===transport.surfaceGeneration&&sequence<=transport.lastServerSequence)return;if(!transport.loaded||epoch!==transport.serverEpoch||generation!==transport.surfaceGeneration||revision!==transport.htmlRevision){bufferServerEvent(event);void reconcileTransport();return;}if(sequence!==transport.lastServerSequence+1){bufferServerEvent(event);void reconcileTransport();return;}transport.lastServerSequence=sequence;if(event.event==='message')deliver('message',deserialize(event.jsonMessage,event.buffers));else if(event.event==='reload')void reconcileTransport();else if(event.event==='dispose'){disposed=true;status.hidden=false;status.textContent='Extension view closed';frame.remove();rejectPending(new Error('Extension view closed'));}}
 function drainBufferedEvents(){const events=bufferedEvents.splice(0).sort((left,right)=>Number(left?.sequence||0)-Number(right?.sequence||0));for(const event of events)applyServerEvent(event);}
-async function reconcileTransport(){if(disposed||reconciling||!socket.connected)return;reconciling=true;const currentReconcile=++reconcileRevision;status.hidden=false;status.textContent=transport.loaded?'Reconnecting extension view…':'Loading extension view…';try{const result=await attach();if(currentReconcile!==reconcileRevision||!socket.connected)return;webviewId=String(result.viewId||webviewId);webviewContextMenuContributed=result.webviewContextMenuContributed===true;const action=String(result.action||'reload');const eventSequence=Number(result.eventSequence||0);const priorSequence=transport.lastServerSequence;if(action==='reload'){transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=eventSequence;await load(result);transport.loaded=true;if(result.bootstrapReplayComplete===false)console.warn('[extension-webview] current document startup event journal is incomplete');for(const event of Array.isArray(result.bootstrapEvents)?result.bootstrapEvents:[]){if(event?.event==='message')deliver('message',deserialize(event.jsonMessage,event.buffers));}}else{if(!transport.loaded)throw new Error('WBA attempted to resume an unloaded extension document');adoptReconstruction(result,true);transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=priorSequence;if(action==='replay'){for(const event of Array.isArray(result.replayEvents)?result.replayEvents:[])applyServerEvent(event,true);}else if(action!=='resume'){throw new Error('Unsupported WBA resume action: '+action);}if(transport.lastServerSequence!==eventSequence)throw new Error('WBA resume sequence did not converge');}deliver('contextMenuPolicy',{enabled:webviewContextMenuContributed});status.hidden=true;if(reconstructionDirty)void flushReconstruction().catch(error=>console.error('[extension-webview] reconnect state relay failed',error));}catch(error){if(currentReconcile===reconcileRevision){status.hidden=false;status.textContent=errorMessage(error);}}finally{if(currentReconcile===reconcileRevision){reconciling=false;drainBufferedEvents();}}}
+async function reconcileTransport(){if(disposed||reconciling||!socket.connected)return;reconciling=true;const currentReconcile=++reconcileRevision;status.hidden=false;status.textContent=transport.loaded?'Reconnecting extension view…':'Loading extension view…';try{const result=await attach();if(currentReconcile!==reconcileRevision||!socket.connected)return;webviewId=String(result.viewId||webviewId);webviewContextMenuContributed=result.webviewContextMenuContributed===true;const action=String(result.action||'reload');const eventSequence=Number(result.eventSequence||0);const priorSequence=transport.lastServerSequence;if(action==='reload'){transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=eventSequence;await load(result);transport.loaded=true;if(result.bootstrapReplayComplete===false)console.warn('[extension-webview] current document startup event journal is incomplete');for(const event of Array.isArray(result.bootstrapEvents)?result.bootstrapEvents:[]){if(event?.event==='message')deliver('message',deserialize(event.jsonMessage,event.buffers));}}else{if(!transport.loaded)throw new Error('WBA attempted to resume an unloaded extension document');adoptReconstruction(result,true);transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=priorSequence;if(action==='replay'){for(const event of Array.isArray(result.replayEvents)?result.replayEvents:[])applyServerEvent(event,true);}else if(action!=='resume'){throw new Error('Unsupported WBA resume action: '+action);}if(transport.lastServerSequence!==eventSequence)throw new Error('WBA resume sequence did not converge');}deliver('contextMenuPolicy',{enabled:webviewContextMenuContributed});status.hidden=ready;if(reconstructionDirty)void flushReconstruction().catch(error=>console.error('[extension-webview] reconnect state relay failed',error));}catch(error){if(currentReconcile===reconcileRevision){status.hidden=false;status.textContent=errorMessage(error);}}finally{if(currentReconcile===reconcileRevision){reconciling=false;drainBufferedEvents();}}}
 socket.on('connect',()=>{void reconcileTransport();});
 socket.on('disconnect',()=>{reconcileRevision+=1;reconciling=false;bufferedEvents=[];rejectPending(new Error('WBA transport disconnected'));if(Array.isArray(socket.sendBuffer))socket.sendBuffer.length=0;status.hidden=false;status.textContent='Extension host disconnected';});
 socket.on('connect_error',error=>{status.hidden=false;status.textContent=errorMessage(error);});
@@ -609,9 +652,11 @@ window.addEventListener('message',event=>{
   if(event.source!==frame.contentWindow)return;
   const data=event.data;
   if(!data||data.__te2ExtensionWebview!==true)return;
+  if(!documentToken||data.documentToken!==documentToken)return;
   if(data.kind==='ready'){
     ready=true;
     for(const entry of queued.splice(0))deliver(entry[0],entry[1]);
+    status.hidden=true;
     return;
   }
   if(data.kind==='message'){
@@ -625,6 +670,8 @@ window.addEventListener('message',event=>{
     persist();
   }else if(data.kind==='contextmenu'){
     void openContextMenu(data.value);
+  }else if(data.kind==='link'){
+    void rpc('vscode.webview.openLink',{surfaceId,clientInstanceId,serverEpoch:transport.serverEpoch,surfaceGeneration:transport.surfaceGeneration,htmlRevision:transport.htmlRevision,href:data.value?.href}).catch(error=>console.error('[extension-webview] link failed',error));
   }
 });
 window.addEventListener('pointerdown',event=>{if(!contextMenu.hidden&&!contextMenu.contains(event.target))closeContextMenu();},true);
@@ -637,6 +684,7 @@ export class WebviewRuntime {
   // Background startup belongs to this workspace/session, never its successor.
   private activationController = new AbortController();
   private pendingPrimaryActivations = 0;
+  private primaryMembershipComplete = false;
   private readonly serverEpoch = crypto.randomUUID();
   private readonly providers = new Map<string, WebviewProvider>();
   private readonly surfaces = new Map<string, ExtensionWebviewSurface>();
@@ -660,6 +708,7 @@ export class WebviewRuntime {
       surfaceId: string;
       runtimeId: string;
       record: WebviewReconstructionRecord;
+      htmlRevision: number;
       expiresAt: number;
     }
   >();
@@ -673,7 +722,7 @@ export class WebviewRuntime {
   handleMainThreadRequest(message: DecodedExtHostRpc): WebviewMainThreadResult {
     const rpcId = Number(message.rpcId);
     const method = stringValue(message.method);
-    const args = Array.isArray(message.args) ? message.args : [];
+    const args = isUnknownArray(message.args) ? message.args : [];
     try {
       if (rpcId === this.runtime.rpcIds.MainThreadWebviewViews) {
         return this.handleViewRequest(method, args);
@@ -694,6 +743,7 @@ export class WebviewRuntime {
     const { signal } = this.activationController;
     const contributions = this.primaryContributions();
     this.pendingPrimaryActivations++;
+    this.primaryMembershipComplete = false;
     try {
       await Promise.all(
         contributions.map(async (contribution) => {
@@ -717,6 +767,7 @@ export class WebviewRuntime {
     } finally {
       if (this.activationController.signal === signal) {
         this.pendingPrimaryActivations--;
+        this.primaryMembershipComplete = this.pendingPrimaryActivations === 0;
       }
     }
     if (!signal.aborted) this.emitSnapshot();
@@ -726,6 +777,7 @@ export class WebviewRuntime {
     this.activationController.abort();
     this.activationController = new AbortController();
     this.pendingPrimaryActivations = 0;
+    this.primaryMembershipComplete = false;
     const oldWorkspace = this.workspaceFolder();
     for (const runtimeSurface of [...this.runtimeSurfaces.values()]) {
       try {
@@ -838,7 +890,7 @@ export class WebviewRuntime {
         for (let index = transport.journal.length - 1; index >= 0; index -= 1) {
           const event = transport.journal[index];
           if (
-            event.event === "reload" &&
+            event?.event === "reload" &&
             event.htmlRevision === runtimeSurface.htmlRevision
           ) {
             revisionStart = index;
@@ -862,6 +914,7 @@ export class WebviewRuntime {
         surfaceId: surface.surfaceId,
         runtimeId: runtimeSurface.runtimeId,
         record,
+        htmlRevision: runtimeSurface.htmlRevision,
         expiresAt: Date.now() + 30_000,
       });
       this.pruneBootstrapTokens();
@@ -896,7 +949,7 @@ export class WebviewRuntime {
       typeof params.jsonMessage === "string"
         ? params.jsonMessage
         : JSON.stringify(params.message ?? null);
-    const buffers = Array.isArray(params.buffers)
+    const buffers = isUnknownArray(params.buffers)
       ? params.buffers.filter(
           (value): value is Uint8Array => value instanceof Uint8Array,
         )
@@ -925,6 +978,56 @@ export class WebviewRuntime {
       vscodeState: params.vscodeState,
       localStorage: params.localStorage,
     });
+  }
+
+  linkTarget(params: JsonObject): { kind: "file"; uri: UriRecord; options: JsonObject } | { kind: "command"; command: string; arguments: unknown[] } {
+    const surface = this.requiredSurface(params.surfaceId);
+    const client = stringValue(params.clientInstanceId);
+    if (!client) throw new Error("Missing webview link client identity");
+    const runtime = this.requiredRuntimeSurface(surface, client);
+    const transport = this.requiredTransport(runtime.runtimeId);
+    if (params.serverEpoch !== this.serverEpoch || params.surfaceGeneration !== transport.surfaceGeneration ||
+        params.htmlRevision !== runtime.htmlRevision) throw new Error("Stale webview link document");
+    const href = stringValue(params.href);
+    if (!href || href.length > 16384 || /[\u0000-\u001f]/.test(href)) throw new Error("Invalid webview link");
+    const base = runtime.sourcePath || this.runtime.getActiveDocument?.();
+    let url = new URL(href, base ? pathToFileURL(base).href : undefined);
+    const resourcePrefix = `${PUBLIC_WEBVIEW_BASE}/resource/`;
+    if (url.pathname.startsWith(resourcePrefix)) {
+      const parts = url.pathname.slice(resourcePrefix.length).split("/");
+      const token = decodeURIComponent(parts[0] || "");
+      const scope = this.resourceScopesByToken.get(token);
+      if (!scope || token !== runtime.resourceScopeToken || !scope.runtimeIds.has(runtime.runtimeId)) {
+        throw new Error("Webview file link has a foreign resource scope");
+      }
+      const scheme = decodeURIComponent(parts[1] || "");
+      const authority = decodeURIComponent(parts[2] || "");
+      if (!["file", "vscode-remote"].includes(scheme)) throw new Error("Unsupported webview file resource scheme");
+      url = new URL(`${scheme}://${authority === "_" ? "" : authority}/${parts.slice(3).join("/")}${url.search}${url.hash}`);
+    }
+    if (url.protocol === "command:") {
+      const command = decodeURIComponent(url.pathname);
+      const policy = runtime.options.enableCommandUris;
+      if (!(policy === true || isUnknownArray(policy) && policy.includes(command))) throw new Error("Webview command URI is not enabled");
+      const args: unknown = url.search ? JSON.parse(decodeURIComponent(url.search.slice(1))) : [];
+      if (!command || url.host || !isUnknownArray(args)) throw new Error("Invalid webview command URI");
+      return { kind: "command", command, arguments: args };
+    }
+    if (!["file:", "vscode-remote:"].includes(url.protocol) || url.username || url.password || url.search) {
+      throw new Error("Unsupported webview link scheme or parameters");
+    }
+    const filePath = decodeURIComponent(url.pathname);
+    if (!filePath.startsWith("/") || filePath.includes("\0") || url.protocol === "file:" && url.host && url.host !== "localhost") {
+      throw new Error("Invalid webview file URI");
+    }
+    const options: JsonObject = {};
+    const position = /^#L?(\d+)(?:[,C:](\d+))?$/i.exec(url.hash);
+    if (position) {
+      const line = Number(position[1]), column = Number(position[2] || 1);
+      if (!Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(column) || column < 1) throw new Error("Invalid webview link position");
+      options.selection = { startLineNumber: line, startColumn: column, endLineNumber: line, endColumn: column };
+    }
+    return { kind: "file", uri: { scheme: url.protocol.slice(0, -1), authority: url.host, path: filePath }, options };
   }
 
   async resetClientState(params: JsonObject): Promise<JsonObject> {
@@ -985,11 +1088,15 @@ export class WebviewRuntime {
     if (!runtimeSurface || runtimeSurface.surfaceId !== surfaceId) {
       throw new Error("extension webview runtime is no longer available");
     }
+    if (runtimeSurface.htmlRevision !== bootstrap.htmlRevision) {
+      throw new Error("extension webview document revision changed before load");
+    }
     return transformWebviewHtml(
       this.bindResourceScope(runtimeSurface).token,
       runtimeSurface.html,
       resourceOrigin,
       bootstrap.record,
+      bootstrapToken,
     );
   }
 
@@ -1236,6 +1343,8 @@ export class WebviewRuntime {
         viewColumn: panelViewColumn(showOptions.viewColumn),
         iconUrl: "",
         iconResource: null,
+        iconId: "",
+        sourcePath: this.runtime.getActiveDocument?.() ?? "",
       };
       this.surfaces.set(surfaceId, surface);
       this.runtimeSurfaces.set(surface.runtimeId, surface);
@@ -1269,8 +1378,11 @@ export class WebviewRuntime {
           uriRecord(args[1].light) ??
           uriRecord(args[1]))
         : null;
-      surface.iconResource = icon;
-      surface.iconUrl = resourceUrl(surface.surfaceId, icon);
+      surface.iconId = themeIconId(args[1]);
+      const extension = this.runtime.getExtensions().find(value => isRecord(value) && extensionIdentifier(value) === surface.extensionId);
+      surface.iconResource = surface.iconId ? null : existingIcon(surface.extensionLocation, icon,
+        isRecord(extension) ? extension.icon : null);
+      surface.iconUrl = resourceUrl(surface.surfaceId, surface.iconResource);
       this.emitSnapshot();
       return { handled: true };
     }
@@ -1299,7 +1411,7 @@ export class WebviewRuntime {
       const extensionId = extensionIdentifier(rawExtension);
       const containers =
         isRecord(rawExtension.contributes.viewsContainers) &&
-        Array.isArray(rawExtension.contributes.viewsContainers.activitybar)
+        isUnknownArray(rawExtension.contributes.viewsContainers.activitybar)
           ? rawExtension.contributes.viewsContainers.activitybar
           : [];
       const views = isRecord(rawExtension.contributes.views)
@@ -1309,11 +1421,9 @@ export class WebviewRuntime {
         if (!isRecord(rawContainer)) continue;
         const containerId = stringValue(rawContainer.id);
         const contributionLocation = extensionLocation(rawExtension);
-        const icon = extensionResourceUri(
-          contributionLocation,
-          rawContainer.icon,
-        );
-        const descriptors = Array.isArray(views[containerId])
+        const iconId = /^\$\(/.test(stringValue(rawContainer.icon)) ? themeIconId(rawContainer.icon) : "";
+        const icon = iconId ? null : existingIcon(contributionLocation, rawContainer.icon, rawExtension.icon);
+        const descriptors = isUnknownArray(views[containerId])
           ? views[containerId]
           : [];
         for (const rawDescriptor of descriptors) {
@@ -1330,6 +1440,7 @@ export class WebviewRuntime {
             viewType,
             title: stringValue(rawDescriptor.name) || viewType,
             icon,
+            iconId,
           });
         }
       }
@@ -1377,6 +1488,7 @@ export class WebviewRuntime {
       viewColumn: 0,
       iconUrl: resourceUrl(surfaceId, contribution.icon),
       iconResource: contribution.icon,
+      iconId: contribution.iconId,
     };
     this.surfaces.set(surfaceId, surface);
     this.createTransport(surfaceId);
@@ -1651,7 +1763,7 @@ export class WebviewRuntime {
   private documentResourceRoots(
     surface: ExtensionWebviewSurface,
   ): UriRecord[] {
-    const configured = Array.isArray(surface.options.localResourceRoots)
+    const configured = isUnknownArray(surface.options.localResourceRoots)
       ? surface.options.localResourceRoots
           .map(uriRecord)
           .filter((value): value is UriRecord => !!value)
@@ -1775,6 +1887,7 @@ export class WebviewRuntime {
       retainContextWhenHidden: surface.retainContextWhenHidden,
       viewColumn: surface.viewColumn,
       iconUrl: surface.iconUrl,
+      iconId: surface.iconId || "",
     };
   }
 
@@ -1794,7 +1907,8 @@ export class WebviewRuntime {
       authoritative,
       // Individual views may be ready while other providers are still activating.
       // Publish those views immediately, but absence is not removal yet.
-      membershipComplete: this.pendingPrimaryActivations === 0,
+      membershipComplete: reason === "workspace_switch" ||
+        (this.primaryMembershipComplete && this.pendingPrimaryActivations === 0),
       reason,
       surfaces,
     };

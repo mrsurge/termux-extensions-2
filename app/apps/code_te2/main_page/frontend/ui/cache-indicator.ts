@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 // @ts-check
 
 interface CacheIndicatorInfo {
@@ -19,7 +20,7 @@ interface CacheIndicatorControllerDeps {
 }
 
 function asCacheIndicatorInfo(value: unknown): CacheIndicatorInfo | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!value || typeof value !== 'object' || isUnknownArray(value)) return null;
   return value as CacheIndicatorInfo;
 }
 

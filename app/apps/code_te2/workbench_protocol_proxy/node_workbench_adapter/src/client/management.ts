@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../protocol/value-types.ts';
 import * as http from "node:http";
 
 export interface ManagementState {
@@ -82,7 +83,7 @@ export interface ManagementConnectResult {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function includeBuiltinFromEnv(env: Record<string, string | undefined>): boolean {
@@ -133,7 +134,7 @@ async function scanExtensions(
   const scanned = await runtime.spanTraceAsync("connect.scanExtensions.rpc", () =>
     runtime.refs.mgmtIpc!.call("remoteExtensionsScanner", "scanExtensions", ["en", null, [], null, null]),
   );
-  if (!Array.isArray(scanned)) return [];
+  if (!isUnknownArray(scanned)) return [];
   const includeBuiltin = includeBuiltinFromEnv(runtime.env);
   return scanned.filter((ext) => includeBuiltin || (isRecord(ext) && ext.isBuiltin === false));
 }
@@ -145,7 +146,7 @@ function sanitizeScannedExtensions(
   authority: string,
 ): unknown[] {
   try {
-    if (String(runtime.env.TE2_DEBUG_SCAN_SHAPE || "") === "1" && Array.isArray(scannedExtensions)) {
+    if (String(runtime.env.TE2_DEBUG_SCAN_SHAPE || "") === "1" && isUnknownArray(scannedExtensions)) {
       const sample = scannedExtensions.slice(0, 5).map((ext) => {
         const identifier = isRecord(ext) && isRecord(ext.identifier) ? ext.identifier : null;
         const packageJson = isRecord(ext) && isRecord(ext.packageJSON) ? ext.packageJSON : null;
@@ -162,7 +163,7 @@ function sanitizeScannedExtensions(
       runtime.onEvent({ type: "mgmt/scanExtensions_shape", ts_ms: Date.now(), sample });
     }
     const authForLoc = useRemote ? authority : null;
-    if (!Array.isArray(scannedExtensions)) return [];
+    if (!isUnknownArray(scannedExtensions)) return [];
     return scannedExtensions.map((ext) => runtime.sanitizeExtensionForInit(ext, authForLoc)).filter(Boolean);
   } catch {
     return [];
@@ -178,6 +179,7 @@ const MANIFEST_OWNED_EXTENSION_FIELDS = [
   "browser",
   "activationEvents",
   "contributes",
+  "icon",
   "extensionDependencies",
   "extensionPack",
 ] as const;
@@ -243,7 +245,7 @@ export async function loadProductVersionFromAppRoot(
     if (!appRootPath || typeof appRootPath !== "string") return null;
     const productPath = runtime.joinPath(String(appRootPath), "product.json");
     const raw = await runtime.readTextFile(productPath);
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const version = isRecord(parsed) ? parsed.version : null;
     if (typeof version === "string" && version.trim()) {
       runtime.refs.productVersion = version.trim();
@@ -360,7 +362,7 @@ export async function connectManagementSession(
       type: "mgmt/scanExtensions",
       ts_ms: Date.now(),
       ok: true,
-      count: Array.isArray(scannedExtensions) ? scannedExtensions.length : null,
+      count: isUnknownArray(scannedExtensions) ? scannedExtensions.length : null,
       source: shouldSkipMgmtScan(runtime.env) ? "skipped" : extensionsSource(runtime.env),
     });
   } catch (error) {
@@ -405,7 +407,7 @@ export async function connectManagementSession(
   }
   runtime.refs.rawExtensionConfigs = runtime.extractExtensionConfigDefaults(scannedExtensions);
   logLoadedExtensions(runtime, scannedExtensions);
-  runtime.refs.extensions = Array.isArray(scannedExtensions) ? scannedExtensions : [];
+  runtime.refs.extensions = isUnknownArray(scannedExtensions) ? scannedExtensions : [];
 
   try {
     if (!shouldSkipMgmtScan(runtime.env) && runtime.refs.mgmtIpc) {

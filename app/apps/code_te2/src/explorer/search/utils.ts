@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 export interface ExplorerDiffBaseCommitInfo {
   hash?: string;
   short?: string;
@@ -51,7 +52,7 @@ export function formatDiffBaseLabel(
 }
 
 export function firstDiffLine(change: ExplorerDiffChangeLike | null | undefined): number {
-  const hunks = Array.isArray(change?.hunks) ? change.hunks : [];
+  const hunks = isUnknownArray(change?.hunks) ? change.hunks : [];
   for (const hunk of hunks) {
     if (typeof hunk?.newStart === 'number' && hunk.newStart > 0) {
       return hunk.newStart;

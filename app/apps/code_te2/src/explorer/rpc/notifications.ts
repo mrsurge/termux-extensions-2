@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import {
   EXPLORER_RPC_METHODS,
   EXPLORER_RPC_NOTIFICATIONS,
@@ -107,7 +108,7 @@ interface ExplorerNotificationHandlerDeps {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !isUnknownArray(value);
 }
 
 function getStringValue(value: unknown): string | null {
@@ -163,9 +164,9 @@ function coerceGitStatus(payload: JsonObject): ExplorerGitStatus {
   }
   if (typeof payload.ahead === "number") status.ahead = payload.ahead;
   if (typeof payload.behind === "number") status.behind = payload.behind;
-  if (Array.isArray(payload.staged)) status.staged = payload.staged;
-  if (Array.isArray(payload.unstaged)) status.unstaged = payload.unstaged;
-  if (Array.isArray(payload.untracked)) status.untracked = payload.untracked;
+  if (isUnknownArray(payload.staged)) status.staged = payload.staged;
+  if (isUnknownArray(payload.unstaged)) status.unstaged = payload.unstaged;
+  if (isUnknownArray(payload.untracked)) status.untracked = payload.untracked;
   return status;
 }
 
@@ -308,7 +309,7 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated: {
-        const dirs = Array.isArray(payload.dirs)
+        const dirs = isUnknownArray(payload.dirs)
           ? payload.dirs.filter(
               (value): value is string => typeof value === "string",
             )

@@ -1,28 +1,26 @@
 // @ts-check
 
-/**
- * @param {{
- *   settingsModalEl: HTMLElement,
- *   settingsCloseEl: HTMLElement,
- *   settingsConsoleWorkerIdEl: HTMLElement,
- *   settingsClientIdentityEl: HTMLElement,
- *   settingsClientCopyEl: HTMLButtonElement,
- *   settingsClientResetEl: HTMLButtonElement,
- *   menuEditorSettingsEl: HTMLElement,
- *   extManagerModalEl: HTMLElement,
- *   extManagerCloseEl: HTMLElement,
- *   settingsExtStripEl: HTMLElement,
- *   closeAllMenus: () => void,
- *   refreshEditorSettingsModal: () => Promise<any> | void,
- *   refreshEditorExtManagerModal: () => Promise<any> | void,
- *   loadCustomSettings: () => Promise<any> | void,
- *   getConsoleWorkerId: () => string | null,
- *   getClientIdentity: () => {clientInstanceId: string, provider: string, label: string},
- *   resetClientIdentity: () => Promise<void>,
- *   toast: (message: string, timeoutMs?: number) => void,
- * }} deps
- */
-export function createSettingsModalsController(deps: any) {
+interface Dependencies {  settingsModalEl: HTMLElement,
+  settingsCloseEl: HTMLElement,
+  settingsConsoleWorkerIdEl: HTMLElement,
+  settingsClientIdentityEl: HTMLElement,
+  settingsClientCopyEl: HTMLButtonElement,
+  settingsClientResetEl: HTMLButtonElement,
+  menuEditorSettingsEl: HTMLElement,
+  extManagerModalEl: HTMLElement,
+  extManagerCloseEl: HTMLElement,
+  settingsExtStripEl: HTMLElement,
+  closeAllMenus: () => void,
+  refreshEditorSettingsModal: () => Promise<unknown> | void,
+  refreshEditorExtManagerModal: () => Promise<unknown> | void,
+  loadCustomSettings: () => Promise<unknown> | void,
+  getConsoleWorkerId: () => string | null,
+  getClientIdentity: () => {clientInstanceId: string, provider: string, label: string},
+  resetClientIdentity: () => Promise<void>,
+  toast: (message: string, timeoutMs?: number) => void,
+}
+
+export function createSettingsModalsController(deps: Dependencies) {
   let identityResetPending = false;
 
   function refreshClientIdentity() {

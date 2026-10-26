@@ -155,6 +155,9 @@ interface MonacoRuntimeSocketLike {
   connected?: boolean;
   on?(eventName: string, handler: (payload: unknown) => void): void;
   emit?(eventName: string, payload: Record<string, unknown>): void;
+  off?(eventName: string, handler: (payload: unknown) => void): void;
+  disconnect?(): void;
+  volatile?: { emit(eventName: string, payload: Record<string, unknown>): void };
 }
 
 interface MonacoSocketIoLike {
@@ -177,14 +180,14 @@ interface MonacoTouchSelectionGlobal {
         defaultTools: Map<string, MonacoTouchSelectionTool>;
         openMenu(): void;
         closeMenu(): void;
-      }) => Iterable<MonacoTouchSelectionTool> | undefined;
+      }) => Iterable<MonacoTouchSelectionTool, unknown, unknown> | undefined;
       navigationTools?: (options: {
         editor: MonacoRuntimeEditorLike;
         selectorMenu: HTMLDivElement;
         defaultTools: Map<string, MonacoTouchSelectionTool>;
         openMenu(): void;
         closeMenu(): void;
-      }) => Iterable<MonacoTouchSelectionTool> | undefined;
+      }) => Iterable<MonacoTouchSelectionTool, unknown, unknown> | undefined;
     },
   ): void;
 }

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import type { ShortcutIcon } from './types.ts';
 import { normStr } from './utils.ts';
 
@@ -23,7 +24,7 @@ export function renderIconNode(icon: unknown, sizePx: number | null = 16, fallba
     wrap.style.height = `${sizePx}px`;
   }
 
-  const i = icon && typeof icon === 'object' && !Array.isArray(icon) ? icon as ShortcutIcon : null;
+  const i = icon && typeof icon === 'object' && !isUnknownArray(icon) ? icon as ShortcutIcon : null;
   if (!i) {
     if (fallbackText) wrap.textContent = fallbackText;
     return wrap;
@@ -31,6 +32,18 @@ export function renderIconNode(icon: unknown, sizePx: number | null = 16, fallba
 
   if (i.kind === 'emoji') {
     wrap.textContent = normStr(i.emoji);
+    return wrap;
+  }
+
+  if (i.kind === 'codicon') {
+    const match = /^([a-z0-9-]+)(~spin)?$/i.exec(normStr(i.name));
+    if (match) {
+      const glyph = document.createElement('span');
+      glyph.className = `codicon codicon-${match[1]}${match[2] ? ' codicon-modifier-spin' : ''}`;
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.style.fontSize = sizePx === null ? 'inherit' : `${sizePx}px`;
+      wrap.appendChild(glyph);
+    } else if (fallbackText) wrap.textContent = fallbackText;
     return wrap;
   }
 

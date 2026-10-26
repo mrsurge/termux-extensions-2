@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import { openProjectDirectory } from '../../../../../static/js/te_project_directory_intent.mjs';
 
 export async function consumeProjectLaunch(options: {
@@ -14,7 +15,7 @@ export async function consumeProjectLaunch(options: {
   await options.connect();
   await openProjectDirectory({ directory, dialog: { confirm: options.confirm }, request: async (params) => {
     const result = await options.request(params);
-    if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('Invalid project response');
+    if (!result || typeof result !== 'object' || isUnknownArray(result)) throw new Error('Invalid project response');
     return result as Record<string, unknown>;
   } });
 }

@@ -1,9 +1,10 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 export interface IssuesCommandPayloadLike {
   action?: string;
 }
 
 function asIssuesCommandPayloadLike(value: unknown): IssuesCommandPayloadLike | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as IssuesCommandPayloadLike
     : null;
 }

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 import {
   EXPLORER_RPC_METHODS,
@@ -54,7 +55,7 @@ interface MutableProjectionNode extends ExplorerNameTreeNode {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function stringValue(value: unknown): string | null {
@@ -87,7 +88,7 @@ function entryKind(value: unknown): 'file' | 'dir' {
 }
 
 function normalizeSearchItems(value: unknown): ExplorerNameSearchItem[] {
-  if (!isRecord(value) || !Array.isArray(value.results)) return [];
+  if (!isRecord(value) || !isUnknownArray(value.results)) return [];
   const items: ExplorerNameSearchItem[] = [];
   for (const raw of value.results) {
     if (!isRecord(raw)) continue;
@@ -103,7 +104,7 @@ function normalizeSearchItems(value: unknown): ExplorerNameSearchItem[] {
 }
 
 function normalizeTreeEntries(value: unknown): ExplorerTreeEntry[] {
-  if (!isRecord(value) || !Array.isArray(value.entries)) return [];
+  if (!isRecord(value) || !isUnknownArray(value.entries)) return [];
   return value.entries.filter(
     (entry): entry is ExplorerTreeEntry =>
       isRecord(entry) && Boolean(normalizeRel(entry.rel || entry.path)),
@@ -114,7 +115,7 @@ function normalizeShallowListings(
   value: unknown,
 ): Map<string, ExplorerTreeEntry[]> {
   const listings = new Map<string, ExplorerTreeEntry[]>();
-  if (!Array.isArray(value)) return listings;
+  if (!isUnknownArray(value)) return listings;
   for (const raw of value) {
     if (!isRecord(raw)) continue;
     const cwd = normalizeRel(raw.cwd);

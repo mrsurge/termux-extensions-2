@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 import {
   EXPLORER_RPC_METHODS,
   type ExplorerRpcMethod,
@@ -51,7 +52,7 @@ export function buildDiffBaseOptions(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function normalizeDiffBase(value: unknown): ExplorerDiffBaseInfo {
@@ -261,7 +262,7 @@ export function createExplorerDiffBaseController(
     }
     try {
       const result = await requestExplorerRpc(EXPLORER_RPC_METHODS.gitCommitsList, { limit: 50 });
-      const commits = Array.isArray(result.commits)
+      const commits = isUnknownArray(result.commits)
         ? (result.commits as ExplorerCommitChoice[])
         : [];
       renderDropdown(dropdown, commits);

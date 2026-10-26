@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import {
   EXTENSION_ACTIVITY_EVENT,
   EXTENSION_ACTIVITY_READY_EVENT,
@@ -70,11 +71,11 @@ const MAX_ACTIVITY_ITEMS = 500;
 const MAX_RENDERED_LOG_CHARS = 512 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !isUnknownArray(value);
 }
 
 function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
+  return isUnknownArray(value) ? (value as T[]) : [];
 }
 
 function snapshotFromReply(value: unknown): ExtensionActivitySnapshot {

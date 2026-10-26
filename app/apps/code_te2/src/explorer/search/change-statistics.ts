@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 interface ChangeStatistics { added: number; deleted: number }
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' ? value as Record<string, unknown> : null;
@@ -13,11 +14,11 @@ export function changeStatistics(value: unknown): ChangeStatistics | null {
   if (summary && count(summary.added) && count(summary.deleted)) {
     return { added: summary.added, deleted: summary.deleted };
   }
-  if (change.error || summary?.contentSuppressed || !Array.isArray(change.hunks)) return null;
+  if (change.error || summary?.contentSuppressed || !isUnknownArray(change.hunks)) return null;
   let added = 0, deleted = 0;
   for (const hunk of change.hunks) {
     const lines = record(hunk)?.lines;
-    if (!Array.isArray(lines)) continue;
+    if (!isUnknownArray(lines)) continue;
     for (const line of lines) {
       const type = record(line)?.type;
       if (type === 'add' || type === 'add-draft') added++;

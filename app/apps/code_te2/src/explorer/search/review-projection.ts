@@ -1,6 +1,7 @@
+import { isUnknownArray } from '../../rpc/value-types.ts';
 type Row = Record<string, unknown> & { rel: string; identity: string; hunks: unknown[] };
 function record(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+  return !!value && typeof value === 'object' && !isUnknownArray(value);
 }
 
 // Client-side projection mirror only; membership/identity belong to the backend.
@@ -21,7 +22,7 @@ export function createReviewProjection() {
       if (currentProject !== project) reset(currentProject);
       if (!record(value) || value.complete !== true || value.projectRoot !== currentProject
         || !Number.isSafeInteger(value.projectGeneration) || !Number.isSafeInteger(value.revision)
-        || typeof value.projectionId !== 'string' || !value.projectionId || !Array.isArray(value.entries)) return null;
+        || typeof value.projectionId !== 'string' || !value.projectionId || !isUnknownArray(value.entries)) return null;
       const nextGeneration = value.projectGeneration as number;
       const nextRevision = value.revision as number;
       if (nextGeneration < 0 || nextRevision < 0) return null;
@@ -30,7 +31,7 @@ export function createReviewProjection() {
       const next = new Map<string, Row>();
       for (const item of value.entries) {
         if (!record(item) || typeof item.rel !== 'string' || !item.rel || typeof item.identity !== 'string'
-          || !Array.isArray(item.hunks) || next.has(item.rel)) return null;
+          || !isUnknownArray(item.hunks) || next.has(item.rel)) return null;
         const old = entries.get(item.rel);
         next.set(item.rel, old?.identity === item.identity ? old : item as Row);
       }

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 export interface DiagnosticIssueCounts {
   errors: number;
   warnings: number;
@@ -12,7 +13,7 @@ function boundedCount(value: unknown): number {
 }
 
 export function diagnosticIssueCounts(payload: unknown): DiagnosticIssueCounts {
-  const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+  const record = payload && typeof payload === 'object' && !isUnknownArray(payload)
     ? payload as Record<string, unknown>
     : {};
   const errors = boundedCount(record.errors);

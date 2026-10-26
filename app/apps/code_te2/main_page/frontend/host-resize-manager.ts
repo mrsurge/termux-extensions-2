@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../src/rpc/value-types.ts';
 // Host resize manager - handle main-page panel resizing with drag handles.
 
 import { clampTerminalDrawerHeight } from './ui/drawer-sizing.ts';
@@ -30,7 +31,7 @@ function eventClientPoint(event: MouseEvent | TouchEvent): { clientX: number; cl
 
 function parseLayoutPreferences(raw: string | null): LayoutPreferences {
   const parsed: unknown = JSON.parse(raw || '{}');
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+  return parsed && typeof parsed === 'object' && !isUnknownArray(parsed)
     ? parsed as LayoutPreferences
     : {};
 }

@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 import {
   SHORTCUT_KIND_FRAMEWORK_APP,
   UI_PREF_KEY_ACTIVE,
@@ -18,7 +19,7 @@ export interface ActiveShortcutSelection {
 }
 
 export function collectShortcuts(uiPrefs: UnknownRecord): SidebarShortcut[] {
-  const raw = Array.isArray(uiPrefs?.[UI_PREF_KEY_SHORTCUTS])
+  const raw = isUnknownArray(uiPrefs?.[UI_PREF_KEY_SHORTCUTS])
     ? uiPrefs[UI_PREF_KEY_SHORTCUTS]
     : [];
   const out: SidebarShortcut[] = [];
@@ -46,7 +47,7 @@ export function collectShortcuts(uiPrefs: UnknownRecord): SidebarShortcut[] {
       url,
       version: normStr(sc.version),
       icon:
-        sc.icon && typeof sc.icon === "object" && !Array.isArray(sc.icon)
+        sc.icon && typeof sc.icon === "object" && !isUnknownArray(sc.icon)
           ? (sc.icon as SidebarShortcut["icon"])
           : null,
       load: normalizeLoad(sc.load),
@@ -55,7 +56,7 @@ export function collectShortcuts(uiPrefs: UnknownRecord): SidebarShortcut[] {
         ? Number(sc.last_used)
         : 0,
       state:
-        sc.state && typeof sc.state === "object" && !Array.isArray(sc.state)
+        sc.state && typeof sc.state === "object" && !isUnknownArray(sc.state)
           ? (sc.state as SidebarShortcut["state"])
           : undefined,
       state_kind: normStr(sc.state_kind || sc.stateKind),
@@ -72,7 +73,7 @@ export function resolveActive(
   const activeId =
     normStr(clientActiveShortcutId) || normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
   if (!activeId) return null;
-  const list = Array.isArray(shortcuts) ? shortcuts : collectShortcuts(uiPrefs);
+  const list = isUnknownArray(shortcuts) ? shortcuts : collectShortcuts(uiPrefs);
   return (
     list.find(
       (sc) =>
@@ -105,7 +106,7 @@ export function ensureActiveSelection(
 ): ActiveShortcutSelection {
   const activeId =
     normStr(clientActiveShortcutId) || normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
-  const list = Array.isArray(shortcuts) ? shortcuts : collectShortcuts(uiPrefs);
+  const list = isUnknownArray(shortcuts) ? shortcuts : collectShortcuts(uiPrefs);
   if (!list.length) {
     return { active: null, activeId: "", clientActiveShortcutId };
   }

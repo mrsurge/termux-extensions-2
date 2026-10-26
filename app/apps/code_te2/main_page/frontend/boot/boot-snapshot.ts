@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 type JsonRecord = Record<string, unknown>;
 
 export interface HostBootSnapshot {
@@ -21,7 +22,7 @@ interface RequestBootSnapshotDeps {
 }
 
 function asRecord(value: unknown): JsonRecord | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
+  return value != null && typeof value === 'object' && !isUnknownArray(value)
     ? value as JsonRecord
     : null;
 }

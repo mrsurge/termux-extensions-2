@@ -24,7 +24,7 @@ export async function readRuntimeFile(path: URL): Promise<Uint8Array> {
 // Concurrent first requests share I/O; failed reads remain retryable.
 export function createStaticAssetLoader(path: URL): () => Promise<Uint8Array> {
   let pending: Promise<Uint8Array> | undefined;
-  return () => pending ??= readRuntimeFile(path).catch(error => {
+  return () => pending ??= readRuntimeFile(path).catch((error: unknown) => {
     pending = undefined;
     throw error;
   });

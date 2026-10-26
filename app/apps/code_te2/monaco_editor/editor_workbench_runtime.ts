@@ -1,3 +1,4 @@
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { isAdapterReady, wbIsFrameworkReady, wbIsBarrierOpen } from './editor_workbench_barrier_utils.js';
 import { wbFlushDidChangeIfReady, wbFlushPendingAfterOpen, wbFlushSymbolsIfReady, wbPublishDidChange } from './editor_workbench_flush_utils.js';
 import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
@@ -131,7 +132,7 @@ function asString(value: unknown): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
+  return value != null && typeof value === 'object' && !isUnknownArray(value);
 }
 
 function reviveMonacoMarkerUri(monacoRef: MonacoLike, value: unknown): MonacoUriLike | null {
@@ -152,7 +153,7 @@ function projectMarkerCode(monacoRef: MonacoLike, value: unknown): unknown {
 }
 
 function projectRelatedInformation(monacoRef: MonacoLike, value: unknown): unknown[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!isUnknownArray(value)) return undefined;
   const projected: unknown[] = [];
   for (const item of value) {
     if (!isRecord(item)) continue;
@@ -386,7 +387,7 @@ export function createEditorWorkbenchRuntime(
       promise.then((value) => {
         deps.clearTimeoutFn(timer);
         resolve(value);
-      }, (error) => {
+      }, (error: unknown) => {
         deps.clearTimeoutFn(timer);
         reject(error instanceof Error ? error : new Error(String(error || label + '_failed')));
       });
@@ -863,7 +864,7 @@ export function createEditorWorkbenchRuntime(
         } catch (error) {
           console.warn('[readiness] post-ready folding warmup failed (' + String(reason || 'open') + ')', error);
         }
-      }).catch((error) => {
+      }).catch((error: unknown) => {
         console.warn('[readiness] post-ready structure refresh failed (' + String(reason || 'open') + ')', error);
       });
     }, 0);
@@ -1013,7 +1014,7 @@ export function createEditorWorkbenchRuntime(
         requestId: payload.requestId,
       });
       return result;
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       requestFailed = true;
       recordProjectionTrace('open_file_failed', {
         path: payload.path,
@@ -1040,7 +1041,7 @@ export function createEditorWorkbenchRuntime(
       }
       const pending = wbFlow.pendingOpenFile;
       if (!pending || (requestFailed && sameOpenRequest(pending, payload))) return;
-      void flushActiveModelOpen('queued_after_open').catch((error) => {
+      void flushActiveModelOpen('queued_after_open').catch((error: unknown) => {
         console.warn('[readiness] queued active model open failed', error);
       });
     };
@@ -1129,7 +1130,7 @@ export function createEditorWorkbenchRuntime(
       return Promise.resolve({ ok: false, disabled: true });
     }
     console.log('[readiness] baton arrived, flushing active model open');
-    return flushActiveModelOpen('baton').catch((error) => {
+    return flushActiveModelOpen('baton').catch((error: unknown) => {
       console.warn('[readiness] baton replay open_file failed', error);
       throw error instanceof Error ? error : new Error(String(error || 'baton_open_failed'));
     });
@@ -1177,7 +1178,7 @@ export function createEditorWorkbenchRuntime(
       }
       if (kind === 'hover' && seq !== languageBridge.hoverSeq) return { ok: false, stale: true };
       return { ok: true, result };
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       return { ok: false, error: String(error && (error as { message?: unknown }).message ? (error as { message: unknown }).message : error || 'error') };
     });
   }

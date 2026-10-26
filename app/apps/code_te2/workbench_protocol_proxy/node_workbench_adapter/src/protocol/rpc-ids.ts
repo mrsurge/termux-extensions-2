@@ -1,4 +1,4 @@
-import { PINNED_RPC_IDS, PINNED_CODE_SERVER_VERSION, PINNED_CODE_SERVER_COMMIT } from "./pinned-rpc-ids.mjs";
+import { PINNED_RPC_IDS, PINNED_CODE_SERVER_VERSION, PINNED_CODE_SERVER_COMMIT } from "./pinned-rpc-ids.ts";
 export type RpcIdName = keyof typeof PINNED_RPC_IDS;
 export type RpcIds = Readonly<Record<RpcIdName, number>>;
 
