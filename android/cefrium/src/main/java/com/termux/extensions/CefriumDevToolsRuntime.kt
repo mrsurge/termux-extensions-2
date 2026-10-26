@@ -222,6 +222,7 @@ internal class CefriumDevToolsRuntime(
     private val pendingCommands = mutableMapOf<Long, PendingCommand>()
     private val surfaces = mutableMapOf<String, AndroidDevRuntimeSurface>()
 
+    private val endpoint = CefriumDevToolsEndpoint(android.os.Process.myPid())
     private var server: DevToolsServer? = null
     private var socketBridge: CefriumDevToolsSocketBridge? = null
     private var controlSocket: WebSocket? = null
@@ -259,8 +260,8 @@ internal class CefriumDevToolsRuntime(
         listener.onStatusChanged("starting")
 
         try {
-            val nextServer = DevToolsServer(DEVTOOLS_SOCKET_PREFIX)
-            val nextBridge = CefriumDevToolsSocketBridge(DEVTOOLS_SOCKET_NAME)
+            val nextServer = DevToolsServer(endpoint.prefix)
+            val nextBridge = CefriumDevToolsSocketBridge(endpoint.socketName)
             nextServer.setRemoteDebuggingEnabled(true)
             nextBridge.start()
             synchronized(lock) {
@@ -382,6 +383,7 @@ internal class CefriumDevToolsRuntime(
             .put("status", status)
             .put("controlConnected", controlSocket != null)
             .put("bridgePort", socketBridge?.port ?: JSONObject.NULL)
+            .put("socketName", endpoint.socketName)
             .put("targetCount", targets.size)
             .put("browserTargetCount", browserTargets.size)
             .put("monitorSessionCount", monitorSessions.size)
@@ -1360,8 +1362,6 @@ internal class CefriumDevToolsRuntime(
 
     companion object {
         private const val TAG = "CefriumDevTools"
-        private const val DEVTOOLS_SOCKET_PREFIX = "te2_cefrium"
-        private const val DEVTOOLS_SOCKET_NAME = "${DEVTOOLS_SOCKET_PREFIX}_devtools_remote"
         private const val CONTROL_COMMAND_START = 1_000_000_000L
         private const val FRAME_PROBE_EXPRESSION =
             "JSON.stringify({windowName:String(window.name||''),url:String(location.href)," +

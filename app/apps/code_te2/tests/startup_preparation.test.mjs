@@ -221,7 +221,7 @@ test('real lifecycle stream starts preparation on catalog but releases only on r
       emit(name, payload) { this.handlers.get(name)({ data: JSON.stringify(payload) }); }
     }
     const context = vm.createContext({
-      EventSource, appId: 'code_te2', host: { setTitle() {} },
+      EventSource, window: {}, appId: 'code_te2', host: { setTitle() {} },
       teStateStore: null, debugFullStack: false, runtimeStartupDebug: false,
       startupMark() {}, renderBackendReadinessPlaceholder() {},
       normalizeReadinessStatus: readiness => readiness.status,

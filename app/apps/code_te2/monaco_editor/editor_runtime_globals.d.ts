@@ -1,4 +1,6 @@
 interface MonacoRuntimeEditorOptionMap {
+  cursorStyle?: number;
+  lineNumbers?: number;
   fontFamily?: unknown;
   fontSize?: unknown;
   lineHeight?: unknown;

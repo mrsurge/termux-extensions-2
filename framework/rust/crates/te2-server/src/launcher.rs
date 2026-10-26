@@ -67,6 +67,39 @@ pub(crate) fn runtime_debug_enabled() -> bool {
     })
 }
 
+pub(crate) fn console_debug_enabled() -> bool {
+    crate::console_policy::enabled()
+}
+
+pub(crate) fn console_debug_default() -> bool {
+    console_debug_policy(
+        runtime_debug_enabled(),
+        std::env::var("TE2_DEBUG_CONSOLE").ok().as_deref(),
+    )
+}
+
+fn console_debug_policy(runtime_debug: bool, console: Option<&str>) -> bool {
+    runtime_debug
+        || console.is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+#[cfg(test)]
+#[test]
+fn console_policy_is_independent_of_runtime_diagnostics() {
+    for flag in [None, Some("0"), Some("false"), Some(""), Some("unknown")] {
+        assert!(!console_debug_policy(false, flag));
+        assert!(console_debug_policy(true, flag));
+    }
+    for flag in ["1", "true", "yes", "on", " TRUE "] {
+        assert!(console_debug_policy(false, Some(flag)));
+    }
+}
+
 pub fn launch_app(
     store: &LaunchStore,
     app: &AppDefinition,

@@ -6,7 +6,7 @@ import { bindTerminalShiftButton } from '../../../libs/terminal_runtime/terminal
 import { decode as decodeMessagePack, encode as encodeMessagePack } from '@msgpack/msgpack';
 import {
   getConsoleBridgeStatus,
-  initConsoleBridge,
+  initBuiltinConsoleBridge,
 } from 'te2-console-bridge';
 import {
   TERMINAL_LIFECYCLE_CODEC,
@@ -466,10 +466,10 @@ async function ensureSocketIoClient(): Promise<void> {
 async function ensureTerminalConsoleBridge(workerId = ''): Promise<void> {
   if (terminalConsoleBridgeInitialized) return;
   try {
-    await ensureSocketIoClient();
     const inheritedWorkerId = workerId.trim();
-    const bridge = initConsoleBridge(
-      inheritedWorkerId
+    const bridge = await initBuiltinConsoleBridge({
+      prepare: ensureSocketIoClient,
+      ...(inheritedWorkerId
         ? {
             workerLabel: 'terminal',
             workerId: inheritedWorkerId,
@@ -477,8 +477,8 @@ async function ensureTerminalConsoleBridge(workerId = ''): Promise<void> {
         : {
             workerLabel: 'terminal',
             uniquePerWindow: true,
-          },
-    );
+          }),
+    });
     if (bridge) {
       terminalConsoleBridgeInitialized = true;
       console.info('[terminal] console bridge ready', bridge.workerId);

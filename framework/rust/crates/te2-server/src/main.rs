@@ -5,6 +5,7 @@ mod app_policy;
 mod app_proxy;
 mod app_worker_pipe_bridge;
 mod apps_lifecycle;
+mod console_policy;
 #[path = "../../../../asset_gzip.rs"]
 mod asset_gzip;
 mod framework_services;
@@ -520,6 +521,7 @@ fn build_router_base_with_mcp(
         .merge(frontend_assets::router())
         .merge(android_assets::router())
         .route("/api/health", get(health))
+        .merge(console_policy::router())
         .merge(framework_services::router())
         .merge(runtime_bridge::router())
         .merge(apps_lifecycle::router())

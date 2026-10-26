@@ -1,0 +1,23 @@
+[package]
+name = "te2-runtime-probe-consumers"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+members = ["runtime"]
+resolver = "3"
+
+[dependencies]
+te2-probe-runtime = { path = "runtime" }
+
+[[bin]]
+name = "framework-fixture"
+path = "../src/consumer.rs"
+
+[[bin]]
+name = "worker-fixture"
+path = "../src/consumer.rs"
+
+[profile.release]
+strip = "debuginfo"

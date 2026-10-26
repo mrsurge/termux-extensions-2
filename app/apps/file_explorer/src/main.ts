@@ -1,4 +1,4 @@
-import { initConsoleBridge, getConsoleBridgeStatus } from '/static/js/te2_console_bridge.js';
+import { initBuiltinConsoleBridge, getConsoleBridgeStatus } from '/static/js/te2_console_bridge.js';
 import { getIcon, renderIcon } from '/static/js/file_icons.js';
 import { selectPaths } from '/static/js/file_explorer_selection.mjs';
 import { createListingFilter } from '/static/js/file_explorer_filter.mjs';
@@ -25,9 +25,9 @@ const mountedRoots = new WeakMap<HTMLElement, () => void>();
 function validSort(value: string): TabOptions['sortBy'] { return value === 'size' || value === 'type' || value === 'date' ? value : 'name'; }
 async function startFileExplorerConsoleBridge(options: { workerId?: string } = {}): Promise<unknown> {
   try {
-    await ensureSocketIoLoaded();
     const workerId = (options.workerId ?? '').trim();
-    return await initConsoleBridge({
+    return await initBuiltinConsoleBridge({
+      prepare: async () => { await ensureSocketIoLoaded(); },
       appId: 'file_explorer', workerLabel: 'file_explorer', socketPath: '/te2_console_ws/socket.io', namespace: '/te2_console',
       ...(workerId ? { workerId } : { uniquePerWindow: true }),
     });

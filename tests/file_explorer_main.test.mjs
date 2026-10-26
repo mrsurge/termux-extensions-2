@@ -7,7 +7,7 @@ import { Window } from '../app/apps/code_te2/node_modules/happy-dom/lib/index.js
 import { encode, decode } from '../app/apps/file_explorer/node_modules/@msgpack/msgpack/dist.esm/index.mjs';
 
 const shims = `
-export const initConsoleBridge = () => Promise.resolve(null);
+export const initBuiltinConsoleBridge = () => Promise.resolve(null);
 export const getConsoleBridgeStatus = () => ({});
 export const getIcon = async () => ({codicon:'file'});
 export const renderIcon = (node, icon) => { node.dataset.icon = icon.codicon; };

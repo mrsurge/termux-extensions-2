@@ -921,6 +921,7 @@ fn build_app_bootstrap_payload(
         "state": state,
         "debug_full_stack": debug_full_stack,
         "runtime_debug": crate::launcher::runtime_debug_enabled(),
+        "debug_console": crate::launcher::console_debug_enabled(),
     })
 }
 
@@ -1365,5 +1366,7 @@ mod tests {
         assert_eq!(payload["app"]["frontend_preparation"], true);
         assert_eq!(payload["state"]["activeProject"], "/workspace");
         assert_eq!(payload["debug_full_stack"], true);
+        // Runtime policy may change after snapshot construction.
+        assert!(payload["debug_console"].is_boolean());
     }
 }

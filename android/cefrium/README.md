@@ -11,6 +11,15 @@ entering Gecko builds.
 
 ## Build
 
+Native DevTools uses one process-qualified prefix (`te2_cefrium_<pid>`) for
+both Chromium's `DevToolsServer` and the loopback-to-abstract-socket relay.
+Do not revert to the shared `te2_cefrium_devtools_remote` name: when sibling
+APK variants coexist, Chromium can bind its PID-suffixed fallback while the
+relay keeps contacting another app's base socket (SELinux rejects that access).
+`android.devTools.state.get` exposes the exact `socketName` and bridge port;
+discover them again after process restart. This path does not require frontend
+console log forwarding. Source tests are not installed-APK acceptance.
+
 The module pins the Cefrium SDK and Gradle plugin to `0.9.0`, targets arm64, and
 requires Android API 29 or newer.
 

@@ -32,13 +32,15 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_list_workers(rest)
     if command == "eval":
         return _cmd_eval(rest)
+    if command == "logging":
+        return _cmd_logging(rest)
     if command == "tail":
         return _cmd_tail(rest)
     if command == "search":
         return _cmd_search(rest)
 
     print(f"Unknown console command: {command}", file=sys.stderr)
-    print("Available: list-workers, eval, tail, search", file=sys.stderr)
+    print("Available: list-workers, eval, logging, tail, search", file=sys.stderr)
     return 1
 
 
@@ -95,6 +97,38 @@ def _cmd_list_workers(argv: list[str]) -> int:
     print("No live console workers registered.", file=sys.stderr)
     _try_log_workers()
     return 1
+
+
+def _cmd_logging(argv: list[str]) -> int:
+    """Set the framework's new-page policy, without replay or environment mutation."""
+    from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
+    import msgspec
+
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req: object, fp: object, code: int,
+                             msg: str, headers: object, newurl: str) -> None:
+            return None
+
+    parser = argparse.ArgumentParser(prog="te2 console logging")
+    parser.add_argument("mode", choices=("on", "off", "status"))
+    parser.add_argument("--url", default=None, help="Framework URL")
+    args = parser.parse_args(argv)
+    body = None if args.mode == "status" else json.dumps({"enabled": args.mode == "on"}).encode()
+    request = Request((args.url or _framework_url()).rstrip("/") + "/api/console/logging",
+                      data=body, headers={"Content-Type": "application/json", "X-TE2-Console-Control": "logging"})
+    try:
+        with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=10) as response:
+            raw = response.read(4097)
+        if len(raw) > 4096:
+            raise ValueError("console logging policy response too large")
+        value = msgspec.json.decode(raw, type=dict[str, object])
+        if type(value.get("enabled")) is not bool or value.get("scope") != "new_app_pages":
+            raise ValueError("invalid console logging policy response")
+    except Exception as exc:
+        print(f"Console logging policy failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(value))
+    return 0
 
 
 def _try_log_workers() -> None:

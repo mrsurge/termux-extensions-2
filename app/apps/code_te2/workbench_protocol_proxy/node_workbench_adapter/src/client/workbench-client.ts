@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { editorProperties } from "../extensions/editor-state.mjs";
 import { QuickFixService } from '../extensions/intelligence/code-actions.mjs';
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
@@ -3185,10 +3186,18 @@ export class WorkbenchClient {
   async extensionEditorStateUpdate(
     params: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return await this._runWithClientEditorFacade(params, () => ({
-      ok: this._syncActiveEditorSelection(params),
-      activePath: this.state.activePath,
-    }), {
+    return await this._runWithClientEditorFacade(params, () => {
+      const path = typeof params.path === "string" ? params.path.trim() : "";
+      if (!path || path !== this.state.activePath || !this._activeEditorId ||
+          params.generation !== undefined && params.generation !== this._activeGeneration) {
+        return { ok: false, activePath: this.state.activePath };
+      }
+      // Validate the entire delta before sending anything into the extension host.
+      const properties = editorProperties(params);
+      this._sendExt(_rpcIds.ExtHostEditors, "$acceptEditorPropertiesChanged",
+        [this._activeEditorId, properties], false);
+      return { ok: true, activePath: this.state.activePath };
+    }, {
       label: "editorState.update",
       timeoutMs: 5000,
     });

@@ -2,6 +2,8 @@
 
 CONSOLE_USAGE = """Console commands:
   te2 console list-workers [--url URL]
+  te2 console logging on|off|status [--url URL]
+      Runtime-only logging default for new/reloaded built-in app pages.
       List live worker IDs; use an exact ID for evaluation.
   te2 console eval --worker ID [--code JAVASCRIPT] [--timeout SECONDS] [--url URL]
       Evaluate in one live worker; omit --code to read JavaScript from stdin.

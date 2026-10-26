@@ -2,6 +2,22 @@
 
 ## Release direction
 
+### Approved editor ↔ extension-host properties slice — 2026-10-25
+
+After deferring shared libraries to .357, repair missing editor-to-preview scroll
+sync and complete the bounded read-side editor-properties family: visible ranges,
+all selections and resolved editor options. Reuse vscode.editorState.update and
+ExtHostEditors.$acceptEditorPropertiesChanged, not Markdown-specific messages or
+another transport. Reference local Code OSS mainThreadEditor.ts/extHostTextEditors.ts
+and Markdown TopmostLineMonitor. Preserve exact-client facade/path/generation,
+volatile disconnected notifications and open-ACK resynchronization; independently
+deduplicate changed properties and dispose obsolete listeners/timers. Initial
+properties must be refreshed after open and viewport/model/configuration changes.
+Tests cover real WBA client dispatch, client isolation, malformed ingress,
+coalescing and lifecycle. Typecheck/build frontend and WBA; no Python/Rust/mypyc,
+runtime restart, OTA, Android, version bump or commit in this approval.
+Editor mutations, decorations and editor-group management remain separate APIs.
+
 User defines this release primarily as drop-in optimizations. Preserve established
 contracts/behavior, avoid new runtime dependencies, and measure improvements
 without claiming source-only validation proves live latency gains. Additional
@@ -57,10 +73,15 @@ it or leave it as the next work item.
    conversions/allocations, starting with the source-backed telemetry-only WBA
    re-encode described below. Then measure boundary alternatives before changing
    queues/concurrency. Each slice has its own implementation/acceptance gate.
-4. Native-client debug access and internal console-bridge retirement — deferred
-   until after those two actual work phases, NOT immediately after validation.
-5. Remaining O3–O8 routing/codec/shared-library/local-transport experiments, ordered
-   by later evidence and user choice rather than treating all as one approved cutover.
+4. Connected-but-quiet built-in console policy is implemented; Cefrium socket
+   repair awaits the user's APK acceptance. User defers ALL remaining console/
+   MCP work on 2026-10-25; see end-of-plan backlog. Do not start native commands,
+   ALS logging migration or retained-history implementation now.
+5. User suspends O3 pipe socket routing indefinitely (2026-10-25). Further raw/
+   zero-copy pipe codec flattening is next-version investigation, not .356 work
+   or a promised zero-copy result. Do not automatically resume either. Remaining
+   optimization candidates need explicit reprioritization; reviewing the existing
+   async-runtime probe does not authorize production adoption.
 
 This corrects the agent's earlier placement of console work as Phase 2. Workstream
 ordering does not itself approve implementation of the recorded investigations.
@@ -224,7 +245,88 @@ If needed, measure connection setup, emitted request/response and backend snapsh
 timing to evaluate the additive HTTP endpoint and further startup scheduling changes.
 Transport congestion is plausible, not established by the source inspection.
 
-## Phase 4 — native-client debugging and internal bridge retirement (deferred)
+## Phase 4 — native-client debugging and staged built-in bridge policy
+
+Approved native inspector repair (2026-10-25): live Razr evidence isolates a
+cross-APK DevTools abstract-socket collision, not console identity or logging.
+Chromium falls back to <base>_<pid> when its base bind fails, while the existing
+relay keeps connecting to another APK's base socket and SELinux denies access.
+Direct ADB discovery of this process's fallback lists the actual app targets.
+Share a process-qualified prefix/name between native server and relay from
+creation; expose that name in the existing state snapshot and cover derivation
+with JVM tests. Do not scan/fallback to another app's socket, weaken SELinux,
+enable logs as a workaround, or change the renderer/debugger policy. Shared
+Cefrium/TE2 Termux source only; APK assembly/install remains a separate gate.
+Source reference: [Chromium DevTools socket factory](https://github.com/chromium/chromium/blob/main/chrome/browser/android/devtools_server.cc).
+
+Subsequent user scope correction: connected-but-quiet console registration/eval
+is sufficient for ordinary debugging; the objective is eliminating automatic
+page-load log traffic, not retiring this working control lane. Gecko native
+debugging is being developed by the user on another branch; do not implement a
+competing Gecko/Chii replacement here. Next bounded proposal is MCP access to
+Cefrium native CDP, especially errors unavailable after page failure. Existing
+te2_console_eval already addresses the native Android control worker independent
+of page JavaScript, but its allowlist currently exposes state, not CDP requests.
+Qualify typed native target discovery, exact-target evaluation and bounded
+on-demand error retrieval over that existing control lane. Preserve inspector
+session/focus, connection/document epochs, request deadlines and cancellation;
+never replay evaluation or continuously forward protocol/log events upstream.
+Native error capture retention/byte limits require explicit design approval.
+No new framework transport or MCP catalog entry is inherently required. Android
+implementation and another APK build require separate approval; leave the user's
+current Cefrium build source undisturbed while investigating.
+
+2026-10-25 update: user resumes this work and approves a bounded **bridge-policy
+first** implementation, superseding full removal as the immediate direction.
+Code TE2, Terminal and File Explorer opt into a shared built-in wrapper around
+the unchanged agnostic bridge API. Framework bootstrap adds `--debug-console` /
+`--no-debug-console` with `TE2_DEBUG_CONSOLE`; existing `--runtime-debug` also
+enables these bridges. Rust's existing app_bootstrap publishes `debug_console`
+and app_shell applies it before app module import, without another HTTP request,
+query flag or console registration handshake. Older/missing policy is quiet;
+the existing runtime_debug field still enables older-server diagnostics.
+
+User correction supersedes connection gating: built-in setup always prepares,
+connects/registers and serves eval, preserving existing identity/state consumers.
+Only automatic log/error forwarding is gated, before serialization. The ordinary
+browser console continues running. `await window.te2DebugConsole.enable()` works
+through console eval; `disable()` restores console/error hooks without tearing
+down registration, eval or pending control work. `status().forwarding` reports
+the distinction. Page overrides are not persisted; dependency preparation stays
+single-flight and retryable.
+
+Approved runtime extension: `te2 console logging on|off|status [--url URL]` reads
+or updates framework-owned atomic policy through bounded JSON /api/console/logging.
+Startup flags/environment seed policy; explicit runtime off overrides that seed.
+No process-environment mutation, persistence, automatic replay, broadcast or shared
+runtime restart. Newly loaded/restarted app pages receive the policy through
+existing app-bootstrap; existing pages use their own eval override. Mutation
+requires JSON plus a non-simple control header under existing framework network
+admission; CLI disables proxies/redirects and reports failures without fallback.
+
+Approved scope: source/tests/builds/docs for those three TE2-owned producers,
+CLI/bootstrap and existing app-bootstrap projection. No native Android control
+worker, run-profile/generic user-app API or framework console relay changes;
+no APK build, runtime restart, OTA, commit or ALS edits. ALS has its own producer
+and upstream/snapshot contract, so it remains a separate migration—not evidence
+that all first-party logging is quiet. Rebuild/adopt the framework plus publish
+matching app-shell/bridge/host/Terminal/File Explorer assets before live checks;
+no Code TE2 worker or mypyc rebuild is required.
+
+Subsequent separately scoped slices: client-associated native debugger/MCP
+discovery/evaluation, then client-run-scoped **disk-only retained history, at most
+500 records**, with bounded record bytes/previews and on-demand retrieval rather
+than automatic network forwarding. Retained history excludes in-memory log lists,
+not transient bounded encoding/I/O buffers or browser-internal caches. Qualify
+native CDP on Cefrium/Electron versus native Firefox RDP on GeckoView; current
+Gecko Chii/Chobitsu GUI remains separate and does not consume RDP directly.
+Use exact client/run/target/frame/document-incarnation guards, not URLs or a
+global last-active target. Qualify built-in sidebar frame coverage and native
+control discovery before retiring bridge-dependent tools. Browser debug caches
+are volatile/bounded, not a durable cross-renderer log contract.
+
+The following records earlier deferral/removal directions for context; it does
+not override the bounded policy implementation and separate follow-up gates above.
 
 User explicitly defers implementation until after framework-pipe intents (Phase 2)
 and concurrency/queuing (Phase 3). This is not the next work item, approved edits
@@ -650,6 +752,41 @@ actual bindings and buffer lifetimes. No codec replacement based on size estimat
 
 ### O5. Shared Rust libraries and direct operations
 
+**Deferred by user to 0.2.357 (2026-10-25).** Preserve the isolated PoC and
+results below; no production integration belongs to .356. The continuation
+owner is ../release_0_2_357/PLAN.md and its TRACKER.md. This deferral does not
+authorize production changes or a version bump.
+
+2026-10-25 approved first proof: prioritize **final product size, duplicated
+build work and developer ergonomics**, not runtime/request speed. Isolated
+framework/shared_runtime_probe compares two static consumers against two
+matched-toolchain Rust-dylib consumers of one concrete Tokio/Hyper/gzip runtime.
+Count the entire distribution, including dynamic Rust std, using identical
+implementation/dependency locks and ZIP settings. Measure target-cold/cached-
+source, no-op and private-implementation-change builds; inspect actual Cargo
+consumer recompilation. This is a matched-set ABI experiment, not stable public
+Rust ABI, zero-copy work or a production dependency/pipe migration. Linux first;
+Termux, private Python, wheel loader/receipt integration and production adoption
+remain separate. PyO3 is not duplicated between framework and editor worker.
+User confirms Ferrous is additive/backward-compatible; align framework to worker
+pin only in a separately approved production integration, not in this fixture.
+
+Approved scratch cleanup first reclaims ~3.3 GiB from obsolete .354 APK trials
+and extracted inspection JAR, with exact recovery log losslessly compressed.
+Active/previous mypyc selectors, compiler caches/snapshots, current APK/mapping
+and release artifacts remain. Probe builds preserve isolated targets, require
+2 GiB free and stop their own build process group below 1 GiB.
+
+User subsequently clarifies the intended candidate is a **stripped cdylib**, not
+the initially tested ordinary Rust dylib. Approved isolated follow-up now exposes
+only a version check and bounded caller-owned byte-buffer operation; no Rust
+types, allocator ownership or Future crosses. Compare equally stripped static
+consumers, include all client/library bytes, test real C-header use, loader/ABI
+failures and private implementation-only rebuilds. Tiny fixture result is ~20.6%
+net ZIP saving, initial build times essentially tied, with unchanged consumers on
+library implementation updates. No production-size estimate, worker/pin/pipe
+migration or runtime speed claim. Details: framework/shared_runtime_probe/README.md.
+
 Investigate a shared framework/editor operations crate and separately evaluate
 runtime shared-library packaging/linking to reduce duplicated binaries/build work.
 A shared source crate is not proof of smaller shipped binaries. Compare actual
@@ -816,3 +953,78 @@ The native long-press menu displayed the browser-resolved .href on the current
 loopback origin; ordinary clicks are user-confirmed working after the pipe
 receiver correction. This is separate from the compiled DTO/intent failure.
 Obtain a concrete renderer/interaction/test approval when this item is resumed.
+
+## Deferred — shell execution profiles and command-palette terminal commands
+
+User intake 2026-10-25; record only, then return to the logging/native-debug
+work. This does not authorize implementation or change the release cut line.
+
+- Add a shell-execution run-profile type: execute the configured shell command
+  in the running editor terminal, or open/create one when necessary, using the
+  same execution/terminal ownership as the built-in Python/Node/GCC runners.
+  This is not a new web-server/preview profile or another shell backend.
+- Support current-file self-reference in command templates: `%` for the current
+  file and `%<` for its extensionless counterpart. Preserve the user's example:
+  `gcc % -o %< && ./%<`. Allow additional run arguments appended to the command
+  tail. Before implementation, qualify existing runner substitutions, cwd/path
+  conventions, shell quoting (spaces/Unicode/metacharacters), placeholder
+  escaping and argument placement for compound commands; reuse existing helpers
+  instead of inventing an incompatible substitution/dispatch system.
+- Add a root command-palette option that accepts a shell command and executes
+  it in that same editor-terminal path, opening a terminal if needed. Typing or
+  previewing the palette entry must not execute it; explicit acceptance does.
+- Whenever a user action invokes the editor terminal (including run profiles,
+  palette execution and existing terminal-open actions), reveal it and transfer
+  keyboard focus from the editor to the terminal after it is ready. Preserve
+  exact-client ownership; background updates/restoration must not steal focus.
+
+Implementation requires a bounded source-backed plan/approval and tests for
+existing-terminal reuse, creation/readiness, active-file substitutions, trailing
+arguments, explicit palette acceptance/cancellation and focus on desktop/mobile.
+Preserve existing run/save/draft consent and disconnected/no-replay behavior.
+
+## Deferred — Cefrium 0.13 staging comparison (before CDP work)
+
+User defers this trial to the end of the plan, immediately before remaining
+CDP/MCP work (2026-10-25). No SDK upgrade or build is authorized now.
+
+Compare current validated Cefrium 0.9 staging APK (166.8 MiB, SHA256
+4db25163e2da4526db8425b99de1282a3f93d67b84bab949c61e94c350283814)
+against 0.13.0 with equivalent source/settings, allowing required compatibility
+adaptations to be explicitly recorded. The 0.12 fixes inherited by 0.13 remove
+overly broad Chromium consumer keep rules, so larger native libraries alone do
+not determine final APK size. Measure compressed native libraries, DEX, resources
+and total APK; do not assume upstream optimization percentages apply to TE2.
+Audit dependency changes and query-origin/subframe-policy migration, preserve
+security guards, then obtain bounded implementation/build approval. Preserve
+baseline APK and R8 mapping before replacement; verify manifest/resources,
+signature/alignment and runtime parity. Missing-manifest packaging cause remains
+unproven and separate. Require adequate disk headroom or an approved alternate
+build host; last local observation was only 1.5 GiB free, not build-ready.
+Primary release evidence: https://cefrium.com/releases/.
+
+## Deferred — remaining console / native-debug MCP work
+
+User defers the rest of this workstream on 2026-10-25. Keep implemented quiet
+registration/eval policy and the current Cefrium socket fix; its APK live
+acceptance remains open while the user builds/tests. Native CDP targets/eval/
+on-demand errors through MCP, ALS producer/snapshot changes, broader producer
+audit and client-local disk history all remain backlog, not the next task.
+Do not require native debugger replacement to keep the working console control
+lane. Gecko debugging stays on the user's other branch. Resume only on explicit
+reprioritization and concrete approval; preserve prior contracts/evidence above.
+
+## Deferred — native CEF DevTools transport
+
+User requests end-of-list deferral (2026-10-25), not implementation or a release
+blocker. Retain the current process-owned socket/CDP relay fix.
+
+Investigate replacing the embedded inspector's socket discovery/WebSocket relay
+with CEF's native `SendDevToolsMessage` / `ExecuteDevToolsMethod` and
+`AddDevToolsMessageObserver` APIs. These still carry CDP; they do not require an
+active remote-debugging session. Check whether the pinned Cefrium SDK exposes
+the bindings before proposing JNI/upstream work. Qualify browser ownership,
+iframe/session coverage, inspector request/event routing, threading, observer
+disposal and renderer lifecycle parity. Do not assume a speedup or slowdown.
+Preserve external CDP access where useful; no console-bridge dependency or
+debugger-policy change. Resume only with a bounded source-backed plan/approval.

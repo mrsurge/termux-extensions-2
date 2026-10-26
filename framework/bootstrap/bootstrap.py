@@ -72,6 +72,7 @@ class BootstrapArgs:
     memory_profile_dir: str | None
     runtime_debug: bool = False
     identity_flag: str | None = None
+    debug_console: bool = False
 
 
 @dataclass(frozen=True)
@@ -250,6 +251,12 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         help="Opt in to runtime diagnostics, independently of the Rust build profile.",
     )
     parser.add_argument(
+        "--debug-console",
+        action=argparse.BooleanOptionalAction,
+        default=_env_flag("TE2_DEBUG_CONSOLE"),
+        help="Enable built-in frontend console log forwarding without other runtime diagnostics.",
+    )
+    parser.add_argument(
         "--force-build",
         action="store_true",
         default=_env_flag("TE2_SERVER_FORCE_BUILD"),
@@ -339,6 +346,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         stdio_control=cast(bool, raw.stdio_control),
         memory_profile_dir=cast(str | None, raw.memory_profile),
         runtime_debug=cast(bool, raw.runtime_debug),
+        debug_console=cast(bool, raw.debug_console),
         identity_flag=cast(str | None, raw.identity_flag),
     )
 
@@ -348,6 +356,7 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
     _sanitize_runtime_env(env)
     # Explicit zero overrides inherited enablement, including --no-runtime-debug.
     env["TE2_RUNTIME_DEBUG"] = "1" if args.runtime_debug else "0"
+    env["TE2_DEBUG_CONSOLE"] = "1" if args.debug_console else "0"
     paths = resolve_te2_paths(env)
     ensure_runtime_home(paths.runtime_home)
     paths.export(env)

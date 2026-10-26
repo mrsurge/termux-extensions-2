@@ -175,6 +175,7 @@ interface MonacoRuntimePositionLike {
 }
 
 interface MonacoRuntimeModelLike {
+  getOptions?(): unknown;
   uri?: MonacoRuntimeUriLike;
   getLanguageId?(): string;
   getValue(): string;
@@ -197,7 +198,12 @@ interface MonacoRuntimeEditorLike {
   saveViewState?(): unknown;
   restoreViewState?(state: unknown): void;
   getDomNode?(): HTMLElement | null;
-  onDidChangeConfiguration?(listener: () => void): void;
+  onDidChangeConfiguration?(listener: () => void): { dispose(): void };
+  onDidChangeModelOptions?(listener: () => void): { dispose(): void };
+  onDidScrollChange?(listener: () => void): { dispose(): void };
+  onDidLayoutChange?(listener: () => void): { dispose(): void };
+  getVisibleRanges?(): Record<string, number>[];
+  getSelections?(): Record<string, number>[] | null;
   onDidChangeModelContent(listener: () => void): { dispose(): void };
   onDidChangeCursorSelection?(
     listener: (event: { source?: string }) => void,
@@ -762,6 +768,13 @@ interface MonacoBootWindowLike extends Window {
       return currentPath;
     },
     notify: editorWbaRpcNotify,
+    getGeneration: _wbCurrentGeneration,
+    canPublish: () => _wbIsBarrierOpen(currentPath, _wbCurrentGeneration()),
+    getEditorOptionIds: () => {
+      const ids = window.monaco?.editor?.EditorOption;
+      return typeof ids?.cursorStyle === "number" && typeof ids.lineNumbers === "number"
+        ? { cursorStyle: ids.cursorStyle, lineNumbers: ids.lineNumbers } : null;
+    },
     setTimeoutFn: _setTimeoutBound,
     clearTimeoutFn: _clearTimeoutBound,
   });

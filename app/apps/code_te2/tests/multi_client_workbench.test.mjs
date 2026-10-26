@@ -13,6 +13,65 @@ const ELECTRON_SECONDARY = "client_222222222222";
 const MOBILE_PRIMARY = "client_333333333333";
 const MOBILE_SECONDARY = "client_444444444444";
 
+test("editor property deltas preserve client, generation, ranges, selections and options", async () => {
+  const { client, calls, root, mainPath, painPath } = await createHarness();
+  try {
+    await open(client, ELECTRON_PRIMARY, mainPath, "props_a", 7);
+    await open(client, MOBILE_PRIMARY, mainPath, "props_b", 8);
+    const facades = facadeByClient(client);
+    const a = facades.get(ELECTRON_PRIMARY).editorId;
+    const b = facades.get(MOBILE_PRIMARY).editorId;
+    calls.length = 0;
+    const range = { startLineNumber: 1, startColumn: 1, endLineNumber: 2, endColumn: 1 };
+    const selection = { ...range, selectionStartLineNumber: 2, selectionStartColumn: 1,
+      positionLineNumber: 1, positionColumn: 1 };
+    const options = { tabSize: 4, indentSize: 4, originalIndentSize: "tabSize",
+      insertSpaces: true, cursorStyle: 1, lineNumbers: 2 };
+    const request = { clientInstanceId: ELECTRON_PRIMARY, path: mainPath, generation: 7 };
+    await client.extensionEditorStateUpdate({ ...request, selections: [selection, selection],
+      visibleRanges: [range], options, source: "keyboard" });
+    let properties = calls.filter(call => call.method === "$acceptEditorPropertiesChanged");
+    assert.equal(properties.length, 1);
+    assert.equal(properties[0].args[0], a);
+    assert.deepEqual(properties[0].args[1], {
+      selections: { selections: [selection, selection], source: "keyboard" }, visibleRanges: [range], options,
+    });
+
+    // A viewport-only update must not synthesize another selection event.
+    await client.extensionEditorStateUpdate({ ...request, visibleRanges: [], selection });
+    properties = calls.filter(call => call.method === "$acceptEditorPropertiesChanged");
+    assert.deepEqual(properties.at(-1).args, [a, { selections: null, options: null, visibleRanges: [] }]);
+    await client.extensionEditorStateUpdate({ clientInstanceId: MOBILE_PRIMARY, path: mainPath,
+      generation: 8, visibleRanges: [range] });
+    assert.equal(calls.filter(call => call.method === "$acceptEditorPropertiesChanged").at(-1).args[0], b);
+
+    const count = calls.filter(call => call.method === "$acceptEditorPropertiesChanged").length;
+    for (const invalid of [
+      { visibleRanges: [{ ...range, startColumn: 0 }] },
+      { visibleRanges: [{ ...range, endLineNumber: 0 }], selections: [selection] },
+      { selections: [] }, { selections: [selection, null] },
+      { visibleRanges: Array(1025).fill(range) }, { visibleRanges: "bad" },
+      { options: { ...options, cursorStyle: 7 } },
+      { options: { ...options, tabSize: NaN } }, { options: { ...options, insertSpaces: 1 } },
+    ]) {
+      await assert.rejects(client.extensionEditorStateUpdate({ ...request, ...invalid }));
+    }
+    assert.equal(calls.filter(call => call.method === "$acceptEditorPropertiesChanged").length, count);
+    assert.equal((await client.extensionEditorStateUpdate({ ...request, generation: 6, visibleRanges: [range] })).ok, false);
+    assert.equal((await client.extensionEditorStateUpdate({ ...request, path: painPath, visibleRanges: [range] })).ok, false);
+    assert.equal((await client.extensionEditorStateUpdate({ ...request, clientInstanceId: ELECTRON_SECONDARY, visibleRanges: [range] })).ok, false);
+    assert.equal(calls.filter(call => call.method === "$acceptEditorPropertiesChanged").length, count);
+
+    // Older selection-only publishers still work through the same entrypoint.
+    await client.extensionEditorStateUpdate({ ...request, selection, source: "keyboard" });
+    assert.deepEqual(calls.filter(call => call.method === "$acceptEditorPropertiesChanged").at(-1).args[1],
+      { selections: { selections: [selection], source: "keyboard" }, options: null, visibleRanges: null });
+  } finally {
+    client._resetSessionCaches("test_cleanup");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 async function createHarness() {
   const scratchRoot = process.env.TEMPDIR
     ?? process.env.TMPDIR

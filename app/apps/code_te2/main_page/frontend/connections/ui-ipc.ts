@@ -8,6 +8,7 @@ import { SIDEBAR_IPC_RPC_METHODS, SIDEBAR_IPC_RPC_NOTIFICATIONS, parseSidebarIpc
 import { APP_WORKER_SOCKET_IO_TRANSPORTS, SOCKET_IO_NAMESPACES, SOCKET_IO_PATHS, fileEditorSocketQuery } from '../../../src/rpc/socketio-topology.ts';
 
 interface ConsoleBridgeOptions {
+  prepare?: () => Promise<void>;
   qualifiedIdentity?: boolean;
   clientInstanceId?: string;
   workerId?: string;
@@ -78,20 +79,21 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     if (!mainPageId) return Promise.resolve();
     if (consoleBridgeStarted) return Promise.resolve();
     if (consoleBridgePromise) return consoleBridgePromise;
-    consoleBridgePromise = deps
-      .ensureSocketIoLoaded()
-      .then((io: IoFactory | null | undefined) => {
+    consoleBridgePromise = Promise.resolve().then(() => deps.initConsoleBridge({
+      prepare: async () => {
+        const io = await deps.ensureSocketIoLoaded();
         if (!io) throw new Error('Socket.IO client is not available');
-        const bridge = deps.initConsoleBridge({
-          workerId: `main_page:${mainPageId}`,
-          qualifiedIdentity: true,
-          clientInstanceId: deps.getClientId(),
-          workerLabel: consoleWorkerLabel(),
-          socketPath: SOCKET_IO_PATHS.te2Console,
-          namespace: '/te2_console',
-        });
-        if (!bridge) throw new Error('console bridge did not start');
-        consoleBridgeStarted = true;
+      },
+      workerId: `main_page:${mainPageId}`,
+      qualifiedIdentity: true,
+      clientInstanceId: deps.getClientId(),
+      workerLabel: consoleWorkerLabel(),
+      socketPath: SOCKET_IO_PATHS.te2Console,
+      namespace: '/te2_console',
+    }))
+      .then((bridge: unknown) => {
+        consoleBridgeStarted = !!bridge;
+        if (!bridge) consoleBridgePromise = null;
       })
       .catch((err: unknown) => {
         consoleBridgeStarted = false;

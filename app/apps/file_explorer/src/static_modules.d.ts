@@ -1,4 +1,5 @@
 declare module '*/te2_console_bridge.js' {
+  export function initBuiltinConsoleBridge(options: { prepare?: () => Promise<void>; appId: string; workerLabel: string; socketPath: string; namespace: string; workerId?: string; uniquePerWindow?: boolean }): Promise<unknown>;
   export function initConsoleBridge(options: { appId: string; workerLabel: string; socketPath: string; namespace: string; workerId?: string; uniquePerWindow?: boolean }): unknown;
   export function getConsoleBridgeStatus(): unknown;
 }

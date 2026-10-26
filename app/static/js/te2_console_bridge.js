@@ -29,6 +29,7 @@ let _pendingEvals = new Map();
 let _ownsSocket = false;
 let _socketHandlers = {};
 let _windowHandlers = {};
+let _logsForwarded = false;
 
 export function getConsoleBridgeStatus() {
   return {
@@ -36,6 +37,7 @@ export function getConsoleBridgeStatus() {
     connected: !!(_bridgeSocket && _bridgeSocket.connected),
     workerId: _workerId,
     workerLabel: _workerLabel,
+    forwarding: _logsForwarded,
   };
 }
 
@@ -115,7 +117,7 @@ function _perWindowWorkerId(label, prefix = '', ownerLength = 8) {
 }
 
 function _emitLog(level, rawArgs) {
-  if (!_bridgeSocket || !_bridgeSocket.connected) return;
+  if (!_logsForwarded || !_bridgeSocket || !_bridgeSocket.connected) return;
   const emitter = _bridgeSocket.volatile && typeof _bridgeSocket.volatile.emit === 'function'
     ? _bridgeSocket.volatile
     : _bridgeSocket;
@@ -210,7 +212,7 @@ function _hookEval() {
 }
 
 /**
- * Initialize the console bridge.
+ * Console bridge options (also accepted by the built-in wrapper).
  *
  * @param {object} [opts]
  * @param {object} [opts.socket]   Existing TE2 console Socket.IO instance to reuse.
@@ -223,10 +225,64 @@ function _hookEval() {
  * @param {string} [opts.baseUrl] Explicit framework origin for cross-origin hosted pages.
  * @param {string} [opts.socketPath] Socket.IO path (default '/te2_console_ws/socket.io').
  * @param {string} [opts.namespace] Socket.IO namespace (default '/te2_console').
+ * @param {boolean} [opts.forwardLogs=true] Forward automatic console/errors, independently of registration/eval.
  * @returns {{ socket, workerId, destroy }}
  */
+// Built-in callers opt into this policy; the agnostic API below stays unchanged.
+// Registration, identity and eval stay connected; only automatic forwarding is
+// optional. The explicit logging override is page-lifetime only.
+let _builtinOptions = null;
+let _builtinOverride = null;
+let _builtinPromise = null;
+
+function _builtinEnabled() {
+  return _builtinOverride ?? (window.__te2BuiltinConsoleEnabled === true);
+}
+
+function _startBuiltinBridge() {
+  if (!_builtinOptions) return Promise.resolve(null);
+  if (_builtinPromise) return _builtinPromise;
+  const pending = Promise.resolve().then(async () => {
+    await _builtinOptions.prepare?.();
+    return initConsoleBridge({ ..._builtinOptions, forwardLogs: _builtinEnabled() });
+  });
+  _builtinPromise = pending;
+  // Clear without leaving a second rejected promise unobserved.
+  void pending.then(
+    () => { if (_builtinPromise === pending) _builtinPromise = null; },
+    () => { if (_builtinPromise === pending) _builtinPromise = null; },
+  );
+  return pending;
+}
+
+/**
+ * Register a first-party bridge and its optional lazy dependency loader.
+ * Native/local DevTools may explicitly await window.te2DebugConsole.enable().
+ * disable() stops logging, not registration/eval; reload resets the override.
+ * @param {object} [opts]
+ * @param {() => Promise<void>} [opts.prepare]
+ */
+export function initBuiltinConsoleBridge(opts = {}) {
+  _builtinOptions = opts;
+  window.te2DebugConsole = Object.freeze({
+    enable() {
+      _builtinOverride = true;
+      return _startBuiltinBridge();
+    },
+    disable() {
+      _builtinOverride = false;
+      _setLogForwarding(false);
+    },
+    status: getConsoleBridgeStatus,
+  });
+  return _startBuiltinBridge();
+}
+
 export function initConsoleBridge(opts = {}) {
-  if (_bridgeActive) return { socket: _bridgeSocket, workerId: _workerId, destroy: destroyConsoleBridge };
+  if (_bridgeActive) {
+    if (typeof opts.forwardLogs === 'boolean') _setLogForwarding(opts.forwardLogs);
+    return { socket: _bridgeSocket, workerId: _workerId, destroy: destroyConsoleBridge };
+  }
 
   _workerLabel = _sanitizeWorkerLabel(opts.workerLabel || opts.workerId || 'worker');
   if (opts.uniquePerWindow) {
@@ -304,9 +360,8 @@ export function initConsoleBridge(opts = {}) {
     _bridgeSocket.emit('console:register', registration);
   }
 
-  _patchConsole();
-  _hookErrors();
   _hookEval();
+  _setLogForwarding(opts.forwardLogs !== false);
   _bridgeActive = true;
   _emitBridgeStatus();
 
@@ -314,10 +369,30 @@ export function initConsoleBridge(opts = {}) {
 }
 
 /**
- * Tear down the bridge — restore original console methods.
+ * Toggle automatic forwarding without touching registration or eval.
  */
+function _setLogForwarding(enabled) {
+  if (enabled === _logsForwarded) return;
+  _logsForwarded = enabled;
+  if (enabled) {
+    _patchConsole();
+    _hookErrors();
+  } else {
+    for (const level of LEVELS) {
+      if (_originals[level]) console[level] = _originals[level];
+    }
+    _originals = {};
+    for (const [event, handler] of Object.entries(_windowHandlers)) {
+      window.removeEventListener(event, handler);
+    }
+    _windowHandlers = {};
+  }
+  _emitBridgeStatus();
+}
+
 export function destroyConsoleBridge() {
   if (!_bridgeActive) return;
+  _logsForwarded = false;
   if (_bridgeSocket?.connected) {
     _bridgeSocket.emit('console:unregister', { role: 'worker', workerId: _workerId });
   }

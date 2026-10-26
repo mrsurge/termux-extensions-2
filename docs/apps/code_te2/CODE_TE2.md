@@ -2672,6 +2672,53 @@ The ext host returns a minified DTO with single-letter field names for wire effi
 
 ## 25) Console Observability System (vConsole + Socket.IO)
 
+### Built-in bridge activation policy
+
+Code TE2's host, Terminal and File Explorer use `initBuiltinConsoleBridge`, an
+opt-in wrapper around the unchanged agnostic `initConsoleBridge`. They are quiet
+by default. `te2 --debug-console` / `TE2_DEBUG_CONSOLE=1` enables logging without
+other runtime diagnostics; `--runtime-debug` / `TE2_RUNTIME_DEBUG=1` also enables
+them. `--no-debug-console` overrides the inherited console flag, but runtime
+debug still seeds logging on. Rust's existing app-bootstrap payload supplies
+`debug_console`; the app shell sets the page policy before importing app code.
+Missing/older policy remains off unless the existing runtime_debug flag is true.
+
+Built-in setup always connects/registers and serves eval, including when quiet.
+This preserves worker IDs consumed by existing Sidebar state publication. Quiet
+mode installs no console/error hooks and performs no log argument serialization;
+the local browser console remains normal. Native/local DevTools or console eval
+may explicitly run:
+
+```js
+await window.te2DebugConsole.enable();
+window.te2DebugConsole.status();
+window.te2DebugConsole.disable();
+```
+
+The override is document-local, never persisted or broadcast. Disable changes
+logging only, preserving socket/registration/eval, even during dependency loading.
+`status().forwarding` distinguishes logging from active/connected control state.
+Failure leaves explicit activation retryable. This hook is not a native debugger
+transport or a substitute for its authentication/target ownership. The generic
+bridge API and run-profile behavior remain unchanged, as does Android's native
+control worker. ALS owns a separate bridge/snapshot and is not gated by this slice.
+Framework rebuild/adoption plus matching template/bridge/frontend assets are
+required; no Code TE2 domain/mypyc build or new Android mapping is needed. Client
+disk logging and native CDP/RDP MCP access remain separate work.
+
+`te2 console logging on|off|status [--url URL]` controls the default for new or
+reloaded built-in app pages without a framework restart. /api/console/logging
+GET/POST owns bounded strict JSON, no-store responses and a required non-simple
+mutation header, under existing framework network admission. CLI submissions
+never follow redirects/proxies or retry. Runtime atomic state is seeded by the
+launch flags/environment, not persisted or implemented via environment mutation.
+Explicit runtime off can override runtime-debug's initial logging default without
+disabling runtime debugging. App-bootstrap's boolean debug_console is authoritative;
+only older payloads lacking it fall back to runtime_debug. Existing pages retain
+their settings until reload or explicit page eval; no mass activation is implied.
+
+### Existing relay and identity contracts
+
 Console observability is framework-owned. Browser producers and drawer clients use namespace `/te2_console` on path `/te2_console_ws/socket.io`, backed by `app/te2_console_runtime.py` and mounted by `app/te2_runtime_mounts.py`.
 
 The old worker-owned `/ui_ipc` console relay has been removed from the live source path. `ui_ipc` does not handle `console:*` events.
@@ -4761,6 +4808,25 @@ one exact resynchronization after WBA acknowledges opening the active document;
 there is no polling or reconnect-era notification replay. Command invocation
 still performs its own exact selection synchronization as the final execution
 barrier.
+
+The same `vscode.editorState.update` projection now carries independently
+deduplicated full `selections`, `visibleRanges`, and resolved `options` deltas.
+Scroll/layout events read Monaco's actual visible ranges; editor/model option
+events read resolved tab/indent/space, cursor-style and line-number values.
+Code OSS `$acceptEditorPropertiesChanged` updates the corresponding TextEditor
+properties and emits its native selection/visible-range/options events. This
+supplies Markdown's `TopmostLineMonitor` without a preview-specific bridge.
+Viewport-only updates leave selections null, not reset or spuriously changed.
+Arrays are bounded to 1,024 entries and the whole delta validates before emission;
+empty visible ranges are valid. Selection direction/anchor and all cursors survive.
+Authenticated client facades, active path and supplied open generation fence
+delivery. Timers/listeners are attachment-scoped; model replacement cancels stale
+work, and post-open ACK resync restores all available properties without polling
+or replaying disconnected events. The singular selection field remains for older
+peers; old selection-only publishers remain accepted. Existing extension-requested
+selection/reveal APIs are unchanged. This does not implement extension-driven
+option mutation, decorations, arbitrary edits or editor-group management.
+Activation requires matching WBA and host assets, not Python/mypyc/Rust changes.
 
 Extension-requested navigation uses the bounded Code Server 4.130
 `MainThreadTextEditors` actor and the internal `_workbench.open` command. WBA

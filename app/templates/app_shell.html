@@ -662,6 +662,10 @@
                     : null;
                 debugFullStack = bootstrap.debug_full_stack === true;
                 runtimeStartupDebug = bootstrap.runtime_debug === true;
+                // Delivered with existing bootstrap, before app module import.
+                // Older servers omit these flags: built-in bridges stay quiet.
+                window.__te2BuiltinConsoleEnabled = typeof bootstrap.debug_console === 'boolean'
+                    ? bootstrap.debug_console : runtimeStartupDebug;
                 startupMark('shell.bootstrap_received');
                 const bootstrapStateKey = String(bootstrap.state_key || '').trim();
                 if (teStateStore && bootstrapStateKey === stateKey && typeof teStateStore.seed === 'function') {

@@ -13,7 +13,7 @@ import { installDiagnosticsLatencyProbe } from './src/diagnostics/latency-probe.
 import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
 import { installComparisonStatus } from './main_page/frontend/ui/comparison-status.ts';
 import { createCodeInspectorPanel } from './main_page/frontend/ui/code-inspector.ts';
-import { getConsoleBridgeStatus, initConsoleBridge } from './main_page/frontend/console_bridge.js';
+import { getConsoleBridgeStatus, initBuiltinConsoleBridge as initConsoleBridge } from './main_page/frontend/console_bridge.js';
 import { HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename, formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename, setMenuChecked, FONT_SCALE_PRESETS, requireEl } from './main_page/frontend/core/utils.ts';
 import { createAppContext } from './main_page/frontend/core/app-context.ts';
 import { initVirtualKeyboardAdjustments } from './main_page/frontend/ui/virtual-keyboard.ts';

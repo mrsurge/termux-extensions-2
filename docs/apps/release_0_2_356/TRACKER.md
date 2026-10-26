@@ -1,5 +1,26 @@
 # 0.2.356 maintenance tracker
 
+## Editor properties / Markdown preview sync — 2026-10-25
+
+- [x] Read-only Electron inspection confirms registered bridge/eval with forwarding
+  enabled; current Monaco has a real viewport distinct from cursor position.
+- [x] Source diagnosis: Markdown TopmostLineMonitor listens to visible-range
+  changes; TE2 sends only initial ranges and later selection-only updates.
+- [x] User approves bounded visible-range, multi-selection and resolved-option
+  event projection using the existing typed WBA lane and local Code OSS source.
+- [x] Implement typed, bounded, independently deduplicated properties projection
+  with exact-client/path/generation and lifecycle guards.
+- [x] Frontend typecheck/build and new WBA editor-state contract strict typing
+  pass; 49 focused frontend/WBA/client/webview regressions pass. Whole-WBA
+  typecheck has 106 existing diagnostics: in-memory HEAD-client comparison
+  produces the same 106 with no new/resolved diagnostics. This is not a clean
+  whole-WBA typing claim. Local Code OSS reference is ../code-server/lib/vscode.
+- [x] Read-only live Monaco inspection verifies actual resolved cursor/line-number
+  enum values and model originalIndentSize getter match the new projection.
+- [ ] Activate matching host assets and restart WBA with explicit permission.
+- [ ] Live acceptance: editor↔Markdown preview scroll/selection, options,
+  file switches/reconnect and multiple clients without cross-target effects.
+
 ## App-agnostic framework / manifest refresh
 
 - [x] User clarifies Refresh means reread manifests and remap app entrypoints/
@@ -261,9 +282,13 @@ policy; the separately approved Stage C source migration is recorded below.
 3. O2 byte-ingress/native-type slices N1–N5: source complete and user live
    accepted, including N5 search coverage on 2026-10-24. Async bridge production
    adoption and broader queue/concurrency changes remain separately gated.
-4. Explorer Git-init footer repair: current user-prioritized bug fix; native
-   debug/internal console-bridge work is explicitly deferred again (2026-10-24).
-5. Remaining O3–O8 investigations: later ordering by evidence/user choice.
+4. Git-init footer is user accepted/committed. Connected-but-quiet console policy
+   is implemented. Cefrium socket fix awaits user's APK test. User defers ALL
+   remaining console/MCP work (2026-10-25); see end-of-tracker backlog.
+5. User suspends O3 pipe socket routing indefinitely (2026-10-25); raw/zero-copy
+   pipe codec flattening is deferred to next-version investigation. No automatic
+   resumption or .356 transport/codec implementation. Async-runtime findings may
+   be reviewed independently; production adoption remains unapproved.
 
 Validation belongs within each work phase, never a replacement for actual work.
 
@@ -367,6 +392,13 @@ Validation belongs within each work phase, never a replacement for actual work.
   runtime-inspected DTO/Protocol contracts compatible; no blanket rewrite.
 
 ### Async bridge feasibility — 2026-10-23
+
+2026-10-25 review: confirmed the isolated async-completion probe was actually
+implemented/tested, not just a docs skim. Production still parks in spawn_blocking
+around concurrent Future.result(120.0); worker pins PyO3 0.28.3 and probe uses
+pyo3-async-runtimes 0.28.0. Probe source/compiled × asyncio/uvloop parity and
+thread-wait occupancy findings below remain isolated evidence, not production
+or Android adoption. User asks applicability review; no new runtime edits/tests.
 
 - [x] User requests pyo3-asyncio/uvloop usefulness investigation, then chooses
   Record findings only. Runtime and dependencies remain unchanged.
@@ -848,7 +880,130 @@ Current changes are source-only. No version bump, installation, shared restart,
 OTA/APK publication or push was performed. Existing compiler cfg/dead-code
 warnings remain visible, without suppression. Preserve unrelated reports/dist.
 
-## Phase 4 — native debug / internal bridge retirement (documentation only)
+## Phase 4 — native debug / staged built-in bridge policy
+
+### Resumed — built-in bridge policy first (2026-10-25)
+
+- [x] User narrows next native-debug item: ordinary connected/quiet console eval
+  is sufficient; retain it. Add TE2 MCP access to native Cefrium CDP for page
+  failures/errors. Gecko replacement debugging is on user's separate branch.
+- [x] Read-only source audit: existing MCP eval routes to exact native Android
+  worker without page JavaScript; current allowlist exposes state only (plus
+  asset update/telemetry clear). Inspector's sendProtocol is tied to its own
+  session and is not yet a correlated external CDP request owner.
+- [ ] Approve bounded native targets/eval/error-read command design over existing
+  control lane, with exact target/document epochs, independent inspector session,
+  bounded local error capture and no continuous network forwarding/eval replay.
+  No source changes during user's ongoing APK build; another APK is needed if
+  this native API slice is implemented.
+
+- [x] Updated framework live status returns enabled:false/new_app_pages; exact
+  main_page:dA2Q eval confirms active/connected:true and forwarding:false.
+  Console identity/control works while quiet; no logging policy mutation used.
+- [x] ADB Razr native diagnosis: base te2_cefrium_devtools_remote is occupied by
+  another app SELinux context; Cefrium PID 8695 binds Chromium's fallback
+  te2_cefrium_devtools_remote_8695. Relay hits base and logs connectto denials,
+  reset/EOF discovery failures. Direct ADB GET against PID socket returns
+  /json/version and /json/list with Code TE2/inspector targets. Removed both
+  temporary exact forwards; no app restart/debugger resume/settings mutation.
+- [x] User approves bounded Android source fix: derive server prefix and relay
+  name from same process identity; no legacy cross-app fallback. Pure naming
+  tests cover matching pair, distinct processes and invalid PID. Expose name in
+  existing native debug snapshot. Shared Cefrium/Termux source, not Gecko.
+- [x] JDK25/SDK37 offline testDebugUnitTest with exact Endpoint test filter:
+  production Kotlin/Java and unit-test compilation pass; 3 endpoint tests pass.
+  First invocation lacked ANDROID_HOME; repeated with explicit existing SDK.
+  No APK assembled/installed. Existing deprecation warnings remain visible.
+- [x] User confirms Cefrium CDP socket fix live validated after rebuilt APK
+  installation (2026-10-25). This closes the inspector fix acceptance, not all
+  deferred native debugger/MCP features or an independent Termux APK test.
+
+  Subsequent user build failed installation: staging APK SHA256
+  31f69d2eb1231b143046a18999efe159fd06ec5470f63e9eb93e48039d43c9d1
+  lacked AndroidManifest.xml/resources.arsc. Optimized-resource metadata named
+  absent resources-staging-optimize.ap_; preceding binary shrunk archive retained
+  both entries, matching the recorded 2026-10-13 failure. Root output-removal
+  cause remains unknown; not a signing diagnosis.
+
+  User approves incremental recovery only: JDK25/existing SDK offline
+  assembleStaging --no-daemon --max-workers=2 succeeds in 5m29s, reusing source
+  compilation and rerunning R8/resource optimization/package. No clean, source/
+  setting changes, asset reseed or install. New SHA256
+  4db25163e2da4526db8425b99de1282a3f93d67b84bab949c61e94c350283814.
+  Manifest/resource entries present; unzip integrity, apksigner v2 and zipalign
+  -P16/4 pass. Signer SHA256
+  500d5fbd6f4cb3ff755fd2fc2d23f78750d0cc14755615dc4d0b451f6335e34d.
+  Existing R8 final-ID warnings persist. Free disk ~3.1 GiB after build; no cache
+  cleanup. APK remains at android/cefrium/build/outputs/apk/staging/cefrium-staging.apk;
+  user subsequently confirms inspector/CDP live acceptance. It is not inferred
+  merely from those artifact verification checks.
+
+- [x] User approves implementation of default-off bridges, independent console
+  flag and page-lifetime escape hatch first; concrete approval covers TE2-owned
+  Code TE2/Terminal/File Explorer plus CLI/bootstrap, tests/builds/docs only.
+- [x] CLI `--debug-console` / `--no-debug-console`, `TE2_DEBUG_CONSOLE`, and
+  runtime-debug OR policy are independent of the Rust build profile and native
+  runtime-eval capability. Explicit CLI zero overrides inherited console flag.
+- [x] Existing app_bootstrap transports the effective policy before app import;
+  no per-frame policy fetch, URL override or console connection is needed.
+- [x] User corrects initial connection gating: always register/connect/serve eval
+  and preserve worker identity; gate only console/error forwarding before
+  serialization. `enable()` / `disable()` / `status().forwarding` control logging
+  without tearing down identity/control. Pending loaders finish registration
+  quietly when disabled; single flight and retry remain.
+- [x] User approves runtime `te2 console logging on|off|status`: bounded native
+  JSON endpoint, startup-seeded atomic new-page policy, no environment mutation,
+  persistence, replay or broadcast. Explicit runtime off overrides launch seed.
+  Existing app-bootstrap delivers policy; existing pages retain eval control.
+- [x] Revised actual-bridge regression suite: 10 pass, including quiet registration,
+  actual eval-driven logging, disable-preserved connection and pending-loader
+  registration. Previous test totals below describe the earlier source pass.
+- [x] Revised validation: 23 Python flag/CLI/help/source tests; 3 Rust policy
+  tests including actual HTTP mutation admission/status; 26 bridge/identity/
+  app-shell tests; 5 host/Sidebar transport tests; Terminal 28 and File Explorer
+  145 frontend tests. All three frontend typechecks/builds pass. Runtime CLI
+  failures reject malformed/oversized replies and submit only once. Existing
+  Rust feature-disabled and Node module-type warnings remain visible.
+- [ ] Revised connected/quiet runtime activation and live acceptance. Earlier user
+  acceptance covered default-disconnected behavior only; flag test was deferred.
+- [x] Read-only native Cefrium trace: inspector/client ready but controlConnected
+  false, zero native browser targets, status starting; main browser ready. Native
+  discovery errors are only logcat-visible at this step; no ADB device connected.
+  This does not prove page console registration caused CDP failure. Native
+  control discovery is separate; no Android fix/restart/settings change performed.
+- [x] Three caller entrypoints use the opt-in wrapper; generic/user-app and
+  run-profile initConsoleBridge calls, native Android control and server console
+  relay remain unchanged. Preserve existing differences between bridge copies;
+  only the new policy implementation is identical.
+- [x] New policy/relay/identity/app-shell group: 26 tests pass; Python flag/help/
+  app-agnostic source group: 16 pass. Terminal's 28 tests and File Explorer's
+  145 frontend tests pass. Three frontend typechecks/builds pass; existing Node
+  module-type warning remains visible. File Explorer mock gains the new export;
+  the extracted app-shell fixture gains window for the new policy assignment.
+- [x] Two focused Rust tests pass with --no-default-features in the retained
+  framework/rust/target cache: effective flag policy and app-bootstrap field.
+  This is not full-feature runtime adoption; existing feature-disabled warnings
+  remain visible. No Code TE2 domain/mypyc build or client transition performed.
+- [x] Wider socket/startup group: 50 pass, 5 unrelated fixtures remain failing:
+  four previously recorded TextMate fixtures and the extracted host-boot factory
+  missing createLanguageBootstrapRequest. Their product sources were untouched;
+  no broad suite-pass claim or unrelated repair. Logs under
+  .codex-scratch/console-policy/{focused,wider,file-explorer}.log. Source diff
+  whitespace check passes excluding generated host.js (embedded multiline string
+  whitespace must not be stripped as source formatting).
+- [x] Final UI-IPC/Sidebar/boot-snapshot transport subset passes after the final
+  optional-bridge exception-fencing adjustment; host typecheck/build repeated.
+- [ ] User-approved matching framework adoption and asset publication/reload;
+  verify quiet ordinary boot, each flag, manual enable/disable, reconnect and
+  run-profile/user-app parity. No runtime transition/OTA/APK build/commit yet.
+- [ ] ALS upstream producer plus vendored snapshot adoption, separately approved.
+- [ ] Native CDP/RDP-to-MCP discovery/evaluation with exact client/run/frame/
+  document identity; preserve existing Chii GUI and native control discovery.
+- [ ] Client-local disk history: max 500 records per client run, bounded bytes/
+  previews, no retained in-memory log list, on-demand remote retrieval. Browser
+  cache alone is not durable history. No logger/retention code implemented yet.
+
+### Earlier planning and superseded deferrals
 
 - [x] User explicitly defers this again on 2026-10-24 in favor of the Explorer
   Git-init affordance bug; do not automatically resume after its acceptance.
@@ -878,6 +1033,62 @@ warnings remain visible, without suppression. Preserve unrelated reports/dist.
 Earlier warn/error filtering and registration-policy findings remain investigation
 history, not the current implementation plan. No console/native code changed.
 
+## O5 isolated build/space PoC — deferred to 0.2.357
+
+User defers continuation on 2026-10-25. Completed evidence below is preserved;
+remaining design/integration gates now belong to ../release_0_2_357/TRACKER.md.
+
+- [x] User approves audit then two-consumer shared-library proof; explicitly
+  targets build/space/product-size/developer ergonomics, not request speed.
+- [x] Audit independent framework/worker locks: 224 shared package names,
+  138 exact common identities (not linked-byte attribution). Tokio/Hyper/
+  Engine.IO/Ferrous revisions differ; PyO3 is editor-worker-only. User confirms
+  additive Ferrous compatibility; no production pin or source changes.
+- [x] User approves exact cleanup: obsolete .354 APK comparison directories and
+  inspection JAR removed; recovery log compressed losslessly, retaining active
+  selections, snapshots, compiler caches, current APK/mapping and wheel artifacts.
+  Free disk rises ~3.0 to 6.3 GiB; log falls ~325 to 6.3 MiB. Nested scratch
+  directories are tiny and were not indiscriminately removed.
+- [x] Isolated fixture source at framework/shared_runtime_probe; same concrete
+  Tokio/Hyper/gzip implementation, two consumers, matching dependency locks,
+  compiler gate, retained separate build targets and own-process disk guard.
+  Package accounting includes Rust std dylib and ELF dependency checks.
+- [x] Linux isolated comparison complete: static raw 3,476,056 / ZIP 1,329,608
+  bytes; shared raw 7,684,976 / ZIP 2,364,484 including 5,418,488-byte Rust std.
+  Shared total ~78% larger compressed in this small fixture. Target-cold builds
+  22.78/24.28 s and private-change builds 5.51/6.01 s (static/shared); no observed
+  build-time win. Single samples/cached sources, not production size estimates.
+- [x] Private-change update leaves both shared executable hashes/std identical;
+  only shared runtime changes. Cargo still schedules both consumer packages.
+  Initial/updated HTTP-gzip roundtrips pass; relocated no-LD_LIBRARY_PATH runs,
+  explicit missing-runtime failure and library-only replacement pass. Both Python
+  drivers pass strict mypy; same-source/two-bin Cargo warning remains visible.
+- [x] Reject adoption of this plain Rust-dylib recipe as-is on measured goals.
+  Results/method/limitations: framework/shared_runtime_probe/README.md; receipts
+  in .codex-scratch/shared-runtime-probe/{initial,implementation-change}/results.json.
+  Build outputs use ~130 MiB; free disk remains ~6.2 GiB after cleanup/probe.
+- [x] User clarifies intended **stripped cdylib**, approves isolated corrected
+  variant. Both baseline and candidate strip symbols equally; same registry
+  dependencies/concrete HTTP-gzip implementation. Only ABI-version and bounded
+  UTF-8/caller-owned-buffer exports; no Rust type/ownership/Future crosses.
+- [x] Stripped static raw 2,545,728 / ZIP 1,136,342 bytes versus cdylib+two Rust
+  clients raw 1,955,600 / ZIP 902,159: net ZIP saving 234,183 bytes (~20.6%).
+  No dynamic Rust std dependency. Initial cached-source builds 23.53/23.65 s,
+  private-change builds 6.01/5.26 s, single samples not robust timing estimates.
+- [x] Corrected recipe rebuilds library only for private changes; two consumer
+  hashes remain identical and no consumer compilation occurs. This is fixture
+  build-driver ABI invalidation, not existing production bootstrap behavior.
+- [x] C header smoke, Rust unit byte-boundary test, static/shared/changed output,
+  relocated no-LD_LIBRARY_PATH loading, explicit missing-library failure,
+  pre-execution ABI mismatch rejection and library-only replacement all pass.
+  Dynamic exports exactly two; three Python drivers pass strict mypy. Receipts:
+  .codex-scratch/shared-runtime-cdylib/{initial,implementation-change}/results.json.
+- [x] Move the remaining shared-library design/integration work to .357 at the
+  user's request; retain the PoC without production adoption.
+- Deferred: decide whether measured net size/build ergonomics justify further work.
+  No production adoption, pin alignment, search/Git/FS mainlining, pipe change,
+  framework restart, Android/wheel publication or performance claim implied.
+
 ## Optimization agenda intake (O1–O8; schedule above)
 
 Initially recorded while user tested initialization (now accepted). PLAN.md O1–O8 owns
@@ -890,10 +1101,13 @@ not done, not failed acceptance or approval to implement all items.
 - [ ] O2: Pipe multiprocessing/multithreading, bounded in-process queuing and
   Code TE2 DTO/PyO3 handoff; identify actual backpressure and ordering needs.
 - [ ] O3: Transparent socket routing through pipe DTO envelopes, avoiding
-  network proxy hops where measurements justify it.
+  network proxy hops where measurements justify it. User suspends indefinitely
+  on 2026-10-25; not an active/next investigation.
 - [ ] O4: FlatBuffers / Cap'n Proto pipe codec comparison and compatibility proof.
+  Raw/zero-copy codec flattening is explicitly next-version work, not .356.
 - [ ] O5: Shared Rust source/runtime libraries, binary/build savings and direct
   pre-envelope *ops DTO reuse without duplicating framework authority.
+  Deferred to .357; see ../release_0_2_357/PLAN.md and TRACKER.md.
 - [ ] O6: Selected critical localhost streams over Node IPC on desktop/mobile,
   with explicit local capability and preserved remote paths; WBA candidate.
 - [ ] O7: Frontend Cap'n Proto packed-stream proof over Socket.IO binary frames;
@@ -1033,3 +1247,52 @@ bounded implementation; no migration implementation or shared restart yet.
   explicit path/line/column file actions using existing own-backend RPC only on
   activation. Preserve web URLs, streaming/final/replay parity, accessibility and
   exact-client proof; prevent misleading localhost link-menu destinations.
+
+## Deferred — shell profiles / command-palette execution / terminal focus
+
+- [x] Record user request (2026-10-25), planning only; return to current
+  logging/native-debug investigation afterward, without implementing this slice.
+- [ ] Add shell-execution run-profile type using the existing built-in runner's
+  editor-terminal execution path; reuse a running terminal or open/create one.
+- [ ] Add current-file `%` / extensionless `%<` substitutions and trailing run
+  arguments. User example: `gcc % -o %< && ./%<`. Qualify existing cwd, quoting,
+  substitution/escaping and compound-command argument rules before implementing.
+- [ ] Add command-palette shell-command entry using the same terminal path;
+  execute only on explicit acceptance, never on preview or cancelled input.
+- [ ] Reveal/focus the editor terminal whenever invoked by user intent, including
+  existing open/run actions; wait for readiness without cross-client or
+  background-restoration focus stealing.
+- [ ] Obtain concrete implementation approval and validate reuse/create,
+  substitutions/arguments, consent, cancellation/no-replay and desktop/mobile
+  focus. No source edits/builds/runtime changes/publication in this intake.
+
+## Deferred — Cefrium 0.13 staging comparison (before CDP work)
+
+- [x] User places this trial near the end, BEFORE deferred CDP/MCP work;
+  current validated 0.9 APK/socket fix stays in place. No upgrade/build now.
+- [ ] Audit 0.13 dependencies, query-origin/subframe migration and inherited
+  0.12 consumer R8 keep-rule fixes; preserve validated baseline APK/mapping.
+- [ ] Approve bounded trial with sufficient disk or an approved build host.
+  Compare same-source/settings compressed native/DEX/resources/total bytes and
+  perform artifact/device checks. No assumed size win or packaging-root-cause fix.
+
+## Deferred — remaining console / native-debug MCP work
+
+- [x] User explicitly defers remaining console/MCP work on 2026-10-25; return
+  to optimization agenda. Keep quiet registration/eval and socket fix in place.
+- [x] User subsequently confirms Cefrium APK CDP fix live accepted; deferred
+  native-debug/MCP features remain unimplemented and are not accepted by this.
+- [ ] Resume native CDP MCP commands, ALS producer/snapshot migration, broader
+  logging audit and client-local history only when separately reprioritized and
+  approved. No new Android/API/history implementation now; Gecko belongs to
+  user's other branch. Prior design/evidence remains in Phase 4 above.
+
+## Deferred — native CEF DevTools transport (end of list)
+
+- [x] User requests backlog-only placement on 2026-10-25; current process-owned
+  socket/CDP relay fix remains the immediate implementation.
+- [ ] Audit pinned Cefrium bindings for native CEF DevTools send/execute/observer
+  APIs, then qualify browser/iframe/session routing, thread/lifecycle ownership
+  and embedded inspector compatibility. This replaces transport, not CDP.
+- [ ] Obtain separate implementation approval after feasibility review; no
+  assumed performance gain, release gate, JNI work or APK build in this intake.
