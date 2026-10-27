@@ -93,7 +93,7 @@ export function installComparisonStatus(deps: {
       if (generation !== token || project !== requestedProject || menu !== currentMenu) return;
       apply(data);
       currentMenu.replaceChildren();
-      const add = (label: string, checked: boolean, change: Data): void => {
+      const add = (label: string, checked: boolean, change: Data, target: HTMLElement = currentMenu): void => {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'fe-dd-item';
@@ -104,9 +104,19 @@ export function installComparisonStatus(deps: {
           close();
           void deps.request({ projectPath: requestedProject, ...change }).then(apply).catch(showError);
         });
-        currentMenu.append(item);
+        target.append(item);
       };
-      add('Plain editor', mode === 'plain', { mode: 'plain' });
+      const plainRow = document.createElement('div');
+      plainRow.className = 'comparison-plain-options';
+      currentMenu.append(plainRow);
+      const atHead = !base.ref || base.ref === 'HEAD';
+      add('Plain editor', mode === 'plain' && !atHead, { mode: 'plain' }, plainRow);
+      const separator = document.createElement('span');
+      separator.className = 'comparison-plain-separator';
+      separator.setAttribute('role', 'separator');
+      separator.setAttribute('aria-orientation', 'vertical');
+      plainRow.append(separator);
+      add('Plain editor @HEAD', mode === 'plain' && atHead, { mode: 'plain', ref: 'HEAD' }, plainRow);
       add('Versus selected commit', mode === 'commit', { mode: 'commit' });
       add('Draft versus disk (autosave off)', mode === 'disk', { mode: 'disk' });
       const divider = document.createElement('hr');

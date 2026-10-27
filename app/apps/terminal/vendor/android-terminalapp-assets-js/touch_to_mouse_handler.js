@@ -512,10 +512,14 @@ function ensureHandleStyles() {
       width: 16px;
       height: 16px;
       border: 1px solid rgba(4, 10, 24, 0.82);
-      border-radius: 50% 50% 50% 0;
+      border-radius: 0 50% 50% 50%;
       background: rgba(71, 137, 255, 0.94);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42);
-      transform: translateX(-50%) rotate(135deg);
+    }
+    .${HANDLE_CLASS}[data-selection-endpoint="start"]::after {
+      left: auto;
+      right: 50%;
+      border-radius: 50% 0 50% 50%;
     }
     .${HANDLE_CLASS}.dragging::after {
       background: #8fbcff;
@@ -646,6 +650,9 @@ function hideMenu(attachment) {
 }
 
 function syncHandleLabels(attachment) {
+  // The same physical handle changes handedness when dragged across its peer.
+  attachment.startHandle.dataset.selectionEndpoint = 'start';
+  attachment.endHandle.dataset.selectionEndpoint = 'end';
   attachment.startHandle.setAttribute('aria-label', 'Adjust selection start');
   attachment.endHandle.setAttribute('aria-label', 'Adjust selection end');
 }
@@ -937,6 +944,7 @@ function attach(terminal) {
     publicDisposable: null,
   };
 
+  syncHandleLabels(attachment);
   const onPointerDown = (event) => beginHandleDrag(event, attachment);
   for (const handle of [startHandle, endHandle]) {
     handle.addEventListener('pointerdown', onPointerDown);

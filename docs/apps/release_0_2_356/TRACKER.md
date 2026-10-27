@@ -1,5 +1,34 @@
 # 0.2.356 maintenance tracker
 
+## Mobile terminal selection handle handedness — 2026-10-26
+
+- [x] Shared terminal helper uses left-facing start and right-facing end bulbs,
+  retaining existing cell anchors, stems and touch-target dimensions. Endpoint
+  styling/accessible labels swap when a physical handle crosses its peer.
+- [x] Code TE2/standalone helper copies remain identical; File Explorer consumes
+  the Code TE2 helper. Touch selection regressions cover shapes and crossing.
+  All 29 terminal touch tests pass, including actual endpoint crossing.
+- [x] User confirms handles look and work correctly; retain the existing stem
+  for now as a visual offset indicator. Further touch-target offset changes are
+  deferred, not implemented. Helpers are served separately,
+  so no JS bundle rebuild is required. No backend change, APK build or Android
+  seed publication performed; existing OTA/bundle inventory paths are unchanged.
+
+## Extension dependency warnings / plain comparison reset — 2026-10-26
+
+- [x] Uninstall dependency refusals name the blocking extension and tell the user
+  to uninstall dependents first. Full stdout/stderr stays in worker logs rather
+  than RPC/toast text; unrecognized failures point to those logs with the exit code.
+- [x] History status menu offers `Plain editor | Plain editor @HEAD`, separated
+  vertically. Original action preserves the reference; @HEAD uses the existing
+  host backend mode/ref intent to reset HEAD and disable diff display. Neither
+  action replaces document contents.
+- [x] 18 Python marketplace/uninstall tests and three comparison/frontend tests
+  pass. Strict mypy plus disallow-any checks pass for the two changed Python
+  files; frontend/WBA typecheck reports zero Any findings/diagnostics. Bundles rebuilt.
+- [ ] User live acceptance after activating backend and updated frontend assets.
+  No agent-triggered runtime restart, mypyc build or Android asset publication.
+
 ## ALS compact sub-agent activity / vendored snapshot — 2026-10-26
 
 - [x] ALS correction checkpoint b77e7d5 includes bounded shell/MCP/tool activity,

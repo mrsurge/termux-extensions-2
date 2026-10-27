@@ -338,12 +338,24 @@ test('selection handles use viewport-adjusted xterm cell geometry', () => {
 
   assert.equal(start.hidden, false);
   assert.equal(end.hidden, false);
+  assert.equal(start.dataset.selectionEndpoint, 'start');
+  assert.equal(end.dataset.selectionEndpoint, 'end');
   assert.equal(start.style.transform, 'translate3d(100px, 105px, 0)');
   assert.equal(end.style.transform, 'translate3d(130px, 105px, 0)');
   assert.equal(harness.menu().hidden, false);
   assert.equal(harness.menu().style.left, '135px');
   assert.equal(harness.menu().style.top, '90px');
 
+  harness.disposable.dispose();
+});
+
+test('selection bulbs mirror left and right without changing the shared touch target', () => {
+  const harness = createHarness();
+  const style = [...harness.window.document.querySelectorAll('style')]
+    .map(element => element.textContent).join('\n');
+  assert.match(style, /::after\s*\{[^}]*left: 50%;[^}]*border-radius: 0 50% 50% 50%;/);
+  assert.match(style, /\[data-selection-endpoint="start"\]::after\s*\{[^}]*left: auto;[^}]*right: 50%;[^}]*border-radius: 50% 0 50% 50%;/);
+  assert.doesNotMatch(style, /rotate\(135deg\)/);
   harness.disposable.dispose();
 });
 
@@ -701,8 +713,11 @@ test('double tap selects a word directly without a synthetic double click', () =
 
 test('dragging a handle across its peer preserves the physical moving handle', () => {
   const harness = createHarness();
+  try {
   harness.flushAnimationFrames();
-  const [physicalStart] = harness.handles();
+  const [physicalStart, physicalEnd] = harness.handles();
+  assert.equal(physicalStart.dataset.selectionEndpoint, 'start');
+  assert.equal(physicalEnd.dataset.selectionEndpoint, 'end');
 
   physicalStart.getBoundingClientRect = () => ({ top: 105, height: 58 });
 
@@ -713,11 +728,21 @@ test('dragging a handle across its peer preserves the physical moving handle', (
 
   assert.deepEqual(harness.selectCalls.at(-1), { column: 7, row: 11, length: 8 });
   assert.equal(physicalStart.style.transform, 'translate3d(150px, 85px, 0)');
+  // The first move is still above the fixed endpoint. Move below/past it.
+  assert.equal(physicalStart.dataset.selectionEndpoint, 'start');
+  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 170, y: 160 }));
+  harness.flushAnimationFrames();
+  assert.deepEqual(harness.selectCalls.at(-1), { column: 5, row: 12, length: 2 });
+  assert.equal(physicalStart.dataset.selectionEndpoint, 'end');
+  assert.equal(physicalEnd.dataset.selectionEndpoint, 'start');
+  assert.equal(physicalStart.getAttribute('aria-label'), 'Adjust selection end');
 
   physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 170, y: 140 }));
   harness.flushAnimationFrames();
   assert.equal(harness.menu().hidden, false);
-  harness.disposable.dispose();
+  } finally {
+    harness.disposable.dispose();
+  }
 });
 
 test('handle mapping advances off a wide-character continuation cell', () => {

@@ -12,7 +12,9 @@ with TE2's generated language gates into code-server User/settings.json.
 
 import hashlib
 import json
+import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -35,6 +37,25 @@ ExtensionMap: TypeAlias = dict[str, ExtensionEntry]
 LanguageSlot: TypeAlias = dict[str, object]
 LanguageSlotMap: TypeAlias = dict[str, LanguageSlot]
 Registry: TypeAlias = dict[str, object]
+_LOGGER = logging.getLogger(__name__)
+
+
+def _uninstall_failure_message(ext_id: str, output: str, returncode: int) -> str:
+    """Keep subprocess diagnostics in logs, not user-facing RPC errors."""
+    dependency = re.search(
+        r"Cannot uninstall '([^'\r\n]+)' extension\. ([^\r\n]+?) depends on this\.",
+        output,
+    )
+    if dependency:
+        name, dependents = dependency.groups()
+        return (
+            f"Cannot uninstall {name}: {dependents} depends on it. "
+            "Uninstall the dependent extension(s) first, then try again."
+        )
+    return (
+        f"Could not uninstall {ext_id} (code-server exit code {returncode}). "
+        "See the Code TE2 worker logs for details."
+    )
 
 # ── Paths ─────────────────────────────────────────────────────────────
 
@@ -991,8 +1012,13 @@ def uninstall_extension(ext_id: str) -> dict[str, object]:
     )
 
     if result.returncode != 0:
-        err = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(f"code-server uninstall failed (rc={result.returncode}): {err}")
+        _LOGGER.error(
+            "code-server uninstall failed for %s (rc=%s)\nstdout:\n%s\nstderr:\n%s",
+            ext_id, result.returncode, result.stdout, result.stderr,
+        )
+        raise RuntimeError(_uninstall_failure_message(
+            ext_id, result.stdout + "\n" + result.stderr, result.returncode,
+        ))
 
     print(f"[ext_registry] uninstall stdout: {result.stdout.strip()}", flush=True)
 
