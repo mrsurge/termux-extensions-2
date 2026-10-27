@@ -1,5 +1,28 @@
 # 0.2.357 plan
 
+## Code TE2 pipe concurrency — deferred O2 continuation
+
+Deferred from .356 at the user's request on 2026-10-26. Completed DTO/PyO3
+byte-ingress/native-type optimizations remain accepted, not pending work.
+The user reports searching 6,000+ files and delivering all needle-in-a-haystack
+results in under one second without earlier stalls. This is user-observed
+behavior, not a controlled benchmark or a new throughput guarantee.
+
+The original request includes multiprocessing, multithreading and event queuing
+on Code TE2's receiving/processing side, using the main framework scheduler as a
+reuse candidate. Tokio tasks alone are not multiprocessing. Historical synthetic
+Ferrous/JSON-RPC tests demonstrated tens of thousands of concurrent real RPCs
+per second; the reported search backpressure was Python-worker intake, not FD
+transport capacity. Preserve that distinction when investigating.
+
+Resume only if workloads demonstrate sustained queue pressure, unrelated RPC
+responsiveness problems, or a new concurrency requirement. Audit the current
+framework scheduler and Python ownership/GIL boundaries before choosing processes,
+threads or bounded queues. Preserve ordering, cancellation, bounded memory and
+state authority; measure a user-visible benefit against coordination and
+serialization costs before production adoption. Scheduling this backlog does
+not approve implementation or require resuming it first in .357.
+
 ## Shared Rust runtime libraries
 
 User defers this work from .356 on 2026-10-25. Target final product size,

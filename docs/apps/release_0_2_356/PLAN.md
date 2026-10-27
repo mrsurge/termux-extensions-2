@@ -2,6 +2,34 @@
 
 ## Release direction
 
+### Termux execution-environment refresh — 2026-10-26
+
+Before the next release, refresh installed `termux-*` packages plus the current
+core/exec/tools prerequisites. Installed presence alone does not qualify an old
+Termux execution environment. Read names/status from `dpkg-query`, not `apt list`
+display text, and do not require ripgrep in the installer. Refresh apt metadata,
+then reinstall/upgrade the selected package set and normal dependencies with
+explicit `--force-confnew`/`--force-confask` dpkg policy. `apt -y` alone does not
+answer modified-conffile prompts. Explain package-configuration replacement and
+dpkg backups before consent; home dotfiles are outside this repair.
+
+The Python installer performs this before locking or probing Python/Node ABI,
+then replaces itself through Termux's packaged login entrypoint and the exact
+installer arguments. One internal handoff flag avoids a refresh loop. This lets
+package-owned loader setup choose the preload library rather than inheriting a
+stale environment or hardcoding current library names. Rollback/uninstall skip
+the refresh; Linux and legacy release selection stay unchanged. The no-Python
+bootstrap also installs core support with explicit updated-conffile policy.
+
+Mocked install/consent/failure/handoff tests do not establish on-device linking
+acceptance. Validate with a stale Termux environment before publication. Also
+audit the separately packaged Electromux launcher's hardcoded legacy
+`LD_PRELOAD` path before claiming parity; client/Android edits are not authorized
+by this installer slice.
+
+Sources: https://github.com/termux/termux-tools/blob/master/scripts/login.in and
+https://manpages.debian.org/bookworm/dpkg/dpkg.1.en.html.
+
 ### Owned frontend/WBA no-Any cleanup — 2026-10-25
 
 Replace explicit and inferred Any in owned source, including nested structures,
@@ -102,10 +130,10 @@ it or leave it as the next work item.
    implementation approval and delivery, with its tests/acceptance in that phase.
    Immediately after the cutover, address the Code TE2 Any audit described below,
    before starting the next optimization slice.
-3. Pipe/DTO/PyO3 optimization (O2): next priority is removing avoidable graph
-   conversions/allocations, starting with the source-backed telemetry-only WBA
-   re-encode described below. Then measure boundary alternatives before changing
-   queues/concurrency. Each slice has its own implementation/acceptance gate.
+3. Pipe/DTO/PyO3 optimization (O2): delivered byte-ingress/native-type slices are
+   complete and live accepted. Remaining Code TE2-side multiprocessing,
+   multithreading and event-queue work is deferred to .357 (2026-10-26), not a
+   .356 release obligation. See ../release_0_2_357/PLAN.md for resumption gates.
 4. Connected-but-quiet built-in console policy is implemented; Cefrium socket
    repair awaits the user's APK acceptance. User defers ALL remaining console/
    MCP work on 2026-10-25; see end-of-plan backlog. Do not start native commands,
@@ -507,6 +535,14 @@ source validation. TRACKER.md owns those pending gates; ALS FRAMEWORK_STDIO.md a
 the APP_RPC companion own the implementation contract.
 
 ### O2. Pipe concurrency and in-process Code TE2 DTO buffering
+
+Current disposition (2026-10-26): completed boundary optimizations remain done;
+the remaining Code TE2-side process/thread scheduling and event queuing is
+deferred to .357. The user reports searching over 6,000 files and delivering all
+needle-in-a-haystack results in under one second, without the earlier stalls.
+This is user-observed acceptance, not an agent-controlled benchmark. Further
+concurrency complexity has no demonstrated present need. The following records
+the historical investigation, not authorization to resume it.
 
 2026-10-21 priority: user requests conversion/allocation overhead as the next
 target, not eliminating PyObject pointers from generated C. User approves plan/
@@ -1070,3 +1106,19 @@ paths wait for their matching surface confirmation and resume through normal
 sidebar-state notifications. Reset admission on WBA session loss without deleting
 saved membership. Cold resync is non-pruning until primary activation completes;
 individual available views may mount during staggered activation.
+
+## Final candidate evaluation — GekkoTron
+
+User requests this as the final candidate to examine for the upcoming release
+(2026-10-26), after the other selected work. GekkoTron is the user's independent
+desktop/mobile Electron/GeckoView port. It may not yet be ready. Its name records
+the requested project, not a renderer replacement already adopted by TE2.
+
+Before any integration, inspect the current source/API and build state; qualify
+client/preload bridges, local/remote launch, asset routing, identity, scale/input,
+debugging and lifecycle/security boundaries. Obtain a bounded trial/build plan,
+adequate disk headroom and grouped device acceptance approval. Compare complete
+artifact size and functionality against the existing clients. Do not migrate
+Android or replace a shipped renderer under this scheduling note. Defer if the
+candidate is not ready; adoption and release-blocking status require a separate
+user decision. Existing deferred work does not automatically resume ahead of it.

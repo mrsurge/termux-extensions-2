@@ -1,5 +1,37 @@
 # 0.2.356 maintenance tracker
 
+## ALS compact sub-agent activity / vendored snapshot — 2026-10-26
+
+- [x] ALS correction checkpoint b77e7d5 includes bounded shell/MCP/tool activity,
+  throttled prose, running fallback, non-sticky headers and completion anchoring.
+- [x] User confirms concurrent live activity works while the parent reads README.
+  Full iframe child transcripts remain deferred in ALS's SUBAGENT_ACTIVITY_PLAN.md.
+- [x] TE2 vendored assets refreshed: 150 hashes verified and three proxy/intercept/
+  OTA contract tests pass. APK build, runtime restart and publication not performed.
+
+## Termux installer execution-environment refresh — 2026-10-26
+
+- [x] Source audit: prerequisite installation previously skipped installed but
+  stale Termux support packages and used apt -y without dpkg conffile policy.
+- [x] User approves targeted installed `termux-*` refresh plus core/exec/tools,
+  explicit packaged-configuration replacement, fresh login handoff, mocked tests
+  and release planning. No device upgrade or Android modification is approved.
+- [x] Read installed names/status through dpkg-query; no apt-display parsing or
+  installer dependency on ripgrep. Refresh metadata and reinstall/upgrade selected
+  packages with `--force-confnew`/`--force-confask`; retain checked apt failures.
+- [x] Replace the installer process through packaged Termux login before ABI/Node
+  validation and acquiring the lock. Preserve quoted arguments; internal handoff
+  flag prevents recursion. Uninstall/rollback and Linux do not enter this flow.
+- [x] No-Python shell bootstrap requests core support with explicit confnew policy.
+- [x] Local validation: 52 installer/release/native-source tests and 6 subtests
+  pass; shell syntax and strict mypy on the installer pass. Package operations
+  and login handoff are mocked, not live Termux acceptance.
+- [ ] Device acceptance from stale Termux login/profile/package state: updated
+  support libraries, fresh child environment, Node launch, installation and repeat
+  invocation. Fresh-install and cancellation/failure behavior also need acceptance.
+- [ ] Separately qualify Electromux's hardcoded legacy LD_PRELOAD library against
+  current Termux packaging; no client/API/Android edits in this installer slice.
+
 ## Owned frontend/WBA no-Any cleanup — 2026-10-25
 
 - [x] User approves compiler-backed explicit/inferred audit, owned-source cleanup,
@@ -352,7 +384,8 @@ policy; the separately approved Stage C source migration is recorded below.
    working; Any cleanup and app-agnostic refresh follow-up are source-complete.
 3. O2 byte-ingress/native-type slices N1–N5: source complete and user live
    accepted, including N5 search coverage on 2026-10-24. Async bridge production
-   adoption and broader queue/concurrency changes remain separately gated.
+   adoption remains separately gated; remaining Code TE2-side multiprocessing,
+   multithreading and event queuing is deferred to .357 (2026-10-26).
 4. Git-init footer is user accepted/committed. Connected-but-quiet console policy
    is implemented. Cefrium socket fix awaits user's APK test. User defers ALL
    remaining console/MCP work (2026-10-25); see end-of-tracker backlog.
@@ -363,7 +396,7 @@ policy; the separately approved Stage C source migration is recorded below.
 
 Validation belongs within each work phase, never a replacement for actual work.
 
-## O2 — conversion/allocation overhead: next active investigation
+## O2 — conversion/allocation overhead: delivered slices and deferred continuation
 
 - [x] User prioritizes this after the Sidebar/typing checkpoint; approves plan/
   tracker edits and read-only source investigation before runtime changes.
@@ -764,8 +797,9 @@ test compilation is validation only and does not activate a production worker.
 
 - [ ] Phase 2 / O1: source-backed framework-pipe/Sidebar IPC intent design,
   especially ALS <-> Code TE2; bounded implementation approval then delivery.
-- [ ] Phase 3 / O2: source-backed concurrency, queue and DTO/PyO3-boundary design,
-  bounded implementation approval then delivery.
+- [x] Phase 3 / O2 disposition: boundary slices delivered/live accepted; remaining
+  Code TE2-side process/thread concurrency and queues deferred to .357. Historical
+  design below is not an active implementation gate for .356.
 
 Their testing/acceptance belongs within these phases; neither is implemented or
 approved for blanket changes merely because the order is now recorded.
@@ -1169,8 +1203,11 @@ not done, not failed acceptance or approval to implement all items.
 - [x] Preserve the user's complete optimization agenda in this release plan.
 - [ ] O1: Framework-pipe intents / Sidebar IPC consolidation, especially
   ALS <-> Code TE2; reconcile earlier deferred work and exact-client ownership.
-- [ ] O2: Pipe multiprocessing/multithreading, bounded in-process queuing and
-  Code TE2 DTO/PyO3 handoff; identify actual backpressure and ordering needs.
+- [x] O2 disposition: DTO/PyO3 boundary slices delivered/live accepted; remaining
+  Code TE2-side multiprocessing/multithreading and event queuing moved to .357.
+  User reports 6,000+ files searched with all needle-in-a-haystack results in
+  under one second. User-observed, not a controlled benchmark; no further .356
+  optimization required. See ../release_0_2_357/TRACKER.md.
 - [ ] O3: Transparent socket routing through pipe DTO envelopes, avoiding
   network proxy hops where measurements justify it. User suspends indefinitely
   on 2026-10-25; not an active/next investigation.
@@ -1367,3 +1404,13 @@ bounded implementation; no migration implementation or shared restart yet.
   and embedded inspector compatibility. This replaces transport, not CDP.
 - [ ] Obtain separate implementation approval after feasibility review; no
   assumed performance gain, release gate, JNI work or APK build in this intake.
+
+## Final candidate evaluation — GekkoTron
+
+- [x] Record user-maintained desktop/mobile Electron/GeckoView port as the last
+  candidate to assess before the upcoming release, after the other selected work.
+  User says it may not be ready; this is not an adoption or release-blocker decision.
+- [ ] On explicit resumption, inspect its current source/API and build readiness,
+  compare existing client behavior, packaging size and lifecycle/security parity.
+- [ ] Approve bounded trial/build/acceptance scope before replacing or adding any
+  shipped client. If not ready, defer it rather than implicitly expanding release.

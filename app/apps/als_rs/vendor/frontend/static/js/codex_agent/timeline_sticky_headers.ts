@@ -41,8 +41,7 @@ function closestTimelineRow(timelineEl: HTMLElement | null, el: Element | null):
 
 function isStickySourceRow(row: Element | null | undefined): boolean {
   if (!row?.classList) return false;
-  return row.classList.contains('subagent-card')
-    || row.classList.contains('diff')
+  return row.classList.contains('diff')
     || row.classList.contains('message-card')
     || row.classList.contains('mcp-tool-card')
     || row.classList.contains('search-card')
@@ -90,14 +89,8 @@ function getStickyHostClasses(row: Element | null | undefined): string[] {
 
 function getStickyChainFromRow(row: StickySourceRow | null): StickySourceRow[] {
   if (!row) return [];
-  const subagents: StickySourceRow[] = [];
-  let cursor = row.parentElement?.closest('.subagent-card');
-  while (isTimelineRowElement(cursor)) {
-    subagents.push(cursor);
-    cursor = cursor.parentElement?.closest('.subagent-card');
-  }
-  subagents.reverse();
-  const chain = [...subagents];
+  // A child transcript owns its own chrome; its outer card is never sticky.
+  const chain: StickySourceRow[] = [];
   if (isStickySourceRow(row) && chain[chain.length - 1] !== row) {
     chain.push(row);
   }

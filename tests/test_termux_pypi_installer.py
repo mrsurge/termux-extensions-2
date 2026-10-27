@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -23,6 +24,94 @@ SPEC.loader.exec_module(installer)
 
 
 class TermuxPyPIInstallerTests(unittest.TestCase):
+    def test_refresh_uses_installed_package_names_and_explicit_profile_policy(self) -> None:
+        prefix = Path("/data/data/com.termux/files/usr")
+        inventory = (
+            "termux-tools\tinstalled\ntermux-exec\tinstalled\n"
+            "termux-api\tinstalled\ntermux-unused\tconfig-files\n"
+            "nodejs-lts\tinstalled\ntermux-invalid/name\tinstalled\n"
+        )
+        argv = ["install_te2.py", "--payload-root", "/path with 'quote'/payload", "--yes"]
+        with patch.object(installer, "_command_output", return_value=inventory) as query, \
+             patch.object(installer, "_confirm_install") as confirm, \
+             patch.object(installer.subprocess, "run") as run, \
+             patch.object(installer.os, "execve", side_effect=SystemExit(73)) as execute, \
+             patch.object(installer.sys, "argv", argv):
+            with self.assertRaises(SystemExit) as raised:
+                installer._refresh_termux_runtime(prefix, assume_yes=True)
+        self.assertEqual(raised.exception.code, 73)
+        self.assertIn("${Package}", query.call_args.args[0][-1])
+        self.assertIn("${db:Status-Status}", query.call_args.args[0][-1])
+        confirm.assert_called_once()
+        self.assertIn("configuration", confirm.call_args.args[0])
+        self.assertIn(".dpkg-old", confirm.call_args.args[0])
+        apt = str(prefix / "bin/apt-get")
+        self.assertEqual(run.call_args_list[0].args[0], [apt, "update"])
+        command = run.call_args_list[1].args[0]
+        self.assertIn("Dpkg::Options::=--force-confnew", command)
+        self.assertIn("Dpkg::Options::=--force-confask", command)
+        self.assertIn("--reinstall", command)
+        self.assertEqual(command[command.index("-y") + 1:],
+                         ["termux-api", "termux-core", "termux-exec", "termux-tools"])
+        for call in run.call_args_list:
+            self.assertTrue(call.kwargs["check"])
+        login, args, _env = execute.call_args.args
+        self.assertEqual(login, str(prefix / "bin/login"))
+        self.assertEqual(args[:2], [login, "-c"])
+        handoff = shlex.split(args[2])
+        self.assertEqual(handoff[:2], ["exec", str(prefix / "bin/python")])
+        self.assertEqual(handoff[3:-1], argv[1:])
+        self.assertEqual(handoff[-1], "--termux-runtime-prepared")
+
+    def test_refresh_stops_on_decline_or_apt_failure_before_login(self) -> None:
+        prefix = Path("/data/data/com.termux/files/usr")
+        with patch.object(installer, "_command_output", return_value=""), \
+             patch.object(installer, "_confirm_install", side_effect=SystemExit("cancelled")), \
+             patch.object(installer.subprocess, "run") as run, \
+             patch.object(installer.os, "execve") as execute:
+            with self.assertRaisesRegex(SystemExit, "cancelled"):
+                installer._refresh_termux_runtime(prefix, assume_yes=False)
+            run.assert_not_called()
+            execute.assert_not_called()
+        for failed_call in (1, 2):
+            with self.subTest(failed_call=failed_call), \
+                 patch.object(installer, "_command_output", return_value=""), \
+                 patch.object(installer, "_confirm_install"), \
+                 patch.object(installer.subprocess, "run", side_effect=(
+                     [subprocess.CalledProcessError(1, "apt")] if failed_call == 1 else
+                     [SimpleNamespace(returncode=0), subprocess.CalledProcessError(1, "apt")]
+                 )), patch.object(installer.os, "execve") as execute:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    installer._refresh_termux_runtime(prefix, assume_yes=True)
+                execute.assert_not_called()
+
+    def test_uninstall_and_rollback_do_not_refresh_termux_packages(self) -> None:
+        for action in ("uninstall", "rollback"):
+            args = SimpleNamespace(desktop=False, prefix=None, uninstall=action == "uninstall",
+                                   rollback="0.2.354" if action == "rollback" else None,
+                                   termux_runtime_prepared=False, yes=True)
+            with tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                with patch.object(installer, "_resolve_prefix", return_value=root), \
+                     patch.object(installer, "_refresh_termux_runtime") as refresh, \
+                     patch.object(installer, "_uninstall"), patch.object(installer, "_rollback"):
+                    self.assertEqual(installer._run_termux(args, root, root), 0)
+                refresh.assert_not_called()
+
+    def test_runtime_refresh_precedes_lock_and_runtime_validation(self) -> None:
+        args = SimpleNamespace(desktop=False, prefix=None, uninstall=False, rollback=None,
+                               termux_runtime_prepared=False, yes=True)
+        root = Path("/unused")
+        with patch.object(installer, "_resolve_prefix", return_value=root), \
+             patch.object(installer, "_refresh_termux_runtime", side_effect=SystemExit(73)) as refresh, \
+             patch.object(installer, "_install_lock") as lock, \
+             patch.object(installer, "_ensure_prerequisites") as prerequisites:
+            with self.assertRaises(SystemExit):
+                installer._run_termux(args, root, root)
+            refresh.assert_called_once_with(root, assume_yes=True)
+            lock.assert_not_called()
+            prerequisites.assert_not_called()
+
     def test_stages_prebuilt_runtime_allowing_small_dependencies_before_activation(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -79,7 +168,7 @@ class TermuxPyPIInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             args = SimpleNamespace(desktop=False, prefix=None, uninstall=False, rollback=None,
-                                   release_version="0.2.354", yes=True)
+                                   release_version="0.2.354", yes=True, termux_runtime_prepared=True)
             with patch.object(installer, "_resolve_prefix", return_value=root / "prefix"), \
                  patch.object(installer.sys, "version_info", (3, 14, 6)), \
                  patch.object(installer.platform, "machine", return_value="aarch64"), \

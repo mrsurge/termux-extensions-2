@@ -32,6 +32,7 @@ LINUX_APT_PACKAGES = ("git", "build-essential", "python3-venv")
 LINUX_LIBARCHIVE_PACKAGES = ("libarchive13t64", "libarchive13")
 LINUX_TARGET = "linux-glibc-x86_64"
 TERMUX_TARGET = "termux-android-aarch64"
+TERMUX_RUNTIME_PACKAGES = ("termux-core", "termux-exec", "termux-tools")
 TERMUX_APT_PACKAGES = (
     {"name": "tur-repo"},
     {"name": "python", "executables": ["python"], "libraries": ["lib/libpython3.14.so"]},
@@ -47,6 +48,18 @@ TERMUX_APT_PACKAGES = (
 REQUIRED_SERVER_FEATURE = "ferrous-framework-native"
 
 
+class InstallerArguments(argparse.Namespace):
+    payload_root: str
+    release_version: str | None
+    prefix: str | None
+    data_home: str | None
+    yes: bool
+    desktop: bool
+    uninstall: bool
+    rollback: str | None
+    termux_runtime_prepared: bool
+
+
 def main() -> int:
     args = _parse_args()
     payload = Path(args.payload_root).expanduser().resolve()
@@ -59,10 +72,12 @@ def main() -> int:
     return _run_linux(args, payload, install_root, data_home)
 
 
-def _run_termux(args: argparse.Namespace, payload: Path, install_root: Path) -> int:
+def _run_termux(args: InstallerArguments, payload: Path, install_root: Path) -> int:
     if args.desktop:
         raise SystemExit("--desktop is supported only on glibc Linux")
     prefix = _resolve_prefix(args.prefix)
+    if not args.uninstall and not args.rollback and not args.termux_runtime_prepared:
+        _refresh_termux_runtime(prefix, assume_yes=args.yes)
     with _install_lock(install_root / ".install.lock"):
         if args.uninstall:
             _uninstall(install_root, prefix)
@@ -102,7 +117,7 @@ def _run_termux(args: argparse.Namespace, payload: Path, install_root: Path) -> 
 
 
 def _run_linux(
-    args: argparse.Namespace,
+    args: InstallerArguments,
     payload: Path,
     install_root: Path,
     data_home: Path,
@@ -162,13 +177,14 @@ def _run_linux(
     return 0
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args() -> InstallerArguments:
     parser = argparse.ArgumentParser(description="Install a verified TE2 release payload")
     parser.add_argument("--payload-root", default=".", help=argparse.SUPPRESS)
     parser.add_argument("--release-version", help=argparse.SUPPRESS)
     parser.add_argument("--prefix", help="Target prefix; defaults to PREFIX")
     parser.add_argument("--data-home", help="Canonical TE2 data root override")
-    parser.add_argument("-y", "--yes", action="store_true", help="Consent to missing apt prerequisites")
+    parser.add_argument("-y", "--yes", action="store_true", help="Consent to apt prerequisites and Termux runtime/configuration refresh")
+    parser.add_argument("--termux-runtime-prepared", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--desktop",
         action="store_true",
@@ -177,7 +193,7 @@ def _parse_args() -> argparse.Namespace:
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--uninstall", action="store_true")
     action.add_argument("--rollback", metavar="VERSION")
-    return parser.parse_args()
+    return parser.parse_args(namespace=InstallerArguments())
 
 
 def _detect_target() -> str:
@@ -326,6 +342,47 @@ def _verify_payload(payload: Path, manifest: Mapping[str, object]) -> None:
         raise SystemExit("TE2 server does not match target manifest")
     _validate_aarch64_elf(server_path)
     _manifest_server_build_info(manifest)
+
+
+def _refresh_termux_runtime(prefix: Path, *, assume_yes: bool) -> None:
+    """Refresh packaged execution support, then replace this stale login context.
+
+    This runs before the install lock and Python/Node ABI checks. An internal
+    handoff argument survives login shell environment filtering and prevents a
+    refresh loop. It is not a security boundary: users control their installer.
+    """
+    query = _command_output([
+        str(prefix / "bin/dpkg-query"), "-W",
+        "-f=${Package}\\t${db:Status-Status}\\n",
+    ], required=True)
+    packages = set(TERMUX_RUNTIME_PACKAGES)
+    for line in query.splitlines():
+        name, separator, status = line.partition("\t")
+        if separator and status == "installed" and re.fullmatch(r"termux-[a-z0-9+.-]+", name):
+            packages.add(name)
+    message = (
+        "Refresh Termux execution support: " + ", ".join(sorted(packages))
+        + ". Package-maintained Termux configuration (including login/profile scripts) "
+        "will be replaced with the packaged versions; dpkg retains replaced conffiles "
+        "as .dpkg-old. User home dotfiles are not modified. The installer then "
+        "continues in a fresh Termux login environment."
+    )
+    _confirm_install(message, assume_yes=assume_yes)
+    if assume_yes:
+        print(message, flush=True)
+    apt = str(prefix / "bin/apt-get")
+    subprocess.run([apt, "update"], check=True)
+    subprocess.run([
+        apt, "-o", "Dpkg::Options::=--force-confnew",
+        "-o", "Dpkg::Options::=--force-confask",
+        "install", "--reinstall", "-y", *sorted(packages),
+    ], check=True)
+    command = [str(prefix / "bin/python"), str(Path(__file__).absolute()),
+               *sys.argv[1:], "--termux-runtime-prepared"]
+    login = str(prefix / "bin/login")
+    # Use the package-owned loader setup rather than guessing current preload
+    # library filenames or sourcing arbitrary profile code into Python.
+    os.execve(login, [login, "-c", "exec " + shlex.join(command)], dict(os.environ))
 
 
 def _ensure_prerequisites(

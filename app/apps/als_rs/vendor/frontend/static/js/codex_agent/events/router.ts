@@ -73,6 +73,7 @@ interface RouterEvent extends JsonObject {
   intent?: string;
   summary?: string;
   success?: boolean;
+  compact?: boolean;
   steps?: unknown[];
   total?: unknown;
   context_window?: unknown;
@@ -655,12 +656,16 @@ export function bindEventRouter(ctx: EventRouterContext) {
       case 'subagent_start':
         setLastEventType('subagent');
         getSubagentContainer(event.id || '', event.name || 'subagent', event.intent || 'working', event);
-        setActivity(`subagent: ${event.intent || event.name || 'working'}`, true);
+        if (!event.compact) setActivity(`subagent: ${event.intent || event.name || 'working'}`, true);
         maybeAutoScroll();
         return;
       case 'subagent_end':
         setLastEventType('subagent');
-        finalizeSubagent(event.id || '', event.summary || '', Boolean(event.success));
+        if (event.compact) {
+          getSubagentContainer(event.id || '', event.name || 'subagent', '', event);
+        } else {
+          finalizeSubagent(event.id || '', event.summary || '', Boolean(event.success));
+        }
         maybeAutoScroll();
         return;
       case 'plan_update':

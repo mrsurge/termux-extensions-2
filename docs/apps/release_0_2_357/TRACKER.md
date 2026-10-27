@@ -1,5 +1,17 @@
 # 0.2.357 tracker
 
+## Code TE2 pipe concurrency — O2 continuation
+
+- [x] Record user-requested deferral from .356 on 2026-10-26; preserve completed
+  boundary optimizations and user-reported sub-second 6,000+ file search acceptance.
+- [ ] Establish an actual workload/queue-pressure or responsiveness need before
+  resuming; not an automatic next task or a .356 release blocker.
+- [ ] Audit reusable framework scheduler process/thread/queue machinery and
+  Code TE2 Python intake/handler ownership; distinguish transport from processing.
+- [ ] Approve a bounded design with ordering, cancellation and memory limits.
+- [ ] Implement only if justified, compare end-to-end responsiveness and obtain
+  live acceptance. No transport replacement or multiprocessing adoption implied.
+
 ## Shared-library continuation
 
 - [x] Record user-requested deferral from .356; preserve PoC source and results.

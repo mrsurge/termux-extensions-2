@@ -20,8 +20,8 @@
       "sha256": "f3c7c0370e645063082d50ef820e0ab492b7f491d50b433c1f688ddb4f53c2dd"
     },
     "codex_agent.css": {
-      "bytes": 80480,
-      "sha256": "307123c86284c610c2d092374628ae2e54bf85baf0b3c6c0695bd6813573c264"
+      "bytes": 81126,
+      "sha256": "3589e435602913d4888928a4fbc8f0f410dd3ad29b961deaf82db9454b7e2a68"
     },
     "codex_agent.ts": {
       "bytes": 104165,
@@ -32,8 +32,8 @@
       "sha256": "c2e2f0a663f1db4ebecc728f55651fa8d55617769d0624809647761d0a14aa1c"
     },
     "dist/codex_agent.js": {
-      "bytes": 910898,
-      "sha256": "b31ee73095f8c7513e22a6bc06baf032d96b2f5447f790cc669dfcd2119bdd34"
+      "bytes": 923730,
+      "sha256": "fc099f285184411d8a023c0a4941a92250c199ee8f80ce934aa9d3bee66e1356"
     },
     "images/green-right-arrow.png": {
       "bytes": 122699,
@@ -100,8 +100,8 @@
       "sha256": "7e7e2b96d4326cb69d694c4a792df5feb4af7b3e1cc08bf6a7db8a7c486cd4ce"
     },
     "js/codex_agent/events/router.ts": {
-      "bytes": 29381,
-      "sha256": "7a6eee5f00c9ac0492ea8ba7140819a89029ff15e79d42a69c48ba27de926b17"
+      "bytes": 29565,
+      "sha256": "8cdc9e42924af2601c0fa0c2c02d72d33c0fefd7011211fe47f3e4467127c808"
     },
     "js/codex_agent/events/socket.ts": {
       "bytes": 4451,
@@ -156,8 +156,8 @@
       "sha256": "ff43647ffffe48123caab6d73a7e142669cb741c44ce6cb40323b8b14151dad2"
     },
     "js/codex_agent/render/utils.ts": {
-      "bytes": 23154,
-      "sha256": "4f33ef5118c9a314c3a1c758684020d0ea0fcda5fcbfaa59ec62970347aa18e0"
+      "bytes": 23166,
+      "sha256": "acd97fa4b3ce2cc577dcddbd1f978566cfd19500bc1f6f0fcde54b7143ae10e0"
     },
     "js/codex_agent/request_cards/runtime.ts": {
       "bytes": 8376,
@@ -232,8 +232,12 @@
       "sha256": "7b72505a65e9465f6eed226956e954291d2e368526172673e5001e9fde8e04a2"
     },
     "js/codex_agent/subagents/collapsible.ts": {
-      "bytes": 8377,
-      "sha256": "36ebf78fc562b517f6f6b67ecb7422ff64ad0c5ce497c0e1ecbe0520c760c4cb"
+      "bytes": 9524,
+      "sha256": "5786c30a0ee2a8f83dbfd5a713321429b3320906a5c535b61d539ddab2d96557"
+    },
+    "js/codex_agent/subagents/compact.ts": {
+      "bytes": 3350,
+      "sha256": "f2e8a8e1335fa6bd84455312aad96f4af5df46284a5c2637015ae0c8aa732d52"
     },
     "js/codex_agent/terminal_ansi.ts": {
       "bytes": 3769,
@@ -244,20 +248,20 @@
       "sha256": "93c91646e860d109f581e7929ed83ef3b7fb6f656c28216d1680542f649da0c8"
     },
     "js/codex_agent/timeline/replay.ts": {
-      "bytes": 31861,
-      "sha256": "9b78ccb2b568dd07983d9d105c010615d238d7fcb3b3346bf990e80a5076c3d1"
+      "bytes": 33397,
+      "sha256": "f36eaef7fa2b31a627028d09377e20cb63efd5e81708a3e387c4d4be057b75c7"
     },
     "js/codex_agent/timeline/rows.ts": {
-      "bytes": 9585,
-      "sha256": "9f7b224c772e6396915206638cfaf1e97aa884dd3827ad2e0b58890b20287dc1"
+      "bytes": 9715,
+      "sha256": "b34b4c5287e8a1114c4050a5bf57dbd2721f5d96115ed57197b3f7dea2d299bc"
     },
     "js/codex_agent/timeline/virtualizer.ts": {
       "bytes": 37565,
       "sha256": "265a2105d3999896d3d9cfb37e211c34eddae19221c8099b7217683f3ae2e781"
     },
     "js/codex_agent/timeline_sticky_headers.ts": {
-      "bytes": 16753,
-      "sha256": "d622ead770aad523f95c95b1b3c85684ef5540d52edd1bed553477213f904587"
+      "bytes": 16528,
+      "sha256": "208d89f99c18445021068140a221d69621662afb529892e2aac98d5b53f61f04"
     },
     "js/codex_agent/toast.ts": {
       "bytes": 2066,
@@ -304,8 +308,8 @@
       "sha256": "55434c04cc136f453f95622511424d36b7eec8385dd36b14e2dd827ffb4409e4"
     },
     "js/codex_agent/vendor_runtime.ts": {
-      "bytes": 4240,
-      "sha256": "9bce5ea6434d51b5dbe80c006257e5fda831f4d9373f60ad66a292a49c8a37d8"
+      "bytes": 4402,
+      "sha256": "7ad704ee49a8830e4b4a10b614c8d056eda20b0a373aad8572a36daea9bb5e70"
     },
     "js/console_bridge.js": {
       "bytes": 9876,
@@ -628,7 +632,7 @@
     ]
   },
   "schema": 1,
-  "source_commit": "3cc5e9f5ec2039a109626f3292f64f2892d95c30",
+  "source_commit": "b77e7d56894343d94d0265f615fa6fd9abd6080e",
   "source_files": {
     "app.js": {
       "bytes": 4021,
@@ -643,8 +647,8 @@
       "sha256": "f3c7c0370e645063082d50ef820e0ab492b7f491d50b433c1f688ddb4f53c2dd"
     },
     "codex_agent.css": {
-      "bytes": 80480,
-      "sha256": "307123c86284c610c2d092374628ae2e54bf85baf0b3c6c0695bd6813573c264"
+      "bytes": 81126,
+      "sha256": "3589e435602913d4888928a4fbc8f0f410dd3ad29b961deaf82db9454b7e2a68"
     },
     "codex_agent.ts": {
       "bytes": 104165,
@@ -655,8 +659,8 @@
       "sha256": "c2e2f0a663f1db4ebecc728f55651fa8d55617769d0624809647761d0a14aa1c"
     },
     "dist/codex_agent.js": {
-      "bytes": 910814,
-      "sha256": "b75c1090453b61f4766277abf14e65edb9a2ec773d360ede0ff9d56671873b1f"
+      "bytes": 923646,
+      "sha256": "8e2e8d350523ef021f649126e6dabb347fcc0486c2d732ad70baee55adc2fe48"
     },
     "images/green-right-arrow.png": {
       "bytes": 122699,
@@ -723,8 +727,8 @@
       "sha256": "7e7e2b96d4326cb69d694c4a792df5feb4af7b3e1cc08bf6a7db8a7c486cd4ce"
     },
     "js/codex_agent/events/router.ts": {
-      "bytes": 29381,
-      "sha256": "7a6eee5f00c9ac0492ea8ba7140819a89029ff15e79d42a69c48ba27de926b17"
+      "bytes": 29565,
+      "sha256": "8cdc9e42924af2601c0fa0c2c02d72d33c0fefd7011211fe47f3e4467127c808"
     },
     "js/codex_agent/events/socket.ts": {
       "bytes": 4451,
@@ -779,8 +783,8 @@
       "sha256": "ff43647ffffe48123caab6d73a7e142669cb741c44ce6cb40323b8b14151dad2"
     },
     "js/codex_agent/render/utils.ts": {
-      "bytes": 23154,
-      "sha256": "4f33ef5118c9a314c3a1c758684020d0ea0fcda5fcbfaa59ec62970347aa18e0"
+      "bytes": 23166,
+      "sha256": "acd97fa4b3ce2cc577dcddbd1f978566cfd19500bc1f6f0fcde54b7143ae10e0"
     },
     "js/codex_agent/request_cards/runtime.ts": {
       "bytes": 8376,
@@ -855,8 +859,12 @@
       "sha256": "7b72505a65e9465f6eed226956e954291d2e368526172673e5001e9fde8e04a2"
     },
     "js/codex_agent/subagents/collapsible.ts": {
-      "bytes": 8377,
-      "sha256": "36ebf78fc562b517f6f6b67ecb7422ff64ad0c5ce497c0e1ecbe0520c760c4cb"
+      "bytes": 9524,
+      "sha256": "5786c30a0ee2a8f83dbfd5a713321429b3320906a5c535b61d539ddab2d96557"
+    },
+    "js/codex_agent/subagents/compact.ts": {
+      "bytes": 3350,
+      "sha256": "f2e8a8e1335fa6bd84455312aad96f4af5df46284a5c2637015ae0c8aa732d52"
     },
     "js/codex_agent/terminal_ansi.ts": {
       "bytes": 3769,
@@ -867,20 +875,20 @@
       "sha256": "93c91646e860d109f581e7929ed83ef3b7fb6f656c28216d1680542f649da0c8"
     },
     "js/codex_agent/timeline/replay.ts": {
-      "bytes": 31861,
-      "sha256": "9b78ccb2b568dd07983d9d105c010615d238d7fcb3b3346bf990e80a5076c3d1"
+      "bytes": 33397,
+      "sha256": "f36eaef7fa2b31a627028d09377e20cb63efd5e81708a3e387c4d4be057b75c7"
     },
     "js/codex_agent/timeline/rows.ts": {
-      "bytes": 9585,
-      "sha256": "9f7b224c772e6396915206638cfaf1e97aa884dd3827ad2e0b58890b20287dc1"
+      "bytes": 9715,
+      "sha256": "b34b4c5287e8a1114c4050a5bf57dbd2721f5d96115ed57197b3f7dea2d299bc"
     },
     "js/codex_agent/timeline/virtualizer.ts": {
       "bytes": 37565,
       "sha256": "265a2105d3999896d3d9cfb37e211c34eddae19221c8099b7217683f3ae2e781"
     },
     "js/codex_agent/timeline_sticky_headers.ts": {
-      "bytes": 16753,
-      "sha256": "d622ead770aad523f95c95b1b3c85684ef5540d52edd1bed553477213f904587"
+      "bytes": 16528,
+      "sha256": "208d89f99c18445021068140a221d69621662afb529892e2aac98d5b53f61f04"
     },
     "js/codex_agent/toast.ts": {
       "bytes": 2066,
@@ -927,8 +935,8 @@
       "sha256": "55434c04cc136f453f95622511424d36b7eec8385dd36b14e2dd827ffb4409e4"
     },
     "js/codex_agent/vendor_runtime.ts": {
-      "bytes": 4240,
-      "sha256": "9bce5ea6434d51b5dbe80c006257e5fda831f4d9373f60ad66a292a49c8a37d8"
+      "bytes": 4402,
+      "sha256": "7ad704ee49a8830e4b4a10b614c8d056eda20b0a373aad8572a36daea9bb5e70"
     },
     "js/console_bridge.js": {
       "bytes": 9876,
@@ -1229,7 +1237,7 @@
   },
   "source_repository": "https://github.com/mrsurge/agent_log_server",
   "source_static_path": "rust/crates/als-server/src/static",
-  "source_tree_sha256": "425d691a70d9fb424a03bf415e84e37e1a42d03d6b7c3c1e77a5776ef03eea41",
-  "tree_sha256": "ad618758d8449e929a105489184eabd9b9aa2b17b252c514697a5d599d06dde2",
+  "source_tree_sha256": "ce2ac63cedb4cf27c660552475cafcc10a6bcbc423d949e2a72e4a4531a93d56",
+  "tree_sha256": "a2cae41ab8d712dd650e0f0ff5316214195f807b88baa37ef7fd2014ccbda401",
   "version": "0.2.139"
 }

@@ -67,9 +67,9 @@ if [ ! -x "${python_bin:-}" ]; then
             printf '%s\n' 'Termux apt-get is required to install Python.' >&2
             exit 2
         fi
-        confirm_install 'TE2 needs Termux Python and pip before it can verify the release payload.'
+        confirm_install 'TE2 needs Termux Python, pip and current execution support before it can verify the release payload. Package-maintained Termux configuration may be replaced by updated versions.'
         apt-get update
-        apt-get install -y python python-pip
+        apt-get -o Dpkg::Options::=--force-confnew install -y termux-core termux-exec termux-tools python python-pip
         python_bin="$PREFIX/bin/python"
     else
         if ! command -v apt-get >/dev/null 2>&1; then
