@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class MainActivity : AppCompatActivity() {
     private var termuxLocalPageBridge: TermuxLocalPageBridge? = null
     private var termuxChrome: TermuxChromeSurface? = null
+    private var termuxWindowEffects: java.io.Closeable? = null
     private lateinit var mainViewport: CefriumViewportController
     private var inspectorViewport: CefriumViewportController? = null
     private var processesViewport: CefriumViewportController? = null
@@ -601,11 +602,28 @@ class MainActivity : AppCompatActivity() {
         restoreToolsSurfaceState()
         if (BuildConfig.TE2_TERMUX) {
             val service = checkNotNull(clientRuntimeService)
+            val local = checkNotNull(service.localFrameworkRuntime)
+            termuxWindowEffects?.close()
+            termuxWindowEffects = local.bindWindowEffects { effect ->
+                check(!isDestroyed && ::browser.isInitialized) { "Native window unavailable" }
+                TermuxWindowEffects.apply(effect, checkNotNull(service.frameworkUrl(LAUNCHER_PATH)),
+                    { check(browser.surfaceContainer.isAttachedToWindow) { "Native surface detached" } },
+                    { loadLauncher() }, { browser.reload() })
+            }
             termuxChrome = TermuxChromeSurface(this, findViewById(R.id.chromeContainer),
                 service.browserFrameworkBaseUrl(), { action ->
                     when (action) {
-                        "home" -> loadLauncher()
-                        "reload" -> browser.reload()
+                        "home", "reload" -> {
+                            val params = JSONObject().put("action", action)
+                            if (action == "home") params.put("url", service.frameworkUrl(LAUNCHER_PATH))
+                            local.execute {
+                                if (!isDestroyed) try { local.request("electron.window.action", params) }
+                                catch (error: Exception) { runOnUiThread {
+                                    if (!isDestroyed) Toast.makeText(this, error.message ?: "Window action failed",
+                                        Toast.LENGTH_SHORT).show()
+                                } }
+                            }
+                        }
                         "recents" -> showRecents()
                         "lock" -> toggleLock()
                         "quit" -> quitCurrentApp()
@@ -2069,6 +2087,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        termuxWindowEffects?.close(); termuxWindowEffects = null
         termuxStartup?.close(); termuxStartup = null
         pendingPreferredApp = null
         termuxChrome?.close()

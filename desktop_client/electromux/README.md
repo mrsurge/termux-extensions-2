@@ -1,5 +1,23 @@
 # TE2 Electromux local-control backend foundation
 
+The first Electron API consumer migration uses upstream `createElectronMain`,
+`BrowserWindow.loadURL` and `webContents.reload` for toolbar Home/Reload. Native
+effects register the existing main surface and call the established Android
+navigation hooks only after exact effect/launcher validation. Toolbar Quit still
+closes the current framework app; it is not Android-host `app.quit()`.
+The framework controller, installer, readiness/cancellation, settings and native
+toolbar remain owned by their existing services. Activity detachment removes the
+effect target without stopping the persistent Node/framework owner; an in-flight
+effect is fenced to its original target and is not replayed after reattachment.
+Valid native refusals/timeouts fail only that window request, not the retained
+framework. A new explicit intent can register fresh window ownership; protocol/
+channel failure still disposes the actor and its owned children.
+
+The embedded entry uses upstream `runElectronRuntime` for independent effect ACKs
+alongside existing lifecycle state events. `runRuntime` remains available for
+non-Electron consumers. Current migration validation/pin gates are in
+`docs/apps/release_0_2_356/TRACKER.md`; host checks do not imply APK acceptance.
+
 Build with `node desktop_client/electromux/build.mjs` from the repository root.
 Output: `desktop_client/electromux/dist/local-framework-backend.mjs`. The bundle
 uses actual Desktop controller/config/roots modules, Node >=22.12, and no

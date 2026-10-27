@@ -6,7 +6,7 @@ import {mkdtemp, mkdir, copyFile, chmod, writeFile, rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 
-async function harness(t, env = {}, isolateLauncherConfig = false, embedded = false) {
+async function harness(t, env = {}, isolateLauncherConfig = false, embedded = false, effectHandler = null) {
   const root = await mkdtemp(join(process.env.TMPDIR || join(process.cwd(), '.codex-scratch'), 'electromux-test-'));
   const command = join(root, 'te2');
   await copyFile('tests/fixtures/electromux_framework.cjs', command); await chmod(command, 0o700);
@@ -28,6 +28,15 @@ async function harness(t, env = {}, isolateLauncherConfig = false, embedded = fa
     while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32BE(0)) {
       const size = buffer.readUInt32BE(0); assert.ok(size > 0 && size <= 65536);
       const frame = JSON.parse(buffer.subarray(4, size + 4)); buffer = buffer.subarray(size + 4);
+      if (frame.event === 'electron.effect') {
+        assert.ok(effectHandler, 'Unexpected Electron effect');
+        effectHandler(frame.data.effect, error => {
+          const body = Buffer.from(JSON.stringify({ack: frame.data.effectId, ...(error ? {error} : {})}));
+          const header = Buffer.alloc(4); header.writeUInt32BE(body.length);
+          channel.write(Buffer.concat([header, body]));
+        });
+        continue;
+      }
       if (frame.event === 'local-framework-state') {
         events.push(frame.data);
         for (const waiter of [...eventWaiters]) waiter(frame.data);
@@ -180,4 +189,35 @@ test('embedded FD disconnect cancels an owned build without mutation replay', {t
   const exit = once(h.child, 'close'); h.channel.end();
   assert.equal((await exit)[0], 0);
   assert.throws(() => process.kill(state.processId, 0), {code: 'ESRCH'});
+});
+test('persistent embedded actor delivers build state while Electron navigation awaits native ACK', {timeout: 10000}, async t => {
+  const effects = [];
+  let release;
+  const h = await harness(t, {TEST_BUILD_DELAY: '150'}, true, true, (effect, ack) => {
+    effects.push(effect);
+    if (effect.kind === 'window.create') release = ack;
+    else ack();
+  });
+  await h.call('start_local_framework');
+  const navigating = h.call('electron.window.action', {action: 'reload'});
+  const running = await h.waitState(value => value.phase === 'running' && !value.operationPending);
+  assert.ok(release, 'Window registration must be waiting for its independent ACK');
+  release();
+  assert.equal((await navigating).result.completed, true);
+  assert.deepEqual(effects.map(effect => effect.kind), ['window.create', 'webContents']);
+  const retained = (await h.call('get_local_framework_state')).result;
+  assert.equal(retained.processId, running.processId);
+  assert.equal(retained.stateSessionId, running.stateSessionId);
+});
+test('native window detachment rejects navigation without stopping the owned framework', {timeout: 10000}, async t => {
+  let reject = true;
+  const h = await harness(t, {}, true, true, (_effect, ack) => ack(reject ? 'Native window detached' : null));
+  await h.call('start_local_framework');
+  const running = await h.waitState(value => value.phase === 'running' && !value.operationPending);
+  const failed = await h.call('electron.window.action', {action: 'reload'});
+  assert.match(failed.error, /detached/);
+  assert.equal((await h.call('get_local_framework_state')).result.processId, running.processId);
+  reject = false;
+  assert.equal((await h.call('electron.window.action', {action: 'reload'})).result.completed, true);
+  assert.equal((await h.call('get_local_framework_state')).result.stateSessionId, running.stateSessionId);
 });

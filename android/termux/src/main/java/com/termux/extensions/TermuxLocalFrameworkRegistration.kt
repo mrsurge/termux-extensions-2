@@ -19,6 +19,10 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     private val client = EmbeddedNodeClient(service.applicationContext, TermuxNodeService::class.java) { raw ->
         val frame = JSONObject(raw)
         val name = frame.getString("event")
+        if (name == "electron.effect") {
+            deliverWindowEffect(frame.getJSONObject("data"))
+            return@EmbeddedNodeClient
+        }
         if (pendingEvents.incrementAndGet() > 16) {
             pendingEvents.decrementAndGet(); error("Native state queue full")
         }
@@ -39,6 +43,33 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     private val pendingEvents = AtomicInteger()
     private var selectionBaselineSet = false
     @Volatile private var closed = false
+    private var windowEffects: ((JSONObject) -> Unit)? = null
+    private var requestingWindow: ((JSONObject) -> Unit)? = null
+
+    @Synchronized override fun bindWindowEffects(apply: (JSONObject) -> Unit): Closeable {
+        check(!closed && windowEffects == null) { "Native window already attached" }
+        windowEffects = apply
+        return Closeable { synchronized(this) { if (windowEffects === apply) windowEffects = null } }
+    }
+
+    private fun deliverWindowEffect(data: JSONObject) {
+        val id = data.getInt("effectId")
+        val target = synchronized(this) { requestingWindow }
+        main.post {
+            val failure = try {
+                check(!closed && target != null && synchronized(this) { windowEffects === target }) {
+                    "Native window detached; action was not replayed"
+                }
+                target(data.getJSONObject("effect"))
+                null
+            } catch (error: Exception) { (error.message ?: "Native window action failed").take(512) }
+            // Never queue this behind owner.execute(): its request is awaiting this ACK.
+            Thread({
+                try { client.acknowledgeEffect(id, failure) }
+                catch (error: Exception) { android.util.Log.w("TE2Window", "Window acknowledgement failed", error) }
+            }, "te2-window-ack").start()
+        }
+    }
 
     override fun execute(operation: () -> Unit) = owner.execute(operation)
     override fun subscribe(observer: (String, JSONObject) -> Unit): Closeable =
@@ -51,6 +82,14 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     }
 
     override fun request(method: String, params: JSONObject): JSONObject {
+        if (method == "electron.window.action") {
+            synchronized(this) {
+                check(!closed && requestingWindow == null) { "Native window unavailable" }
+                requestingWindow = checkNotNull(windowEffects) { "Native window detached" }
+            }
+            try { return actor(method, params) }
+            finally { synchronized(this) { requestingWindow = null } }
+        }
         require(method in TermuxLocalControlPolicy.methods)
         check(!closed)
         if (method == "get_settings") {
@@ -114,7 +153,7 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
             .put("selected", origin == state.optString("localOrigin"))
     }
 
-    override fun close() { closed = true; owner.close() }
+    override fun close() { closed = true; synchronized(this) { windowEffects = null }; owner.close() }
 
     private fun androidSettings(): JSONObject = AndroidAppSettingsStore(service).load().toJson()
         .put("runtime", service.snapshot().toJson())

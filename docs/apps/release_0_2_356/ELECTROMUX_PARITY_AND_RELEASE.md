@@ -100,6 +100,17 @@ desktop_client/electromux/{embedded-entry,local-framework-consumer}.ts.
 
 ## Proposed first API implementation gate
 
+Subsequent user clarification prioritizes consuming existing upstream APIs over
+building a new IPC facade. Approved first migration now uses public BrowserWindow
+loadURL/webContents.reload through persistent Electron effects for TE2 Home/Reload.
+Generic upstream local checkpoint b62eb6c preserves backend ownership across native
+refusals/detach; TE2 supplies exact launcher/action policy. Calculator's UI-bound
+EmbeddedElectronService is deliberately not substituted for TE2's persistent one.
+Upstream/consumer strict typing, 44 runtime tests (real original calculator),
+20 TE2 lifecycle/navigation/FD tests and native Debug suites pass on the VPS.
+APK/live acceptance and upstream publication remain open. The earlier IPC proposal
+below is a future gap candidate, not a mandate to reimplement existing plumbing.
+
 After asset repair, investigate a shared, typed request/reply and disposable
 event subscription subset with Electron-shaped ipcRenderer/ipcMain contracts.
 Reuse existing correlated frames, declared methods/events, exact document

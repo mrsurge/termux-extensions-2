@@ -10,6 +10,7 @@ val termuxKey = providers.environmentVariable("ELECTROMUX_KEYSTORE").orNull
 val termuxBackendAssets = if (termuxConsumer) tasks.register<Exec>("bundleTermuxBackend") {
     workingDir("../..")
     commandLine("node", "desktop_client/electromux/build.mjs")
+    inputs.file("../../pyproject.toml")
     inputs.files(fileTree("../../desktop_client/electromux") { include("*.ts", "*.mjs") },
         fileTree("../../desktop_client/electron/src/main") { include("**/*.ts") },
         fileTree("../../desktop_client/electron/src/shared") { include("**/*.ts") })

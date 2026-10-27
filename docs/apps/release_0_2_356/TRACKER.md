@@ -1,5 +1,44 @@
 # 0.2.356 maintenance tracker
 
+## Active consumer migration and isolated Cefrium R8 experiment — 2026-10-27
+
+- [x] Checkpoint/push ALS approval asset and release-staging work as 747cfd12;
+  no version bump, APK assembly/install or release publication.
+- [x] User approves consuming upstream Electromux APIs in TE2 Termux, not another
+  compatibility layer. Persistent service must retain framework ownership when
+  an activity detaches; the calculator's UI-bound service is not a replacement.
+- [x] Implement generic persistent consumer state + Electron effect/ACK seam
+  upstream and a TE2 Home/Reload consumer migration. Internal framework-app Quit
+  deliberately retains its existing semantics; it is not Electron app.quit.
+  Native refusal/timeouts cannot terminate the persistent framework actor; failed
+  window ownership retires without replay and requires a new explicit intent.
+- [x] Upstream strict TS check and all 44 runtime tests pass, including unchanged
+  pinned original calculator main/preload. TE2 strict consumer TS check and all
+  20 navigation/framework-lifecycle/real FD/ACK tests pass on the VPS.
+- [x] Updated native service/AIDL and TE2 Android sources compile; complete
+  Termux Debug unit suite and generic host/Node suites pass. Vanished 0.9.0
+  metadata required an invocation-only cache recovery init script (exact hashed
+  old plugin JAR/SDK AAR, explicit AAR type, no synthesized Maven POM or version
+  substitution). This is not proof of clean online dependency reproducibility.
+- [x] Real FD coverage verifies concurrent build-state delivery, native ACK,
+  failed/detached native window without stopping the owned framework, new-intent
+  reattachment, and actual channel EOF cleanup. Calculator behavior is unchanged.
+- [x] Upstream local checkpoint b62eb6c and explicit TE2 working-tree pin update.
+  Upstream remains unpublished; TE2 migration is included in this checkpoint. Publish
+  dependency before any consumer commit is pushed with this new gitlink.
+- [ ] Grouped APK physical Home/Reload/reattach plus framework lifecycle
+  acceptance. No install or production APK assembly performed.
+- [x] User approves a separate VPS Cefrium staging/R8 experiment. User identifies
+  version 13 as R8-fixed; latest 0.15.0 is candidate, not an adopted production pin.
+  See CEFRIUM_R8_EXPERIMENT.md. No installation or production upgrade authorized.
+- [x] Controlled standalone Cefrium staging comparison: 166.84 → 135.97 MiB
+  (30.88 MiB / 18.5% smaller); DEX 45.62 → 9.61 MiB, 11 → 1 files. Real keep-radius
+  analysis, valid signatures/manifests/ARM64 and identical 447 asset hashes verified.
+  Candidate-only query policy/JNI inspector adapter approved and 71 JVM tests pass.
+- [ ] Generated-R optimized-resource-shrinker warning qualification, physical
+  inspector/lifecycle/scaling/assets acceptance, and explicit adoption decision.
+  Preserve production 0.9.0 pin; this remains separate from consumer migration.
+
 ## VPS release staging / Electromux and approval assets — 2026-10-27
 
 - [x] User selects current checkout, VPS /mnt/vdb for all build/package work,

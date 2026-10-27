@@ -1,8 +1,9 @@
-import {runRuntime} from '../../vendor/electromux/runtime/src/runtime-host';
+import {runElectronRuntime} from '../../vendor/electromux/runtime/src/electron-runtime-host';
 import {createLocalFrameworkConsumer} from './local-framework-consumer';
+import {createElectronNavigation} from './electron-navigation';
 
 // This entry is bundled by TE2 and chosen only by its native consumer declaration.
-await runRuntime((_root, mode) => async (_signal, emit) => {
+await runElectronRuntime((_root, mode, apply) => async (_signal, emit) => {
   if (mode !== 'standalone' && mode !== 'termux') throw new Error('Invalid native execution lane');
   const environment = {...process.env};
   if (mode === 'termux') {
@@ -12,6 +13,12 @@ await runRuntime((_root, mode) => async (_signal, emit) => {
       LD_PRELOAD: `${prefix}/lib/libtermux-exec.so`,
       TE2_ELECTROMUX_CONFIG_HOME: `${home}/.config/te2/te2-termux`});
   }
-  return createLocalFrameworkConsumer({environment, emit, enableInstaller: mode === 'termux',
+  const consumer = await createLocalFrameworkConsumer({environment, emit, enableInstaller: mode === 'termux',
     log: (lane, text) => { process.stderr.write(`[framework:${lane}] ${text}`); }});
-});
+  // Version is metadata from this consumer's build, never a claimed Electron version.
+  const navigate = createElectronNavigation(apply, TE2_CONSUMER_VERSION);
+  return {...consumer, methods: [...consumer.methods, 'electron.window.action'],
+    dispatch: (method, params) => method === 'electron.window.action' ? navigate(params) : consumer.dispatch(method, params)};
+}, ['local-framework-state']);
+
+declare const TE2_CONSUMER_VERSION: string;
