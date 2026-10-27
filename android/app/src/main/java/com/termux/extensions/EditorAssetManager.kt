@@ -25,6 +25,7 @@ internal fun compareEditorAssetVersions(a: String, b: String): Int {
 internal val REQUIRED_OTA_ASSET_FILES = listOf(
     "apps/als_rs/frontend/manifest.json",
     "apps/als_rs/frontend/static/dist/codex_agent.js",
+    "apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js",
     "apps/als_rs/frontend/static/codex_agent.css",
     "apps/als_rs/frontend/static/js/console_bridge.js",
     "apps/als_rs/frontend/static/vendor/socket.io/socket.io.min.js",

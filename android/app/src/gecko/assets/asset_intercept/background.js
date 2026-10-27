@@ -181,6 +181,9 @@ const BUILTIN_APP_ASSETS = new Map([
 ]);
 
 function localPathFor(urlPath) {
+  if (urlPath === "/api/app/als-rs/proxy/api/extensions/codex/assets/ui/request_cards/codex_ext_request_card.js") {
+    return "/apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js";
+  }
   if (urlPath.startsWith("/api/app/als-rs/proxy/static/")) {
     return "/apps/als_rs/frontend/static/" + urlPath.slice("/api/app/als-rs/proxy/static/".length);
   }

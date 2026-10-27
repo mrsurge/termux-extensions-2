@@ -2,6 +2,16 @@
 
 ## Release direction
 
+### VPS release staging / Electromux parity — 2026-10-27
+
+Current priority and explicit gates are in
+[ELECTROMUX_PARITY_AND_RELEASE.md](ELECTROMUX_PARITY_AND_RELEASE.md).
+All builds/bundling/packaging use Debian /mnt/vdb; Pixel is acceptance only.
+Before Electron-shaped API work, repair and validate the missing ALS extension
+request-card approval asset and refresh the APK seed. Generic Electromux remains
+framework-agnostic. This staging approval does not authorize production builds,
+Android behavior changes, installation or publication; use the bounded gates.
+
 ### Termux execution-environment refresh — 2026-10-26
 
 Before the next release, refresh installed `termux-*` packages plus the current

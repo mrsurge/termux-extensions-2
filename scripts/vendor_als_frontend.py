@@ -13,14 +13,29 @@ import shutil
 import subprocess
 import tempfile
 import tomllib
-from typing import cast
+from typing import TypeGuard, cast
 
 REPO = Path(__file__).resolve().parents[1]
 DESTINATION = REPO / "app/apps/als_rs/vendor/frontend"
 STATIC_PATH = "rust/crates/als-server/src/static"
+ADDITIONAL_RESOURCES = {
+    "extensions/codex/ui/request_cards/codex_ext_request_card.js":
+        "extensions/codex_ext/ui/request_cards/codex_ext_request_card.js",
+}
 EXCLUDED = {".map", ".bak", ".bak2", ".pyc"}
 REQUIRED = ("dist/codex_agent.js", "codex_agent.css", "js/console_bridge.js",
             "vendor/socket.io/socket.io.min.js", "vendor/fonts/jetbrains-mono.css")
+
+
+class VendorArguments(argparse.Namespace):
+    source_repo: Path | None
+    check: bool
+
+
+def _record(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict) and all(
+        isinstance(key, str) for key in cast(dict[object, object], value)
+    )
 
 
 def proxy_text(data: bytes, suffix: str) -> bytes:
@@ -34,8 +49,8 @@ def proxy_text(data: bytes, suffix: str) -> bytes:
     text = data.decode("utf-8")
     for root in ("/api/", "/ws/", "/static/"):
         pattern = r"(['\"`])/api/(?!app/)" if root == "/api/" else r"(['\"`])" + re.escape(root)
-        text = re.sub(pattern, lambda match: match.group(1) + "/api/app/als-rs/proxy" + root, text)
-    text = re.sub(r"url\(\s*(['\"]?)/static/", lambda match: "url(" + match.group(1) + "/api/app/als-rs/proxy/static/", text)
+        text = re.sub(pattern, r"\g<1>/api/app/als-rs/proxy" + root, text)
+    text = re.sub(r"url\(\s*(['\"]?)/static/", r"url(\g<1>/api/app/als-rs/proxy/static/", text)
     return text.encode("utf-8")
 
 
@@ -54,17 +69,19 @@ def inventory(root: Path) -> dict[str, dict[str, str | int]]:
     return result
 
 
-def check(root: Path = DESTINATION) -> dict[str, object]:
+def check(root: Path = DESTINATION, *, require_approval: bool = True) -> dict[str, object]:
     if {path.name for path in root.iterdir()} != {"static", "manifest.json", "LICENSE"}:
         raise ValueError("Unknown content in ALS vendor snapshot; refusing replacement")
     value: object = json.loads((root / "manifest.json").read_text())
-    if not isinstance(value, dict):
+    if not _record(value):
         raise ValueError("Invalid ALS provenance object")
-    manifest = cast(dict[str, object], value)
+    manifest = value
     for path in (root / "static").rglob("*"):
         if path.is_file() and (path.suffix in EXCLUDED or "node_modules" in path.parts or "__pycache__" in path.parts):
             raise ValueError("Unknown excluded file in vendor snapshot; refusing replacement")
     files = inventory(root / "static")
+    if require_approval and any(name not in files for name in ADDITIONAL_RESOURCES):
+        raise ValueError("ALS approval request-card resource missing")
     if manifest.get("schema") != 1 or manifest.get("files") != files:
         raise ValueError("ALS vendored static inventory/hash mismatch")
     digest = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
@@ -81,22 +98,32 @@ def snapshot(source: Path, destination: Path = DESTINATION) -> dict[str, object]
     if destination.is_symlink():
         raise ValueError("Refusing to replace a symlinked vendor snapshot")
     if destination.exists():
-        check(destination)  # Never overwrite unknown/untracked user content.
+        check(destination, require_approval=False)  # Validate the previous schema before upgrading.
     commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     clean = subprocess.run(["git", "-C", str(source), "diff", "HEAD", "--quiet", "--",
-                            STATIC_PATH, "pyproject.toml", "LICENSE"], check=False)
+                            STATIC_PATH, *ADDITIONAL_RESOURCES.values(), "pyproject.toml", "LICENSE"], check=False)
     if clean.returncode:
         raise ValueError("ALS static/version/license source has tracked changes; checkpoint it first")
-    metadata = tomllib.loads((source / "pyproject.toml").read_text())
+    raw_metadata = cast(object, tomllib.loads((source / "pyproject.toml").read_text()))
+    if not _record(raw_metadata):
+        raise ValueError("Invalid ALS package metadata")
+    metadata = raw_metadata
     project: object = metadata.get("project")
-    if not isinstance(project, dict):
+    if not _record(project):
         raise ValueError("Missing ALS project metadata")
-    version: object = cast(dict[str, object], project).get("version")
+    version = project.get("version")
     if not isinstance(version, str) or not version:
         raise ValueError("Missing ALS release version")
     files = inventory(source / STATIC_PATH)
-    tracked = set(subprocess.check_output(["git", "-C", str(source), "ls-files", "-z", "--", STATIC_PATH], text=True).split("\0"))
-    if any(f"{STATIC_PATH}/{name}" not in tracked for name in files):
+    for name, relative in ADDITIONAL_RESOURCES.items():
+        path = source / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"ALS approval source must be a regular file: {relative}")
+        data = path.read_bytes()
+        files[name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+    tracked = set(subprocess.check_output(["git", "-C", str(source), "ls-files", "-z", "--",
+                                          STATIC_PATH, *ADDITIONAL_RESOURCES.values()], text=True).split("\0"))
+    if any(ADDITIONAL_RESOURCES.get(name, f"{STATIC_PATH}/{name}") not in tracked for name in files):
         raise ValueError("Uncommitted/untracked static resources cannot be pinned; checkpoint ALS first")
     license_path = source / "LICENSE"
     license_hash = hashlib.sha256(license_path.read_bytes()).hexdigest()
@@ -109,22 +136,20 @@ def snapshot(source: Path, destination: Path = DESTINATION) -> dict[str, object]
         "files": files,
     }
     proxy_value: object = json.loads((REPO / "app/apps/als_rs/manifest.json").read_text())
-    if not isinstance(proxy_value, dict):
+    if not _record(proxy_value):
         raise ValueError("Invalid ALS wrapper manifest")
-    proxy = cast(dict[str, object], proxy_value).get("proxy_shell")
-    if not isinstance(proxy, dict):
+    proxy = proxy_value.get("proxy_shell")
+    if not _record(proxy):
         raise ValueError("Missing ALS proxy declaration")
-    proxy = cast(dict[str, object], proxy)
     rewrite = proxy.get("rewrite")
     socketio = proxy.get("socketio")
-    if not isinstance(rewrite, dict) or not isinstance(socketio, dict):
+    if not _record(rewrite) or not _record(socketio):
         raise ValueError("Invalid ALS rewrite/socket declaration")
-    rewrite = cast(dict[str, object], rewrite)
-    socketio = cast(dict[str, object], socketio)
     if (rewrite.get("absolute_root_paths") != ["/api/", "/ws/", "/static/"] or
             rewrite.get("css_root_paths") != ["/static/"] or socketio.get("inject_path")):
         raise ValueError("ALS proxy rewrite declaration changed; update/validate static projection first")
     manifest["source_files"] = files
+    manifest["additional_source_files"] = ADDITIONAL_RESOURCES
     manifest["source_tree_sha256"] = manifest["tree_sha256"]
     manifest["proxy_prefix"] = "/api/app/als-rs/proxy"
     manifest["proxy_rewrite"] = rewrite
@@ -134,7 +159,8 @@ def snapshot(source: Path, destination: Path = DESTINATION) -> dict[str, object]
         for name in files:
             target = stage / "static" / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(proxy_text((source / STATIC_PATH / name).read_bytes(), target.suffix))
+            relative = ADDITIONAL_RESOURCES.get(name, f"{STATIC_PATH}/{name}")
+            target.write_bytes(proxy_text((source / relative).read_bytes(), target.suffix))
         shutil.copyfile(license_path, stage / "LICENSE")
         manifest["files"] = inventory(stage / "static")
         manifest["tree_sha256"] = hashlib.sha256(json.dumps(manifest["files"], sort_keys=True).encode()).hexdigest()
@@ -156,7 +182,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-repo", type=Path)
     parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=VendorArguments())
     if args.check:
         manifest = check()
     elif args.source_repo:

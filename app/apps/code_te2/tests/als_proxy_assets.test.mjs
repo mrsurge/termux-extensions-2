@@ -22,7 +22,7 @@ test('every pinned ALS static resource is packaged and mapped for Gecko/Electron
   const entry = bundle.entries.find(e => e.kind === 'tree' && e.dest === 'apps/als_rs/frontend');
   assert.equal(entry.src, 'app/apps/als_rs/vendor/frontend');
   assert.equal(manifest.version, '0.2.139');
-  assert.equal(Object.keys(manifest.files).length, 150);
+  assert.equal(Object.keys(manifest.files).length, 151);
   for (const [path, info] of Object.entries(manifest.files)) {
     const local = `/apps/als_rs/frontend/static/${path}`;
     const proxy = `/api/app/als-rs/proxy/static/${path}`;
@@ -36,7 +36,9 @@ test('every pinned ALS static resource is packaged and mapped for Gecko/Electron
 test('ALS pages/runtime endpoints remain proxied, not cached frontend authority', () => {
   for (const path of ['/api/app/als-rs/proxy/', '/api/app/als-rs/proxy/agent-log',
     '/api/app/als-rs/proxy/api/health', '/api/app/als-rs/proxy/socket.io/',
-    '/api/app/als-rs/proxy/api/extensions/codex/assets/ui/main.js']) {
+    '/api/app/als-rs/proxy/api/extensions/codex/assets/ui/main.js',
+    '/api/app/als-rs/proxy/api/extensions/codex/assets/ui/request_cards/unknown.js',
+    '/api/app/als-rs/proxy/api/extensions/codex/request-cards']) {
     assert.equal(electron(path), null); assert.equal(gecko(path), null);
   }
   const index = read('app/apps/als_rs/manifest.json');
@@ -52,8 +54,27 @@ test('shared Android aliases, WASM MIME, non-stale cache and required OTA inputs
   assert.ok(localServer.includes('assetPath.startsWith("/apps/als_rs/frontend/static/")'));
   const required = read('android/app/src/main/java/com/termux/extensions/EditorAssetManager.kt');
   for (const path of ['manifest.json', 'static/dist/codex_agent.js', 'static/codex_agent.css',
-    'static/js/console_bridge.js', 'static/vendor/socket.io/socket.io.min.js']) {
+    'static/js/console_bridge.js', 'static/vendor/socket.io/socket.io.min.js',
+    'static/extensions/codex/ui/request_cards/codex_ext_request_card.js']) {
     assert.ok(desktop.requiredFiles.includes(`apps/als_rs/frontend/${path}`));
     assert.ok(required.includes(`"apps/als_rs/frontend/${path}"`));
+  }
+});
+
+test('Codex request-card renderer is pinned, required and mapped by its exact API asset URL', async () => {
+  const relative = 'extensions/codex/ui/request_cards/codex_ext_request_card.js';
+  const proxy = '/api/app/als-rs/proxy/api/extensions/codex/assets/ui/request_cards/codex_ext_request_card.js';
+  const local = `/apps/als_rs/frontend/static/${relative}`;
+  assert.equal(electron(proxy), local);
+  assert.equal(gecko(proxy), local);
+  assert.equal(manifest.additional_source_files[relative],
+    'extensions/codex_ext/ui/request_cards/codex_ext_request_card.js');
+  const source = read(`app/apps/als_rs/vendor/frontend/static/${relative}`);
+  const runtime = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  assert.equal(typeof runtime.initializeRequestCardModule, 'function');
+  assert.equal(typeof runtime.renderRequestCard, 'function');
+  for (const request of ['item/commandexecution/requestapproval', 'item/filechange/requestapproval',
+    'item/tool/requestuserinput', 'agent-pty/ask-user', 'mcpserver/elicitation/request']) {
+    assert.ok(source.includes(request));
   }
 });

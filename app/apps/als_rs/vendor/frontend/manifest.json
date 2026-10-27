@@ -1,4 +1,7 @@
 {
+  "additional_source_files": {
+    "extensions/codex/ui/request_cards/codex_ext_request_card.js": "extensions/codex_ext/ui/request_cards/codex_ext_request_card.js"
+  },
   "distribution": "agent-log-server",
   "excluded_suffixes": [
     ".bak",
@@ -34,6 +37,10 @@
     "dist/codex_agent.js": {
       "bytes": 923730,
       "sha256": "fc099f285184411d8a023c0a4941a92250c199ee8f80ce934aa9d3bee66e1356"
+    },
+    "extensions/codex/ui/request_cards/codex_ext_request_card.js": {
+      "bytes": 34644,
+      "sha256": "7ac63e8173edbbd979c3445a9f16aac8ec99000ee9e8bc9fa50db6d0d32b1981"
     },
     "images/green-right-arrow.png": {
       "bytes": 122699,
@@ -632,7 +639,7 @@
     ]
   },
   "schema": 1,
-  "source_commit": "b77e7d56894343d94d0265f615fa6fd9abd6080e",
+  "source_commit": "b828c2002aa68a06c42e0966037efa00882f50c5",
   "source_files": {
     "app.js": {
       "bytes": 4021,
@@ -661,6 +668,10 @@
     "dist/codex_agent.js": {
       "bytes": 923646,
       "sha256": "8e2e8d350523ef021f649126e6dabb347fcc0486c2d732ad70baee55adc2fe48"
+    },
+    "extensions/codex/ui/request_cards/codex_ext_request_card.js": {
+      "bytes": 34644,
+      "sha256": "7ac63e8173edbbd979c3445a9f16aac8ec99000ee9e8bc9fa50db6d0d32b1981"
     },
     "images/green-right-arrow.png": {
       "bytes": 122699,
@@ -1237,7 +1248,7 @@
   },
   "source_repository": "https://github.com/mrsurge/agent_log_server",
   "source_static_path": "rust/crates/als-server/src/static",
-  "source_tree_sha256": "ce2ac63cedb4cf27c660552475cafcc10a6bcbc423d949e2a72e4a4531a93d56",
-  "tree_sha256": "a2cae41ab8d712dd650e0f0ff5316214195f807b88baa37ef7fd2014ccbda401",
+  "source_tree_sha256": "8c4924848f185a6645e496ed114453caa995ccdd57f9cb89091dd193d8463a9c",
+  "tree_sha256": "00dba538eda3948d3fed22436ef149057f701b5030defe28a34a3003d3318bbe",
   "version": "0.2.139"
 }

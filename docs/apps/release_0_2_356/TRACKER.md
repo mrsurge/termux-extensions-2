@@ -1,5 +1,39 @@
 # 0.2.356 maintenance tracker
 
+## VPS release staging / Electromux and approval assets — 2026-10-27
+
+- [x] User selects current checkout, VPS /mnt/vdb for all build/package work,
+  Pixel pixel-9-pro-xl:5555 for acceptance; Electromux, not Electrobun.
+- [x] Clean standalone Electromux main fast-forwarded from 9922abf to existing
+  TE2 pin 2976c4f; no new commit/push/gitlink change or downgrade.
+- [x] Document source-backed 11-family matrix, bounded bridge proposal and
+  separate API/build/device/publication gates in ELECTROMUX_PARITY_AND_RELEASE.md.
+- [x] Inspect /mnt/vdb (233 GiB initially available), default toolchain mismatch,
+  reusable Android tools and existing Docker root-disk storage. Pixel connected.
+- [x] Verify baseline VPS sources: 6,538 TE2 tracked blobs and 136 Electromux
+  blobs (standalone and pinned consumer), honoring declared CRLF attributes.
+  Node 24/JDK 25/Android SDK/NDK and pinned Node SDK staged under /mnt/vdb;
+  isolated Python 3.14 validation environment and jq available. Baseline and
+  subsequent uncommitted overlay receipts are separate; not publication candidates.
+- [x] Find ALS approval gap: Codex request-card JS is outside vendored static
+  inventory/interception; main static bundle alone is insufficient. Existing APK
+  seed is older than the pinned ALS assets. Symptom causality not fully proven.
+- [x] Approve and implement exact-module vendor/routing/required-file/test fix; keep
+  schemas/config/RPC dynamic, never cache an entire extension API prefix.
+- [x] Regenerate seed on VPS: 447 files, 43 MiB, all 151 ALS resource hashes
+  verified including approval renderer; source maps excluded. Four Node tests,
+  five Python vendor/provenance tests and six Gecko JVM tests pass; strict mypy
+  with disallow-any checks passes for the two changed Python files.
+- [ ] Build approved APK candidates and verify approval module/core bundle/CSS
+  hashes in Gecko, Cefrium and Termux APKs. Installed Pixel Gecko remains the old
+  149-resource seed; new interception rules require a new APK, not just OTA.
+- [ ] Pixel approval acceptance: question choices/freeform, submit, cancel/reopen,
+  page reload, command/file approvals and no stale module/core mixed generation.
+- [ ] Approve concrete Electron-compatible bridge subset and regression scope;
+  preserve native service/FWS/readiness ownership and independent calculator.
+- [ ] Prove VPS Android wheel lane before full native builds; no silent Pixel
+  compilation fallback. Group APK and wheel acceptance separately before release.
+
 ## Mobile terminal selection handle handedness — 2026-10-26
 
 - [x] Shared terminal helper uses left-facing start and right-facing end bulbs,

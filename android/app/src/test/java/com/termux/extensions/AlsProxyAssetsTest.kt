@@ -5,6 +5,15 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AlsProxyAssetsTest {
+    @Test fun mapsExactCodexRequestCardWithoutCachingExtensionApis() {
+        val prefix = "/api/app/als-rs/proxy/api/extensions/codex/assets/"
+        val local = "/apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js"
+        assertEquals(local, AlsProxyAssets.localPath(prefix + "ui/request_cards/codex_ext_request_card.js"))
+        assertEquals(local, AlsProxyAssets.localPath(local))
+        assertNull(AlsProxyAssets.localPath(prefix + "ui/request_cards/unknown.js"))
+        assertNull(AlsProxyAssets.localPath("/api/app/als-rs/proxy/api/extensions/codex/request-cards"))
+    }
+
     @Test fun mapsOnlyStaticTrees() {
         for (path in listOf("dist/codex_agent.js", "vendor/tree-sitter-bash/tree-sitter-bash.wasm", "vendor/fonts/jetbrains-mono.css")) {
             val local = "/apps/als_rs/frontend/static/$path"

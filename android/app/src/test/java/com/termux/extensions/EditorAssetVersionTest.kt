@@ -32,7 +32,7 @@ class EditorAssetVersionTest {
             assertTrue(File(root, missingPath).delete())
             assertEquals(missingPath, findMissingRequiredOtaAsset(root))
             File(root, missingPath).writeText("test")
-            for (appEntry in listOf("apps/file_explorer/main.js", "apps/file_explorer/template.html", "apps/terminal/static/dist/main.js", "apps/file_editor/main.js", "apps/als_rs/frontend/manifest.json", "apps/als_rs/frontend/static/dist/codex_agent.js")) {
+            for (appEntry in listOf("apps/file_explorer/main.js", "apps/file_explorer/template.html", "apps/terminal/static/dist/main.js", "apps/file_editor/main.js", "apps/als_rs/frontend/manifest.json", "apps/als_rs/frontend/static/dist/codex_agent.js", "apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js")) {
                 assertTrue(File(root, appEntry).delete())
                 assertEquals(appEntry, findMissingRequiredOtaAsset(root))
                 File(root, appEntry).writeText("test")
