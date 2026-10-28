@@ -6,7 +6,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import org.chromium.chrome.browser.DevToolsServer
+import com.termux.extensions.CefriumNativeDevToolsServer as DevToolsServer
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.Closeable

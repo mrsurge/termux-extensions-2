@@ -22,7 +22,7 @@ const FILE_EXT_LANG_MAP: Record<string, string> = {
   js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'typescript', mts: 'typescript', cts: 'typescript', tsx: 'typescript', jsx: 'javascript',
   py: 'python', rb: 'ruby', rs: 'rust', go: 'go',
   java: 'java', kt: 'kotlin', scala: 'scala',
-  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp',
+  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp', inc: 'cpp',
   cs: 'csharp', fs: 'fsharp',
   php: 'php', swift: 'swift', r: 'r',
   json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',

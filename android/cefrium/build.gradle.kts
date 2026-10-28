@@ -2,7 +2,7 @@ plugins {
     id("com.android.application") version "9.4.0"
     id("com.android.library") version "9.4.0" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
-    id("com.cefrium") version "0.9.0"
+    id("com.cefrium") version "0.15.0"
 }
 
 val termuxConsumer = rootProject.name == "te2-termux"
@@ -51,8 +51,8 @@ android {
         applicationId = if (termuxConsumer) "com.termux.extensions.te2termux" else "com.termux.extensions.cefrium"
         minSdk = 29
         targetSdk = 34
-        versionCode = 20355
-        versionName = if (termuxConsumer) "1.0.8-r0.2.355-termux" else "1.0.8-r0.2.355-cefrium"
+        versionCode = 20356
+        versionName = if (termuxConsumer) "1.0.8-r0.2.356-termux" else "1.0.8-r0.2.356-cefrium"
         buildConfigField("boolean", "TE2_TERMUX", termuxConsumer.toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -197,7 +197,7 @@ dependencies {
     // JAR until the upstream Gradle metadata supplies an equivalent dependency.
     if (termuxConsumer) compileOnly(files("../cefrium/libs/window-extensions-core-1.0.0.jar"))
     else compileOnly(files("libs/window-extensions-core-1.0.0.jar"))
-    implementation("com.cefrium:cefrium-sdk:0.9.0")
+    implementation("com.cefrium:cefrium-sdk:0.15.0")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.browser:browser:1.8.0")

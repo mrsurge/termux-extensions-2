@@ -22,6 +22,7 @@
     "/api/app/code_te2/ui/monaco_vscode/lang/workers/"
   ],
   "localFiles": [
+    "/api/app/als-rs/proxy/api/extensions/codex-ext/assets/ui/request_cards/codex_ext_request_card.js",
     "/api/app/als-rs/proxy/api/extensions/codex/assets/ui/request_cards/codex_ext_request_card.js",
     "/apps/code_te2/extensions/sidebar_extension/manifest.json",
     "/apps/als_rs/template.html",
@@ -76,6 +77,11 @@
     "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
   ],
   "localMappings": [
+    {
+      "kind": "exact",
+      "source": "/api/app/als-rs/proxy/api/extensions/codex-ext/assets/ui/request_cards/codex_ext_request_card.js",
+      "destination": "/apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js"
+    },
     {
       "kind": "exact",
       "source": "/api/app/als-rs/proxy/api/extensions/codex/assets/ui/request_cards/codex_ext_request_card.js",

@@ -38,6 +38,7 @@ TERMUX_APT_PACKAGES = (
     {"name": "python", "executables": ["python"], "libraries": ["lib/libpython3.14.so"]},
     {"name": "python-pip", "executables": ["pip"]},
     {"name": "git", "executables": ["git"]},
+    {"name": "codex", "executables": ["codex"]},
     {"name": "nodejs-lts", "executables": ["node"], "majorVersion": 24},
     {"name": "npm", "executables": ["npm"]},
     # node-pty still builds on first use; small Python dependencies may build too.

@@ -1,5 +1,27 @@
 # 0.2.357 plan
 
+## Fail-closed built-in asset routing
+
+Deferred from .356 by the user on 2026-10-27 to preserve the release schedule.
+The corrected exact codex-ext approval-module alias remains in .356; broader
+routing hardening is not a .356 release blocker.
+
+The approval incident exposed different miss behavior: Cefrium/TE2 Termux's
+unmatched module request fell through the framework relay to the server, hiding
+the bad local alias, while Gecko's local asset origin returned 404. Bundled-file
+presence and hashes did not prove that the actual dynamic-import URL was local.
+
+Define a manifest-backed distinction between local-only built-in static assets
+and genuinely dynamic/backend requests. Declared asset requests must fail closed
+when missing or unmapped, never silently fetch from the upstream server. Preserve
+normal API/socket/document routing; do not indiscriminately block unknown API
+requests. Audit Gecko, Cefrium, TE2 Termux and Electron against the same contract.
+
+Add end-to-end regressions for actual request URLs, redirected ESM/local-origin
+imports, absent files and incorrect aliases. Verify that asset misses generate
+clear failures and zero upstream requests, while dynamic routes still proxy.
+Resume only with separately approved implementation and client validation.
+
 ## Code TE2 pipe concurrency — deferred O2 continuation
 
 Deferred from .356 at the user's request on 2026-10-26. Completed DTO/PyO3

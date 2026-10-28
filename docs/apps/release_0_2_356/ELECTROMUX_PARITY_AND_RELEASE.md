@@ -1,5 +1,14 @@
 # Electromux parity and VPS release procedure
 
+Final release continuation: the user now explicitly approves adoption of the
+tested Cefrium 0.15 SDK/plugin, query policies and native inspector adapter;
+0.2.356 source/asset freeze; ALS 0.2.140 snapshot; dependency-first pushes and
+final VPS APK/Linux wheel builds. The earlier staging-only constraints below
+record their historical scope, not the current build authorization. Stop for
+grouped final acceptance before TE2 publication. The tested Electromux b62eb6c
+is published on release/te2-0.2.356; newer upstream main remains unchanged.
+ALS 0.2.140 wheels are user-accepted and published on PyPI and GitHub.
+
 User-approved staging/investigation, 2026-10-27. No production build, install,
 runtime restart, version change, TE2-main merge, tag, push or publication is
 authorized by this staging slice. Source is authoritative; this does not reopen
@@ -36,14 +45,19 @@ finding alone proves every missing-prompt symptom.
   Codex manifest additionally declares the dynamically imported module
   `ui/request_cards/codex_ext_request_card.js` under extensions/codex_ext.
 - Its actual proxied request URL is
-  `/api/app/als-rs/proxy/api/extensions/codex/assets/ui/request_cards/codex_ext_request_card.js`.
+  `/api/app/als-rs/proxy/api/extensions/codex-ext/assets/ui/request_cards/codex_ext_request_card.js`.
+  The first fix incorrectly used codex instead of the manifest's codex-ext ID.
+  Live Gecko inspection proved the module was bundled but this actual import
+  returned 404 on LocalAssetServer. Both aliases are now exact-mapped; surrounding
+  extension config/schema/RPC URLs are still not intercepted. Include live local-
+  origin import/choice rendering in acceptance, not merely ZIP hash verification.
   Before this fix, TE2 vendoring inventoried only ALS's Rust static tree and asset
   interceptors only aliased its `/static/` tree. The request-card file was missing
   from the local snapshot and was not intercepted. The module renders
   command/file approvals, item/tool/requestUserInput, agent-pty/ask-user, tool
   calls and MCP elicitation.
-- The installed Pixel Gecko APK has an older 149-resource ALS seed and lacks the
-  module. It has not been replaced. The regenerated VPS seed has 447 files
+- The initial Pixel Gecko inspection found an older 149-resource ALS seed lacking
+  the module. The regenerated VPS seed has 447 files
   (43 MiB), with all 151 ALS resource hashes verified and no source maps.
 - User-approved fix implemented: vendor this declared module with exact source/hash
   provenance; map only its immutable asset URL to the local snapshot, not the
@@ -57,7 +71,18 @@ finding alone proves every missing-prompt symptom.
   tests, six Gecko JVM alias/required-file tests, and strict mypy plus disallow-any
   checks for the two changed Python files. This is not a whole-tree typing claim.
 - Source routing/vendor/test edits and VPS seed generation are approved and done.
-  APK assembly/install and final APK hash/device checks remain a later gate.
+  Subsequent authorized Gecko staging assembly/unit tests pass on the VPS:
+  103,220,517 bytes (98.44 MiB), all 447 packaged hashes verified, correct package
+  and signature, ARM64-only libraries. SHA256
+  b44d998f6ae0753f3ad5e1ef896712b41695e43304bb262292230639e7e734da.
+  Receipt: /mnt/vdb/te2-release-0.2.356/receipts/gecko-staging-apk.json.
+  User-requested Pixel update/live acceptance follows this verification.
+  Subsequent approval-route correction replaces that APK: 103,220,625 bytes,
+  SHA256 f2dff5a7cf9000675b82cd30af8e6df4f166843065449879a3e6039d1e150d4c;
+  receipt receipts/gecko-staging-approval-route-fix.json. Installed in place.
+  Live Gecko console verifies actual codex-ext module HTTP 200 from local asset
+  origin and the existing question's labeled choices/free-text/Send UI. No response
+  was submitted and no new approval was issued for the test.
   OTA alone cannot add the new native/WebExtension interception rule to an old APK.
 
 VPS staging receipts distinguish the clean source baseline from the approved

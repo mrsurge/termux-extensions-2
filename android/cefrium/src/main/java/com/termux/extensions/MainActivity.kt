@@ -536,7 +536,7 @@ class MainActivity : AppCompatActivity() {
             if (BuildConfig.TE2_TERMUX && inAppShell) clientUiScale else 100
         }
         selectionIntegration = CefriumSelectionIntegration(browser)
-        browser.setQueryHandler { _, request, origin, callback ->
+        browser.setQueryHandler(CefriumBrowser.QueryOriginPolicy.loopback().withSubframes()) { _, request, origin, callback ->
             handleNativeQuery(request, origin, callback)
         }
         browserContainer.addView(
@@ -1625,7 +1625,7 @@ class MainActivity : AppCompatActivity() {
             inspectorPageLoaded = false
             inspectorDeliveredGeneration = 0L
             next.setPullToRefreshEnabled(false)
-            next.setQueryHandler { _, request, origin, callback ->
+            next.setQueryHandler(CefriumBrowser.QueryOriginPolicy.loopback()) { _, request, origin, callback ->
                 handleInspectorQuery(request, origin, callback)
             }
             next.setOnLoadingStateChangedListener { isLoading, _, _ ->

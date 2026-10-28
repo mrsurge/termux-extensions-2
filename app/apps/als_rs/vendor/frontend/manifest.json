@@ -639,7 +639,7 @@
     ]
   },
   "schema": 1,
-  "source_commit": "b828c2002aa68a06c42e0966037efa00882f50c5",
+  "source_commit": "3137509384a96784788bc90de70aa72ed23a24c0",
   "source_files": {
     "app.js": {
       "bytes": 4021,
@@ -1250,5 +1250,5 @@
   "source_static_path": "rust/crates/als-server/src/static",
   "source_tree_sha256": "8c4924848f185a6645e496ed114453caa995ccdd57f9cb89091dd193d8463a9c",
   "tree_sha256": "00dba538eda3948d3fed22436ef149057f701b5030defe28a34a3003d3318bbe",
-  "version": "0.2.139"
+  "version": "0.2.140"
 }

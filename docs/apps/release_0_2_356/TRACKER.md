@@ -1,5 +1,94 @@
 # 0.2.356 maintenance tracker
 
+## Final source freeze and release builds — 2026-10-27
+
+- [x] User approves adopting the tested Cefrium 0.15 changes into production,
+  syncing TE2 metadata/assets to 0.2.356 and ALS snapshot to published 0.2.140,
+  committing/pushing the dependency before TE2, and final VPS APK/Linux builds.
+  Stop for grouped acceptance before TE2 publication; no shared runtime restart.
+- [x] Production source carries the matched 0.15 SDK/plugin pins, explicit
+  query-origin policies and tested native inspector wrapper/security guard.
+  Preserve the approved codex-ext asset alias repair in every final client.
+- [x] Refresh ALS snapshot and generated release assets on VPS; import generated
+  outputs. ALS 0.2.140 / source 3137509 / 151 resources; Android seed 447 files,
+  version 0.2.356. Source and seeded host/terminal/ALS/console assets synchronized.
+  Frontend/WBA strict no-Any gate, Electron typecheck, five cross-client route
+  tests, five Electron mapper tests, ten vendor tests and 17 installer tests pass.
+  Stale vendor fixtures were corrected for the mandatory approval module and
+  new companion version; no production guard was relaxed to pass those tests.
+  Changed Python fixture passes strict mypy with disallow-any-expr/explicit;
+  this is a targeted test check, not a new whole-tree typing claim.
+- [x] Publish tested Electromux b62eb6c on release/te2-0.2.356 before TE2 push.
+  Upstream main advanced independently to e263289; preserve it unchanged and do
+  not silently add untested upstream behavior or force-push.
+- [ ] Final source validations, push, exact-source VPS APK builds and Linux
+  private-Python 3.14 wheel below 100,000,000 bytes; verify full asset hashes,
+  APK manifests/signatures, and fresh wheel venv joint ALS/FWS installation.
+- [ ] Grouped final APK acceptance, separate wheel acceptance, then TE2 main
+  merge/tag/GitHub/PyPI publication. Native Android wheel route is a separate gate.
+
+## ALS RS 0.2.140 companion release preparation
+
+- [x] User approves stable Python/Cargo version synchronization, source checkpoint,
+  VPS build/tests and Linux private-Python wheel; stop before tags/uploads and
+  Android build-route selection. ALS source checkpoint 3137509, Ferrous 4cdf5db.
+- [x] Frontend typecheck/rebuild (no tracked drift), four subagent UI tests,
+  35 focused Python tests and all 180 Rust tests pass on the VPS.
+- [x] Linux manylinux wheel: 57,348,437 bytes / 54.69 MiB; SHA256
+  1e10fbe276ab38171ee49b843bc07f418446e945b2d2a013198dd08c679f71c7.
+  Twine/auditwheel and separate fresh Python 3.14 container / Python 3.13 Debian
+  venv checks pass: MCP 38 tools/one resource, EOF cleanup, actual bundled Python
+  3.14.6 libpython, dependency consistency and no retired dependency stack.
+- [x] User approves isolated Pixel build and dependencies after device wipe:
+  system Python 3.14.8, locally extracted Rust 1.99.1, four jobs, no global installs.
+  Versioned API-24 C/C++ flags resolve fresh Termux headers rejecting unversioned
+  targets; build exit 0. Twenty-six target Python tests pass.
+- [x] Android ALS wheel: 9,794,152 bytes / 9.34 MiB; SHA256
+  2f71db6948b0cddce439b2f4a1ea2738448de89de9540b6d8e27cfd7aeccdd70.
+  Fresh Termux acceptance venv passes native MCP 38 tools/one resource/EOF,
+  system Python ABI, uvloop-te2, FWS native pipe and retired dependency absence.
+  Copied/hash-verified on VPS under als-0.2.140/android; Twine passes. No installed
+  developer environment or shared runtime replaced; no publication yet.
+- [x] User requires visible project folders for device builds. Move the entire
+  Pixel ALS workspace to ~/projects/als-0.2.140-release, update build scripts and
+  refresh its venvs; completed wheel checksum unchanged. Keep future release
+  workspaces visible rather than placing them under the device's .cache root.
+- [x] User confirms ALS live acceptance on desktop and Termux and authorizes
+  publication of both validated 0.2.140 wheels. Joint TE2 validation is separate.
+- [x] Add official Termux codex package/executable to managed installer
+  prerequisites and manual README instructions; remove the npm workaround.
+  All 17 Termux installer regression tests pass.
+- [x] Publish both ALS wheels to PyPI 0.2.140 and verify public SHA-256 hashes
+  match the accepted Linux/Android artifacts above. TE2 merge/publication remains
+  separate from the companion ALS release.
+
+## Live approval routing correction — 2026-10-27
+
+Broader fail-closed built-in asset routing is deferred by the user to .357 to
+preserve this release schedule; see ../release_0_2_357/PLAN.md and TRACKER.md.
+Keep this release's exact alias correction; do not expand into relay hardening.
+
+- [x] User reports Gecko APK working, then identifies raw-JSON approval cards.
+  Read-only console inspection of als:RP9w.AJIP confirms intact requestUserInput
+  questions but generic fallback. Actual ESM URL uses extension ID codex-ext;
+  the initially tested codex alias was wrong. Native local-origin import gets
+  404 although the same module's bundled storage path returns 200.
+- [x] Add exact codex-ext alias to Gecko WebExtension, shared Android server/relay
+  and desktop inventory; keep the old codex alias and leave other extension APIs
+  dynamic. Regression covers the captured failed URL and negative dynamic routes.
+  Five cross-client Node tests, five actual Electron mapper tests and Electron
+  typecheck pass; source inclusion alone was not adequate runtime proof.
+- [x] Rebuild/install Gecko correction (1m 44s, 103,220,625 bytes; SHA256
+  f2dff5a7cf9000675b82cd30af8e6df4f166843065449879a3e6039d1e150d4c).
+  All 447 seed hashes and signature verified; expected codex-ext WebExtension
+  route is present in the actual APK. In-place installation succeeds, no data clear.
+- [x] Real Gecko worker als:RP9w.w1DM loads the actual codex-ext module from its
+  new local asset origin with HTTP 200 / application/javascript / 34,618 bytes.
+  Existing ALS 0.2.140 approval DOM now has both labeled choices, free-text input
+  and Send, rather than JSON/Accept/Decline. No new approval, submission or shared
+  framework/harness restart performed. Human response submission is not inferred.
+- [ ] Carry corrected shared aliases into final Cefrium/Termux release APKs.
+
 ## Active consumer migration and isolated Cefrium R8 experiment — 2026-10-27
 
 - [x] Checkpoint/push ALS approval asset and release-staging work as 747cfd12;
@@ -27,14 +116,31 @@
   Upstream remains unpublished; TE2 migration is included in this checkpoint. Publish
   dependency before any consumer commit is pushed with this new gitlink.
 - [ ] Grouped APK physical Home/Reload/reattach plus framework lifecycle
-  acceptance. No install or production APK assembly performed.
+  acceptance. TE2 Termux parity staging candidates now assembled on the VPS;
+  user-requested Pixel test follows, not production SDK adoption.
 - [x] User approves a separate VPS Cefrium staging/R8 experiment. User identifies
   version 13 as R8-fixed; latest 0.15.0 is candidate, not an adopted production pin.
-  See CEFRIUM_R8_EXPERIMENT.md. No installation or production upgrade authorized.
+  See CEFRIUM_R8_EXPERIMENT.md. The initial experiment excluded installation;
+  subsequent user approval authorizes Pixel candidate testing, not production adoption.
 - [x] Controlled standalone Cefrium staging comparison: 166.84 → 135.97 MiB
   (30.88 MiB / 18.5% smaller); DEX 45.62 → 9.61 MiB, 11 → 1 files. Real keep-radius
   analysis, valid signatures/manifests/ARM64 and identical 447 asset hashes verified.
   Candidate-only query policy/JNI inspector adapter approved and 71 JVM tests pass.
+- [x] Matched TE2 Termux builds include committed parity changes and embedded Node:
+  163.18 → 157.88 MiB (5.31 MiB / 3.253% smaller). All 78 JVM tests pass; signatures,
+  correct Termux package, ARM64 libraries and all 447 seed hashes verified. Candidate
+  toolbar needs an additional loopback-only query policy; saved in experiment receipts.
+- [x] Install verified TE2 Termux 0.15 parity candidate on Pixel in place with
+  `adb install -r`; success, no app-data clear.
+- [x] User TE2 Termux candidate acceptance: “Its working” after the correct
+  parity/0.15 APK installation. Earlier standalone installation is not this acceptance.
+- [x] Build/verify Gecko staging on VPS with JDK 21 / its separate AGP8 build:
+  unit tests and assembly pass (1m 47s), 103,220,517 bytes / 98.44 MiB. Correct
+  package/signature, ARM64-only libraries and all 447 seed hashes verified,
+  including ALS approval JS; no source maps. Receipt: receipts/gecko-staging-apk.json.
+- [x] User installs initial verified Gecko staging and reports “It's working fine.”
+  Later approval-route defect and corrected APK/live DOM verification are recorded
+  separately above; broad acceptance did not establish approval rendering.
 - [ ] Generated-R optimized-resource-shrinker warning qualification, physical
   inspector/lifecycle/scaling/assets acceptance, and explicit adoption decision.
   Preserve production 0.9.0 pin; this remains separate from consumer migration.
@@ -63,9 +169,10 @@
   verified including approval renderer; source maps excluded. Four Node tests,
   five Python vendor/provenance tests and six Gecko JVM tests pass; strict mypy
   with disallow-any checks passes for the two changed Python files.
-- [ ] Build approved APK candidates and verify approval module/core bundle/CSS
-  hashes in Gecko, Cefrium and Termux APKs. Installed Pixel Gecko remains the old
-  149-resource seed; new interception rules require a new APK, not just OTA.
+- [x] Build approved APK candidates and verify all 447 seeded asset hashes,
+  including approval module/core bundle/CSS, in Gecko, Cefrium and Termux APKs.
+  New interception rules require the APK update, not just OTA. Candidate device
+  acceptance and production SDK adoption remain separate gates above.
 - [ ] Pixel approval acceptance: question choices/freeform, submit, cancel/reopen,
   page reload, command/file approvals and no stale module/core mixed generation.
 - [ ] Approve concrete Electron-compatible bridge subset and regression scope;

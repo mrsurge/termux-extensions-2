@@ -1,9 +1,9 @@
 import {
   applyTranscriptCardMetadata,
-  type TranscriptCardMetadata,
 } from '../transcript_card_metadata.ts';
 import { scrollPathLabelsToEnd } from '../path_label.ts';
 import type { ToggleableRow, UnknownRecord } from '../shared_types.ts';
+import { applyCompactSubagent, type CompactSubagentSnapshot } from './compact.ts';
 
 interface CollapsibleOptions {
   headerEl?: HTMLElement | null;
@@ -180,9 +180,23 @@ export function bindSubagentsCollapsible(ctx: SubagentsCollapsibleContext) {
     id: string,
     name: string,
     intent: string,
-    metadata: TranscriptCardMetadata | null = null,
+    metadata: CompactSubagentSnapshot | null = null,
   ) {
     let subagent = subagentContainers.get(id);
+    if (metadata?.compact === true && !subagent?.row.isConnected) {
+      // A replay/window refresh can replace the DOM while this live controller
+      // survives. Adopt the mounted projection instead of updating a stale row.
+      const mounted = Array.from(documentRef.querySelectorAll<HTMLElement>('.subagent-card'))
+        .find(row => row.dataset.subagentId === id && row !== subagent?.row);
+      const body = mounted?.querySelector<HTMLDivElement>(':scope > .subagent-body');
+      const header = mounted?.querySelector<HTMLDivElement>(':scope > .subagent-header');
+      const statusEl = header?.querySelector<HTMLSpanElement>('.subagent-status');
+      const label = header?.querySelector<HTMLSpanElement>('.subagent-name');
+      if (mounted && body && header && statusEl && label) {
+        subagent = { row: mounted, body, header, statusEl, label, items: [] };
+        subagentContainers.set(id, subagent);
+      }
+    }
     if (!subagent) {
       clearPlaceholder();
       const row = documentRef.createElement('div');
@@ -204,6 +218,7 @@ export function bindSubagentsCollapsible(ctx: SubagentsCollapsibleContext) {
       row.appendChild(body);
       applyTranscriptCardMetadata(row, metadata);
 
+      if (metadata?.compact === true) applyCompactSubagent(row, metadata);
       insertRow(row);
       makeCollapsible(row, `subagent:${id}`, false, {
         headerEl: header,
@@ -214,6 +229,7 @@ export function bindSubagentsCollapsible(ctx: SubagentsCollapsibleContext) {
     } else if (subagent.row instanceof HTMLElement) {
       applyTranscriptCardMetadata(subagent.row, metadata);
     }
+    if (metadata?.compact === true) applyCompactSubagent(subagent.row, metadata);
     return subagent;
   }
 

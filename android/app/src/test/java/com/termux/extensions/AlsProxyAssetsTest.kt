@@ -6,12 +6,16 @@ import org.junit.Test
 
 class AlsProxyAssetsTest {
     @Test fun mapsExactCodexRequestCardWithoutCachingExtensionApis() {
-        val prefix = "/api/app/als-rs/proxy/api/extensions/codex/assets/"
         val local = "/apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js"
-        assertEquals(local, AlsProxyAssets.localPath(prefix + "ui/request_cards/codex_ext_request_card.js"))
+        // codex-ext is the manifest ID and the actual Gecko dynamic-import URL.
+        for (id in listOf("codex-ext", "codex")) {
+            val prefix = "/api/app/als-rs/proxy/api/extensions/$id/assets/"
+            assertEquals(local, AlsProxyAssets.localPath(prefix + "ui/request_cards/codex_ext_request_card.js"))
+            assertNull(AlsProxyAssets.localPath(prefix + "ui/request_cards/unknown.js"))
+            assertNull(AlsProxyAssets.localPath(prefix + "ui/main.js"))
+            assertNull(AlsProxyAssets.localPath("/api/app/als-rs/proxy/api/extensions/$id/request-cards"))
+        }
         assertEquals(local, AlsProxyAssets.localPath(local))
-        assertNull(AlsProxyAssets.localPath(prefix + "ui/request_cards/unknown.js"))
-        assertNull(AlsProxyAssets.localPath("/api/app/als-rs/proxy/api/extensions/codex/request-cards"))
     }
 
     @Test fun mapsOnlyStaticTrees() {

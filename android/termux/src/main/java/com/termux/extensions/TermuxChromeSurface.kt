@@ -75,7 +75,7 @@ internal class TermuxChromeSurface(
         viewport = CefriumViewportController(browser)
         browser.setPinchToZoomEnabled(false)
         browser.setPullToRefreshEnabled(false)
-        browser.setQueryHandler { _, raw, caller, callback ->
+        browser.setQueryHandler(CefriumBrowser.QueryOriginPolicy.loopback()) { _, raw, caller, callback ->
             if (closed) {
                 callback.failure(503, "Chrome closed")
                 return@setQueryHandler true

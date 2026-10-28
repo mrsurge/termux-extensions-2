@@ -1,5 +1,6 @@
 import { applyTranscriptCardMetadata, type TranscriptCardMetadata } from '../transcript_card_metadata.ts';
 import type { MessageCardRow } from '../shared_types.ts';
+import { keepRunningSubagentsAtTail } from '../subagents/compact.ts';
 
 interface TimelineRowsState {
   bottomSpacerEl?: HTMLElement | null;
@@ -79,6 +80,7 @@ export function bindTimelineRows(ctx: TimelineRowsContext) {
     } else {
       timelineEl.appendChild(row);
     }
+    keepRunningSubagentsAtTail(timelineEl, bottomSpacerEl);
     onRowInserted?.(row);
     maybeAutoScroll();
   }

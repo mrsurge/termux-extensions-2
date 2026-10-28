@@ -45,3 +45,14 @@ test("sidebar metadata and relative Monaco font are exact local resources", () =
   );
   assert.equal(mapLocalAssetPath("/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/private.js"), null);
 });
+
+test("Codex manifest ID and legacy approval aliases map only the declared module", () => {
+  const local = "/apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js";
+  for (const id of ["codex-ext", "codex"]) {
+    const base = `/api/app/als-rs/proxy/api/extensions/${id}`;
+    assert.equal(mapLocalAssetPath(`${base}/assets/ui/request_cards/codex_ext_request_card.js`), local);
+    assert.equal(mapLocalAssetPath(`${base}/assets/ui/request_cards/unknown.js`), null);
+    assert.equal(mapLocalAssetPath(`${base}/assets/ui/main.js`), null);
+    assert.equal(mapLocalAssetPath(`${base}/request-cards`), null);
+  }
+});

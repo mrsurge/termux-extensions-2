@@ -19,8 +19,8 @@ diff/review flows, and stateful sidebar apps.
 
 ## Install
 
-The current release is **0.2.353 alpha**: a normal GitHub Release under an
-alpha moniker, available through `latest`.
+This checkout prepares **0.2.356**. Published GitHub releases are available
+through `latest`; use the matching tag to install a specific release.
 
 ### Command-line install: Linux or Termux
 
@@ -58,7 +58,7 @@ inside Termux, or connect to a remote framework.
 
 1. Install and open the compatible GitHub debug build of Termux once to initialize
    its userspace.
-2. Install the [TE2 Termux preview APK](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.353/te2-0.2.353-termux-staging-arm64.apk) and open **TE2 Termux**.
+2. Install the TE2 Termux APK from the [release assets](https://github.com/mrsurge/termux-extensions-2/releases/latest) and open **TE2 Termux**.
 3. If TE2 is not installed, choose **Install** in the launcher or the local-framework
    card in Settings, then confirm. Progress is shown in the app; no shell command
    needs to be pasted into Termux.
@@ -110,26 +110,23 @@ the system packages first:
 pkg update
 pkg install tur-repo
 pkg update
-pkg install python python-pip git nodejs-lts npm build-essential libarchive libgit2
+pkg install python python-pip git codex nodejs-lts npm build-essential libarchive libgit2
 python -m pip install --only-binary=te2,agent-log-server,framework-shells,uvloop-te2 te2
 te2
 ```
 
 Use ordinary CPython 3.14 on Android ARM64 and Node 24. `build-essential` supports
 the Terminal's first-use `node-pty` build and small Python dependency builds.
-The upcoming maintenance release removes the old heavyweight Python dependency
-stack and selects the prebuilt `uvloop-te2` package on Termux (upstream `uvloop`
-on Linux x86-64). Remaining small dependency source builds are supported.
-Published 0.2.353 still has the older dependency metadata; the reduced dependency
-set applies when the new release is published.
+The 0.2.356 dependency set removes the old heavyweight Python dependency stack
+and selects the prebuilt `uvloop-te2` package on Termux (upstream `uvloop` on
+Linux x86-64). Remaining small dependency source builds are supported.
 
 The command above requires wheels for TE2/ALS/FWS/uvloop-te2, avoiding accidental
 Rust/runtime or uvloop compilation while allowing lightweight dependencies to
 build. Optional integrations also use `aria2` (Aria Downloader) and `watchexec`
-(polling watcher). The next-release managed script uses this same PyPI selection,
+(polling watcher). The managed script uses this same PyPI selection,
 adds staging/rollback and installs prerequisites for you; GitHub supplies the
-installer/release metadata, not the TE2 wheelhouse. The published 0.2.353 script
-still uses the older GitHub archive flow.
+installer/release metadata, not the TE2 wheelhouse.
 
 For a pinned installation, use the matching tagged download URL instead of
 `latest` and set `TE2_RELEASE_TAG` for the script process:
@@ -138,7 +135,7 @@ For a pinned installation, use the matching tagged download URL instead of
 curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.353/install-te2 | TE2_RELEASE_TAG=0.2.353 sh -s -- --yes
 ```
 
-The upcoming installer also supports selecting older tags through
+The installer also supports selecting older tags through
 `TE2_RELEASE_TAG`: Termux releases before `0.2.354` use their checksum-verified
 GitHub archive; `0.2.354` and newer use PyPI, including explicit tagged installs.
 `latest` follows the selected release's version, not a different dependency policy.
@@ -286,14 +283,11 @@ On Termux, both the Codex extension and ALS-RS require a Termux-compatible
 `codex` executable to be installed and available on `PATH` before they start:
 
 ```bash
-npm install -g @mmmbuto/codex-cli-termux@latest
+pkg install codex
 ```
 
-The [`DioNanos/codex-termux`](https://github.com/DioNanos/codex-termux)
-repository publishes the Termux-compatible
-[`@mmmbuto/codex-cli-termux`](https://www.npmjs.com/package/@mmmbuto/codex-cli-termux)
-package used above. The maintainer currently updates it for major Codex
-releases.
+Codex is available as an official Termux package. The managed TE2 installer
+includes it in the Termux prerequisites; no separate npm workaround is needed.
 
 ## Requirements
 
@@ -635,8 +629,9 @@ not a hidden product dependency.
 ### Add A Second-Root App
 
 A second-root app is a user-installed app outside TE2's built-in app tree.
-Download the [second-root app template ZIP](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.355/te2-second-root-app-template.zip)
-from the `0.2.355` release assets when published. Extract its `proxy_shell_wrapper`
+Download the second-root app template ZIP from the
+[release assets](https://github.com/mrsurge/termux-extensions-2/releases/latest).
+Extract its `proxy_shell_wrapper`
 directory to `~/.local/share/te2/apps/<your_app_id>` (or
 `$TE2_DATA_HOME/apps/<your_app_id>` when overridden).
 

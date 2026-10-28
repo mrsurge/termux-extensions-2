@@ -101,4 +101,44 @@ APK: debug/staging and historical frontend inventories are different controls.
 Control SHA256: 85d8ba494fed707ea2a2016c8e2a54757cdf2b0285237648641ebb86253e23fe.
 Candidate SHA256: 99661996569b605efe65af633aa5de53ec607adef3cd713e572403b97a75f1b4.
 Machine-readable APK/asset measurements: receipts/{baseline,candidate}-apk.json.
-No APK was installed, no production SDK pin changed, and no runtime restarted.
+No APK was installed during that comparison, no production SDK pin changed, and
+no runtime restarted.
+
+## TE2 Termux parity candidate — subsequent authorized device test
+
+The user noted that the old control has the same generated-resource warnings and
+authorized building/installing the actual TE2 Termux variant for acceptance. The
+earlier standalone Cefrium APK was installed first by mistake; it is not evidence
+of TE2 Termux acceptance. No generator patch or production SDK adoption is implied.
+
+Matched sources include the consumer migration checkpoint ebee76b1 (upstream
+Electromux b62eb6c), the same 447-file seed and embedded Node in both builds.
+VPS experiment: `/mnt/vdb/te2-release-0.2.356/experiments/termux-parity-size`.
+Candidate retains the existing isolated SDK/JNI adaptations and additionally uses
+`QueryOriginPolicy.loopback()` for the Termux-only toolbar query handler, keeping
+its exact-document/generation checks. This last adaptation is saved separately as
+`receipts/termux-chrome-origin-policy.patch`; production source remains on 0.9.0.
+
+| TE2 Termux staging metric | 0.9.0 control | 0.15.0 candidate |
+| --- | ---: | ---: |
+| APK bytes | 171,110,979 | 165,544,744 |
+| APK MiB | 163.18 | 157.88 |
+| DEX files | 11 | 1 |
+| DEX raw bytes | 47,888,444 | 10,116,812 |
+| DEX compressed bytes | 15,595,657 | 4,639,578 |
+| libnode.so compressed bytes | 25,961,161 | 25,961,161 |
+
+Net saving: 5,566,235 bytes = 5.3084 MiB (3.253%). Do not apply the standalone
+30.88 MiB result to Termux: its DEX entries were already compressed. Both Termux
+builds use the intended GitHub-lane public signer and package identity
+`com.termux.extensions.te2termux`; all 447 seeded files match their hashes, the
+ALS approval renderer is present, source maps are absent and native code is ARM64.
+The candidate's embedded consumer includes `electron.window.action`, BrowserWindow
+and native effect/ACK handling. All 78 JVM tests pass; staging assembly succeeds.
+
+Control SHA256: 36a437978cc60d2c4339de91d264cdcc5b1210bdd373c58f6d25749a3665695d.
+Candidate SHA256: c53f9142724646b83765a0c8e81e188f551c4e39fd855d394a1361bd660404f8.
+Size/asset receipts: `receipts/{baseline,candidate}-apk.json` under this experiment.
+Pixel `pixel-9-pro-xl:5555` in-place installation completed successfully with
+`adb install -r`, without clearing app data. User reports “Its working” for this
+correct TE2 Termux candidate and requests GeckoView build/install next.

@@ -1,5 +1,17 @@
 # 0.2.357 tracker
 
+## Fail-closed built-in asset routing
+
+- [x] User defers broader hardening from .356 on 2026-10-27; the exact codex-ext
+  alias fix stays in .356. Not a current-release blocker.
+- [ ] Audit client routing and define manifest-backed local-only asset ownership
+  versus dynamic/backend routes, including redirected ESM/local asset origins.
+- [ ] Approve and implement fail-closed missing/unmapped built-in assets across
+  Gecko, Cefrium, TE2 Termux and Electron without breaking genuine proxy traffic.
+- [ ] Test real URL mappings, missing files and wrong aliases; assert zero upstream
+  fetches on asset failures and continued proxying of dynamic APIs/sockets.
+- [ ] Obtain client runtime acceptance; no implementation approved by scheduling.
+
 ## Code TE2 pipe concurrency — O2 continuation
 
 - [x] Record user-requested deferral from .356 on 2026-10-26; preserve completed

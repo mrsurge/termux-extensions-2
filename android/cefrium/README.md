@@ -20,14 +20,14 @@ relay keeps contacting another app's base socket (SELinux rejects that access).
 discover them again after process restart. This path does not require frontend
 console log forwarding. Source tests are not installed-APK acceptance.
 
-The module pins the Cefrium SDK and Gradle plugin to `0.9.0`, targets arm64, and
+The module pins the Cefrium SDK and Gradle plugin to `0.15.0`, targets arm64, and
 requires Android API 29 or newer.
 
 The Codeberg mirror currently resolves the pinned SDK and plugin. It keeps only
 the latest release, so keep both version pins aligned. Maven Central remains the
 preferred immutable source once this release is present there.
 
-Cefrium 0.9.0 supplies the Window Extensions consumer R8 rule that TE2 previously
+Cefrium supplies the Window Extensions consumer R8 rule that TE2 previously
 carried locally. Its POM declares the interface artifact with Maven `provided`
 scope, which Gradle does not add to the consumer compile/R8 classpath, so TE2 must
 temporarily retain the extracted `window-extensions-core-1.0.0.jar` as

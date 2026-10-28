@@ -184,7 +184,9 @@ class TermuxPyPIInstallerTests(unittest.TestCase):
     def test_termux_runtime_prerequisites_omit_retired_crypto_and_unused_bun(self) -> None:
         names = {item["name"] for item in installer.TERMUX_APT_PACKAGES}
         self.assertFalse(names & {"python-cryptography", "bun"})
-        self.assertTrue({"python", "python-pip", "nodejs-lts", "libarchive", "libgit2"} <= names)
+        self.assertTrue({"python", "python-pip", "codex", "nodejs-lts", "libarchive", "libgit2"} <= names)
+        codex = next(item for item in installer.TERMUX_APT_PACKAGES if item["name"] == "codex")
+        self.assertEqual(codex["executables"], ["codex"])
 
     def test_linux_import_smoke_does_not_require_retired_dependencies(self) -> None:
         with patch.object(installer.subprocess, "run") as run:

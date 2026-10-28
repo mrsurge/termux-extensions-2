@@ -5,6 +5,7 @@ import {
 import { renderShellSummary } from '../shell_render.ts';
 import { mountShellOutputWindow } from '../shell_output_window.ts';
 import { ansiToHtml, hasAnsiSgr } from '../terminal_ansi.ts';
+import { applyCompactSubagent, keepRunningSubagentsAtTail } from '../subagents/compact.ts';
 import type { ToggleableRow, UnknownRecord } from '../shared_types.ts';
 import type { TranscriptCardRecipe } from '../rpc/conversations/contract.ts';
 
@@ -304,6 +305,35 @@ export function bindTimelineReplay(ctx: TimelineReplayContext) {
     items.forEach((entry) => {
       if (isInternalTranscriptItem(entry)) return;
       if (!entry || !entry.role) return;
+
+      if (entry.compact === true && (entry.role === 'subagent_start' || entry.role === 'subagent_end')) {
+        const id = asString(entry.id);
+        let existing = replaySubagents.get(id)?.row;
+        if (!existing) {
+          existing = Array.from(timelineEl.querySelectorAll<HTMLElement>('.subagent-card'))
+            .find(row => row.dataset.subagentId === id);
+        }
+        if (!existing) {
+          existing = documentRef.createElement('div');
+          existing.className = 'timeline-row subagent-card';
+          existing.dataset.subagentId = id;
+          const header = documentRef.createElement('div');
+          header.className = 'subagent-header command-ribbon';
+          const label = documentRef.createElement('span');
+          const status = documentRef.createElement('span');
+          status.className = 'subagent-status';
+          header.append(label, status);
+          const body = documentRef.createElement('div');
+          body.className = 'subagent-body';
+          existing.append(header, body);
+          makeCollapsible(existing, `subagent:${id}`, false, { headerEl: header, fullHeaderToggle: true });
+          replaySubagents.set(id, { row: existing });
+          fragment.appendChild(existing);
+        }
+        applyTranscriptCardMetadata(existing, entry);
+        applyCompactSubagent(existing, entry);
+        return;
+      }
 
       if (entry.role === 'subagent_start') {
         const existing = timelineEl.querySelector(`.subagent-card[data-subagent-id="${entry.id}"]`);
@@ -727,6 +757,7 @@ export function bindTimelineReplay(ctx: TimelineReplayContext) {
     } else {
       timelineEl.appendChild(fragment);
     }
+    keepRunningSubagentsAtTail(timelineEl, state.bottomSpacerEl);
     syncPlanOverlayUi();
 
     if (pendingAgentPtyTerms.length) {

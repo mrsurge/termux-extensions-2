@@ -21,7 +21,7 @@ function electron(path) {
 test('every pinned ALS static resource is packaged and mapped for Gecko/Electron', () => {
   const entry = bundle.entries.find(e => e.kind === 'tree' && e.dest === 'apps/als_rs/frontend');
   assert.equal(entry.src, 'app/apps/als_rs/vendor/frontend');
-  assert.equal(manifest.version, '0.2.139');
+  assert.equal(manifest.version, '0.2.140');
   assert.equal(Object.keys(manifest.files).length, 151);
   for (const [path, info] of Object.entries(manifest.files)) {
     const local = `/apps/als_rs/frontend/static/${path}`;
@@ -44,6 +44,21 @@ test('ALS pages/runtime endpoints remain proxied, not cached frontend authority'
   const index = read('app/apps/als_rs/manifest.json');
   assert.ok(index.includes('"/static/"'));
   assert.ok(!manifest.files['index.html']);
+});
+
+test('live Gecko codex-ext import URL resolves on the local asset origin, not just in the ZIP', () => {
+  const failedImport = new URL('http://127.0.0.1:35225/api/app/als-rs/proxy/api/extensions/codex-ext/assets/ui/request_cards/codex_ext_request_card.js');
+  const local = '/apps/als_rs/frontend/static/extensions/codex/ui/request_cards/codex_ext_request_card.js';
+  assert.equal(gecko(failedImport.pathname), local);
+  assert.equal(electron(failedImport.pathname), local);
+  const nativeAliases = read('android/app/src/main/java/com/termux/extensions/AlsProxyAssets.kt');
+  assert.ok(nativeAliases.includes(`"${failedImport.pathname}"`));
+  assert.ok(fs.existsSync(new URL(`app/apps/als_rs/vendor/frontend/static/${local.split('/static/')[1]}`, root)));
+  for (const suffix of ['request-cards', 'assets/ui/main.js', 'assets/ui/request_cards/unknown.js']) {
+    const path = `/api/app/als-rs/proxy/api/extensions/codex-ext/${suffix}`;
+    assert.equal(gecko(path), null);
+    assert.equal(electron(path), null);
+  }
 });
 test('shared Android aliases, WASM MIME, non-stale cache and required OTA inputs cover ALS', () => {
   const cef = read('android/cefrium/src/main/java/com/termux/extensions/CefriumAssetRoutes.kt');
