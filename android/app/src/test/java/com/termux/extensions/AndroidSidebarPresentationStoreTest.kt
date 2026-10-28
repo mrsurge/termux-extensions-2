@@ -73,6 +73,7 @@ class AndroidSidebarPresentationStoreTest {
                 payload = it
                 true
             },
+            nowMillis = { 1_000L },
         )
 
         repeat(33) { index ->
@@ -90,6 +91,18 @@ class AndroidSidebarPresentationStoreTest {
         assertTrue(
             store.read("client_aaaaaaaaaaaa", "http://server-a:8089", "/workspace/32") != null,
         )
+        // Updating an older partition makes it recent, including after recreating
+        // the store with a clock that has moved backwards.
+        val recreated = AndroidSidebarPresentationStore(
+            readPayload = { payload },
+            writePayload = { payload = it; true },
+            nowMillis = { 500L },
+        )
+        recreated.write("client_aaaaaaaaaaaa", "http://server-a:8089", "/workspace/1", state())
+        recreated.write("client_aaaaaaaaaaaa", "http://server-a:8089", "/workspace/33", state())
+        assertNull(recreated.read("client_aaaaaaaaaaaa", "http://server-a:8089", "/workspace/2"))
+        assertTrue(recreated.read("client_aaaaaaaaaaaa", "http://server-a:8089", "/workspace/1") != null)
+        assertEquals(32, JSONObject(payload!!).getJSONObject("records").length())
     }
 
     @Test(expected = IllegalArgumentException::class)

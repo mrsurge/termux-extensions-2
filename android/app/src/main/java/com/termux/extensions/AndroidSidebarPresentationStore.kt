@@ -29,6 +29,7 @@ private const val MAX_PRESENTATION_BYTES = 256 * 1_024
 internal class AndroidSidebarPresentationStore internal constructor(
     private val readPayload: () -> String?,
     private val writePayload: (String) -> Boolean,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     constructor(context: Context) : this(
         readPayload = {
@@ -79,6 +80,11 @@ internal class AndroidSidebarPresentationStore internal constructor(
         val records = store.optJSONObject("records") ?: JSONObject().also {
             store.put("records", it)
         }
+        // JSON object iteration is not insertion-ordered. Distinct timestamps
+        // keep eviction deterministic even when several writes share a clock tick.
+        val previousUpdate = jsonObjectEntries(records)
+            .maxOfOrNull { (_, value) -> value.optLong("updatedAt", 0L) } ?: 0L
+        val updatedAt = maxOf(nowMillis(), previousUpdate + 1L)
         records.remove(identity.key)
         records.put(
             identity.key,
@@ -86,7 +92,7 @@ internal class AndroidSidebarPresentationStore internal constructor(
                 .put("clientInstanceId", identity.clientInstanceId)
                 .put("frameworkOrigin", identity.frameworkOrigin)
                 .put("projectPath", identity.projectPath)
-                .put("updatedAt", System.currentTimeMillis())
+                .put("updatedAt", updatedAt)
                 .put("state", normalizedState),
         )
         val retained = jsonObjectEntries(records)

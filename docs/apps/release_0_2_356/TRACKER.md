@@ -2,6 +2,17 @@
 
 ## Final source freeze and release builds — 2026-10-27
 
+Final native gate follow-up: the first Gecko suite had relay immediate-port-reuse
+and sidebar eviction timing failures. Both passed in isolation, but the complete
+rerun reproduced eviction (relay passed). Logs: final-gecko-full-suite-failure.log
+and final-gecko-isolated-tests.log under the VPS release logs. User approves a
+targeted sidebar fix: strictly increasing persisted update timestamps, with a
+fixed/backwards-clock regression, unchanged schema and 32-partition bound.
+No relay change or test exclusion is authorized/implied by this fix.
+The patched complete Gecko Debug native suite passes (100 tests, zero failures),
+including frozen-clock and backwards-clock eviction/refresh assertions. Schema,
+32-project limit, client/framework/project partitioning and relay source unchanged.
+
 - [x] User approves adopting the tested Cefrium 0.15 changes into production,
   syncing TE2 metadata/assets to 0.2.356 and ALS snapshot to published 0.2.140,
   committing/pushing the dependency before TE2, and final VPS APK/Linux builds.
