@@ -62,13 +62,44 @@ function setup(browse = async location => ({ entries, path: location }), workerM
     }
     return { ok: true, json: async () => ({ ok: true, data: {} }) };
   };
-  vm.runInNewContext(source, { window, document: window.document, console, fetch, URLSearchParams, Worker, performance, setTimeout, clearTimeout, getIcon: provider.getIcon, renderIcon: provider.renderIcon });
+  const paths = vm.runInNewContext(source + '\n({ toAbsolute, parentPath, simplifyAbsolute });', { window, document: window.document, console, fetch, URLSearchParams, Worker, performance, setTimeout, clearTimeout, getIcon: provider.getIcon, renderIcon: provider.renderIcon });
   const document = window.document;
   const open = options => window.teFilePicker.open({ startPath: '/project', ...options });
   const row = name => [...document.querySelectorAll('.te-fp-item')].find(item => item.textContent.includes(name));
   const click = element => element.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   const key = (element, value) => element.dispatchEvent(new window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
-  return { window, document, open, row, click, key, calls, workers };
+  return { window, document, open, row, click, key, calls, workers, paths };
+}
+
+test('home aliases remain backend-owned and parent navigation has no platform assumptions', () => {
+  const env = setup();
+  assert.equal(env.paths.toAbsolute(null), '~');
+  assert.equal(env.paths.toAbsolute('child'), '~/child');
+  assert.equal(env.paths.simplifyAbsolute('~/child/../other'), '~/other');
+  assert.equal(env.paths.simplifyAbsolute('~/../../other'), '~/../../other');
+  assert.equal(env.paths.parentPath('~'), '~/..');
+  assert.equal(env.paths.parentPath('~/..'), '~/../..');
+  assert.equal(env.paths.parentPath('~/child/..'), '~/..');
+  for (const home of ['/home/alice', '/root', '/data/data/com.termux/files/home']) {
+    assert.equal(env.paths.parentPath(home), path.posix.dirname(home));
+  }
+  env.window.close();
+});
+
+for (const home of ['/home/alice', '/root', '/data/data/com.termux/files/home']) {
+  test(`default home browse uses one request and follows the server's resolved path: ${home}`, async () => {
+    const env = setup(async location => ({ entries, path: location === '~' ? home : location }));
+    env.open({ mode: 'directory', startPath: undefined });
+    await tick();
+    let browses = env.calls.filter(url => url.startsWith('/api/browse?'));
+    assert.equal(browses.length, 1);
+    assert.equal(new URL(browses[0], 'http://localhost').searchParams.get('path'), '~');
+    env.click(env.document.querySelector('.te-fp-btn-up'));
+    await tick();
+    browses = env.calls.filter(url => url.startsWith('/api/browse?'));
+    assert.equal(new URL(browses.at(-1), 'http://localhost').searchParams.get('path'), path.posix.dirname(home));
+    env.window.close();
+  });
 }
 
 test('single click selects a directory, double click enters; Codicons load once', async () => {

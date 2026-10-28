@@ -1,6 +1,6 @@
 [
   {
-    "name": "Prefix",
-    "path": "$PREFIX"
+    "name": "Home",
+    "path": "~"
   }
 ]

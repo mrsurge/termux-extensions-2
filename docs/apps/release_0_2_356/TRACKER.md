@@ -1,5 +1,23 @@
 # 0.2.356 maintenance tracker
 
+## Platform-agnostic filesystem home defaults — 2026-10-28
+
+- [x] User confirms preceding APKs live accepted before this asset-only follow-up.
+  Preserve that native acceptance; do not infer acceptance of newly changed assets.
+- [x] User approves portable home defaults without native changes. Seed Home -> '~'
+  in app/static/bookmarks.json; existing persisted bookmarks remain untouched.
+  Code TE2's fallback now uses '~'; keep home-relative paths backend-resolvable,
+  including parents above home, rather than generating /~ or guessing Termux paths.
+  Remove shared picker's Termux parent special cases. File Explorer's existing
+  Path.home()/project-CWD defaults already work and require no backend change.
+- [x] 42 focused picker/path/open/project-modal/startup tests pass on VPS; frontend
+  and WBA strict gates report zero Any findings/compiler diagnostics. Rebuild host
+  bundles and all 447 Android seed assets on VPS, import unchanged generated output.
+  No Rust/Python/native changes, binary rebuild, shared restart or APK install.
+- [x] User confirms portable-home changes live tested and working. Final
+  wheel/APK resource repackaging can reuse completed native artifacts; updated
+  seed alone is not a rebuilt APK. Publication remains gated separately.
+
 ## Termux final APK cache/toolbar correction — 2026-10-28
 
 - [x] Inspect the Pixel using its own ALS acceptance venv and installed TE2
@@ -32,16 +50,48 @@
   /sdcard/Download/te2-0.2.356-termux-staging-arm64.apk; on-device SHA256 matches.
   No installation, data clear or framework restart. Pixel framework was already
   absent at read-only recheck, so live console validation was not performed.
-- [ ] After user installation/startup, verify normal fetch uses current seed,
-  toolbar arm/fire/spacing and nonrepository Git-init affordance live.
-- [ ] TE2 Android wheel has not started on Pixel; only the completed ALS build
-  exists under ~/projects. Do not report APK testing as wheel progress.
+- [x] User subsequently reports APKs live passed, before the portable-home slice.
+  Record user behavioral acceptance, not a new independently measured browser
+  fetch/hash observation. Source/seed/APK inventory hashes remain separate evidence.
+- [x] Earlier status correction: no TE2 Android wheel build existed on Pixel
+  during APK testing; only ALS had been built. Do not conflate those workflows.
 - [x] User authorizes native Pixel or Termux-container wheel build (2026-10-28).
   Select native Pixel, visible ~/projects/te2-0.2.356-release, isolated compiler
   environment/toolchain and no global upgrades or installed-runtime restart.
   Read-only preflight: 192 GiB free, system Python 3.14.8, reusable isolated ALS
   Rust 1.99.1 works with its own library path. rpw.txt is locally git-excluded;
   its contents are not read and privilege escalation is not used.
+- [x] Checkpoint/push source 6505d322; clone exact revision into the new visible
+  Pixel workspace. Detached build PID 25824 starts dependency provisioning, then
+  framework/editor Cargo builds, mypyc snapshot and validation wheel, four jobs.
+  Build and fresh acceptance use different venvs, no developer activation.
+  Logs/stage/exit receipts stay under that workspace; no APK auto-install.
+- [x] Pixel compiler provisioning passes: isolated mypy 2.3.0, Maturin and
+  ast-serialize build/import successfully with explicit system-libpython linking.
+  Actual TE2 framework Cargo compilation has begun; editor/mypyc/wheel remain
+  queued, not complete. Detached acceptance watcher starts only after build.exit=0,
+  using system libraries and its own clean venv. Build/acceptance recipes are
+  mirrored to VPS receipts; no installed TE2 runtime is replaced.
+- [x] Pixel native build completes with exit 0, validation Android wheel
+  50,432,178 bytes / SHA256
+  997b0e315799b205c566ed7046e7eabeb406f8addcf894c7d117f96d1fc6bffb.
+  Separate fresh acceptance exits 0: all 150 compiled modules, actual WBA import,
+  FWS native pipe/uvloop, ALS MCP 38 tools/one resource/EOF and no retired stack.
+  Candidate is from 6505d322, before the home-default resource-only change.
+  No developer runtime activation or publication. Reuse binaries for resource repack.
+- [x] Refresh Linux wheel from clean 6505d322 on VPS using verified prior domain
+  reuse (matching complete source digest/ABI/native hashes/imports). Wheel size
+  99,526,963 bytes, 473,037 bytes below PyPI limit; SHA256
+  f7453e11dcc635a4126fe98a7e14b6e67aced6fe615d848caf9613ddaf0e68a3.
+  Bundled Python 3.14.6, manylinux_2_28 audit, zero external/blacklisted native
+  libraries. Artifact root: artifacts/final-linux-6505d322. New fresh acceptance
+  is separate from the preceding 9b6888 candidate; no publication performed.
+- [x] Refreshed 6505d322 wheel passes its own fresh VPS venv acceptance: compiled
+  150-module imports, WBA/Socket.IO, server-integrity corruption/reinstall test,
+  framework health/version and eight built-ins. Native FWS pipe, uvloop selection,
+  latest ALS/FWS dependency resolution and pip consistency pass in that venv.
+  Receipt: acceptance/linux-6505d322/acceptance-result.json; complete install /
+  startup log: logs/linux-6505d322-acceptance.log. Shared runtimes untouched.
 - [x] Linux 9b6888 wheel candidate (99,526,422 bytes) installs in a fresh VPS
   Python 3.13 venv, independently loads bundled Python 3.14.6 and all 150 mypyc
   modules, and imports the actual packaged WBA/Socket.IO with Node 24.16.0.

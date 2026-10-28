@@ -480,19 +480,20 @@ function escapeHtml(value) {
 
 function simplifyAbsolute(path) {
   if (!path) return '/';
-  // Don't touch ~ paths - let backend handle them
-  if (path === '~' || path.startsWith('~/')) return path;
+  // Normalize below home, but retain leading .. for server-side resolution.
+  const homeRelative = path === '~' || path.startsWith('~/');
   const segments = [];
-  const parts = String(path).split('/');
+  const parts = (homeRelative ? path.slice(1) : String(path)).split('/');
   for (const part of parts) {
     if (!part || part === '.') continue;
     if (part === '..') {
-      if (segments.length) segments.pop();
+      if (segments.length && segments[segments.length - 1] !== '..') segments.pop();
+      else if (homeRelative) segments.push('..');
       continue;
     }
     segments.push(part);
   }
-  return '/' + segments.join('/');
+  return homeRelative ? '~' + (segments.length ? '/' + segments.join('/') : '') : '/' + segments.join('/');
 }
 
 function toAbsolute(path, base = DEFAULT_START) {
@@ -518,26 +519,8 @@ function toDisplayPath(absPath) {
 function parentPath(path) {
   const abs = simplifyAbsolute(path || DEFAULT_START);
   if (abs === '/' || abs === '') return '/';
-  
-  // Special handling for Termux paths
-  const TERMUX_FILES = '/data/data/com.termux/files';
-  const TERMUX_BASE = '/data/data/com.termux';
-  
-  // If we're at HOME_DIR, go up to /data/data/com.termux/files
-  if (abs === HOME_DIR) {
-    return TERMUX_FILES;
-  }
-  
-  // If we're at /data/data/com.termux/files, go up to /data/data/com.termux
-  if (abs === TERMUX_FILES) {
-    return TERMUX_BASE;
-  }
-  
-  // If we're at /data/data/com.termux, go up to /data/data
-  if (abs === TERMUX_BASE) {
-    return '/data/data';
-  }
-  
+  if (abs === '~' || (abs.startsWith('~/') && abs.endsWith('/..'))) return `${abs}/..`;
+
   // Normal parent directory logic
   const trimmed = abs.replace(/\/+$/, '');
   const idx = trimmed.lastIndexOf('/');

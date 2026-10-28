@@ -1,21 +1,24 @@
 // main_page/frontend/core/utils.ts — Pure utility functions for path manipulation and language detection
 
-export const HOME_DIR = '/data/data/com.termux/files/home';
+// The backend resolves home references on the server, never on the client.
+export const HOME_DIR = '~';
 export const HOME_PREFIX = `${HOME_DIR}/`;
 
 export function simplifyAbsolute(path: string | null | undefined): string {
   if (!path) return '/';
+  const homeRelative = path === '~' || path.startsWith('~/');
   const segments: string[] = [];
-  const parts = String(path).split('/');
+  const parts = (homeRelative ? path.slice(1) : path).split('/');
   for (const part of parts) {
     if (!part || part === '.') continue;
     if (part === '..') {
-      if (segments.length) segments.pop();
+      if (segments.length && segments[segments.length - 1] !== '..') segments.pop();
+      else if (homeRelative) segments.push('..');
       continue;
     }
     segments.push(part);
   }
-  return '/' + segments.join('/');
+  return homeRelative ? '~' + (segments.length ? '/' + segments.join('/') : '') : '/' + segments.join('/');
 }
 
 export function toAbsolute(path: string | null | undefined, base: string | null = null, homeDir = HOME_DIR): string {
@@ -32,7 +35,7 @@ export function toAbsolute(path: string | null | undefined, base: string | null 
 export function parentDir(path: string | null | undefined): string {
   const abs = toAbsolute(path || HOME_DIR);
   if (abs === '/' || abs === '') return '/';
-  if (abs === HOME_DIR) return '/';
+  if (abs === '~' || (abs.startsWith('~/') && abs.endsWith('/..'))) return `${abs}/..`;
   const trimmed = abs.replace(/\/+$/, '');
   const idx = trimmed.lastIndexOf('/');
   if (idx <= 0) return '/';
