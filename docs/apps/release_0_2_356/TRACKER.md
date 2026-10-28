@@ -1,5 +1,55 @@
 # 0.2.356 maintenance tracker
 
+## Current release package ledger — frozen source 920322c2
+
+This ledger supersedes the earlier candidate artifact hashes below. Source fixes
+and portable-home behavior are user live-accepted; exact rebuilt package checks
+are recorded separately. No main merge, TE2 tag or package publication yet.
+
+- [x] Commit/push 920322c236d81cce892d921fa91103b3c1937886 with accepted home
+  defaults and matching generated host/Android seed. User changes/untracked files
+  preserved; private rpw.txt remains locally excluded, never read or staged.
+- [x] Linux resource repack reuses hash-checked server/worker binaries and the
+  existing verified compiled-domain restore path. Native source diff is empty;
+  no Cargo or mypyc compilation. Wheel: 99,528,427 bytes; SHA256
+  255a7712411fff99ba6702eff79295ab02ffa5d75aca3895d6e11bd70c7c5ac7.
+  Fresh acceptance/linux-920322c2 venv passes all 150 module imports, WBA,
+  integrity/reinstall, framework health and eight-app discovery; pip check and
+  FWS native pipe/uvloop selection pass with ALS 0.2.140 and FWS 0.2.65.
+- [x] Pixel Android resource repack also uses the existing native binaries/domain.
+  Wheel: 50,433,643 bytes; SHA256
+  f44a4427ea2797a43120078676bfbfd0789ebf79455daebe58f5b4dac58fd04d.
+  Fresh acceptance-920322c2-venv passes 150 modules, actual WBA, native FWS pipe,
+  uvloop, ALS MCP 38 tools/one resource/EOF, dependency consistency and retired
+  stack absence. Wheel and receipts copied/hash-verified on VPS. This remains
+  validation-only until the existing clean-tag production-assembly guard is met.
+- [x] Inspect actual contents of both wheels: Home/~ JSON, shared picker and both
+  ordinary/compiled-domain host bundle copies match frozen-source SHA256 hashes.
+  Neither wheel contains source maps; both are below 100,000,000 bytes.
+  Artifacts: artifacts/final-{linux,android}-920322c2 under the VPS release root;
+  portable-home-inventory.json records actual ZIP resources, not source assumptions.
+- [x] Final VPS staging APK unit/assembly gates and signature/manifest/ARM64/
+  447-file seed checks pass. Artifact root: artifacts/final-apks-920322c2.
+  Gecko: 103,220,749 bytes; SHA256
+  549682191d2f8b282a0db2a2eb4f2e1cba6511b33068e19b2e86ba360e46d592.
+  Cefrium: 142,577,489 bytes; SHA256
+  acd3df95b889e8587ab7858320012341eacf2ec5805dafd68d697838659be44e.
+  Termux: 165,546,792 bytes; SHA256
+  36389315a23d49338fde5643934c1a0f13971e2bf126ee55ba036b30f90b8846.
+  ALS approval renderer present, zero source maps, expected development/public
+  Termux signers. Keep R8 maps and complete logs; no new optimization experiment.
+- [x] Final Termux homefix APK copy-only delivery to Pixel Downloads as
+  te2-0.2.356-termux-staging-homefix-arm64.apk. Transfer uses a .partial file;
+  SHA256 is verified on-device before rename. No installation/storage clear;
+  existing accepted APK copy preserved.
+- [x] Build second-root app template ZIP directly from frozen Git tree: exactly
+  six tracked source files under proxy_shell_wrapper/, no build/cache/user files.
+  artifacts/final-extras-920322c2/te2-second-root-app-template.zip; SHA256
+  db94d45f2f21d2a3e2e5d10a167b583eb24d41cb233931c6da5b3b6a468515e7.
+- [ ] Separate final wheel live-validation decision, main/tag and production-tag
+  Android rematerialization, final manifest/installers and publication
+  approval. Do not silently promote validation-only artifacts or rewrite receipts.
+
 ## Platform-agnostic filesystem home defaults — 2026-10-28
 
 - [x] User confirms preceding APKs live accepted before this asset-only follow-up.
