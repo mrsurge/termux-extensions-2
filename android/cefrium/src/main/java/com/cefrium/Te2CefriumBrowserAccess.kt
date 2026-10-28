@@ -14,6 +14,15 @@ object Te2CefriumBrowserAccess {
     @JvmStatic
     fun webContents(browser: CefriumBrowser): WebContents? = browser.webContents
 
+    /** Actual Chromium hard reload; CefriumBrowser.reload() uses CefBrowser::Reload. */
+    @JvmStatic
+    fun reloadBypassingCache(browser: CefriumBrowser): Boolean {
+        val contents = browser.webContents ?: return false
+        if (contents.isDestroyed) return false
+        contents.navigationController.reloadBypassingCache(true)
+        return true
+    }
+
     @JvmStatic
     fun disableGestureZoom(browser: CefriumBrowser): Boolean {
         ensureWebContentsConnected(browser)

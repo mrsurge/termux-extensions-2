@@ -460,11 +460,9 @@ class AndroidFrameworkRelay(
             return
         }
 
-        val cacheControl = if (requestPath.startsWith(ANDROID_SHELL_PREFIX)) {
-            "no-store"
-        } else {
-            "max-age=31536000, immutable"
-        }
+        // These stable URLs are replaced by APK seeding/OTA independently of the
+        // remote framework's ?v= value. They are not content-addressed assets.
+        val cacheControl = LOCAL_ASSET_CACHE_CONTROL
         val output = BufferedOutputStream(client.getOutputStream())
         output.write("HTTP/1.1 200 OK\r\n".bytes())
         output.write("Content-Type: ${contentType(file.name)}\r\n".bytes())

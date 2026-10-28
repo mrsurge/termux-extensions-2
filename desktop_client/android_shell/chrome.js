@@ -5,7 +5,31 @@ const titleBox = document.getElementById('chrome-title');
 const scaleDown = buttons.find(button => button.dataset.action === 'scale-down');
 const scaleReset = buttons.find(button => button.dataset.action === 'scale-reset');
 const scaleUp = buttons.find(button => button.dataset.action === 'scale-up');
+const quitButton = buttons.find(button => button.dataset.action === 'quit');
+let quitArmedUntil = 0;
+let quitTimer = null;
+function disarmQuit() {
+  if (quitTimer !== null) clearTimeout(quitTimer);
+  quitTimer = null;
+  quitArmedUntil = 0;
+  quitButton.dataset.armed = 'false';
+  quitButton.textContent = 'Quit';
+  quitButton.setAttribute('aria-pressed', 'false');
+  quitButton.setAttribute('aria-label', 'Quit current app');
+  quitButton.setAttribute('title', 'Quit current app');
+}
+function armQuit() {
+  disarmQuit();
+  quitArmedUntil = performance.now() + 3000;
+  quitButton.dataset.armed = 'true';
+  quitButton.textContent = 'Quit?';
+  quitButton.setAttribute('aria-pressed', 'true');
+  quitButton.setAttribute('aria-label', 'Tap again within three seconds to quit current app');
+  quitButton.setAttribute('title', 'Tap again within three seconds to quit current app');
+  quitTimer = setTimeout(disarmQuit, 3000);
+}
 let currentScale = 100;
+let currentAppId = null;
 let bridge = null;
 let disposed = false;
 let refresh = null;
@@ -15,6 +39,10 @@ function renderScaleLimits() {
 }
 function renderState(state) {
   if (disposed || !state || typeof state !== 'object') return;
+  if (typeof state.appId === 'string' && state.appId !== currentAppId) {
+    disarmQuit();
+    currentAppId = state.appId;
+  }
   const title = typeof state.title === 'string' && state.title.trim() ? state.title : 'TE2 Termux';
   titleBox.textContent = title;
   titleBox.title = title;
@@ -43,7 +71,11 @@ function ready() {
     .finally(() => { refresh = null; });
 }
 for (const button of buttons) button.addEventListener('click', async () => {
-  if (!bridge || button.disabled) return;
+  if (disposed || !bridge || button.disabled) return;
+  if (button.dataset.action === 'quit') {
+    if (performance.now() >= quitArmedUntil) { armQuit(); return; }
+    disarmQuit();
+  } else disarmQuit();
   button.disabled = true;
   errorBox.textContent = '';
   try { renderState(await window.te2Desktop.request('view_action', {action: button.dataset.action})); }
@@ -51,9 +83,12 @@ for (const button of buttons) button.addEventListener('click', async () => {
   finally { button.disabled = false; renderScaleLimits(); }
 });
 window.addEventListener('electromux:page-ready', ready);
+window.addEventListener('blur', disarmQuit);
 window.addEventListener('pagehide', () => {
   disposed = true;
+  disarmQuit();
   window.removeEventListener('electromux:page-ready', ready);
+  window.removeEventListener('blur', disarmQuit);
   bridge?.dispose();
   delete window.__electromuxReceiveEvent;
   delete window.te2Desktop;

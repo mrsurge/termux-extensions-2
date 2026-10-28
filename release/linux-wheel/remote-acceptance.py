@@ -229,8 +229,19 @@ def _print_server_command(te2: Path) -> Path:
         capture_output=True,
         text=True,
     )
-    command = result.stdout.strip()
-    if not command or "\n" in command:
+    lines = result.stdout.strip().splitlines()
+    # Manifest-driven worker selection reports its resolved executable before
+    # the final server command. Accept only that documented diagnostic shape;
+    # unrelated output must still fail, not silently become a command path.
+    prefix = '[te2] Native worker '
+    for line in lines[:-1]:
+        worker, separator, executable = line.removeprefix(prefix).partition(': ')
+        if (not line.startswith(prefix) or not separator or not worker
+                or any(character.isspace() for character in worker)
+                or not Path(executable).is_absolute()):
+            raise RuntimeError(f"unexpected te2 --print-command output: {result.stdout!r}")
+    command = lines[-1] if lines else ''
+    if not command or not Path(command).is_absolute():
         raise RuntimeError(f"unexpected te2 --print-command output: {result.stdout!r}")
     return Path(command).resolve()
 

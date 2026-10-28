@@ -9,15 +9,19 @@
 </head>
 <body>
   <nav aria-label="Application toolbar">
-    <button type="button" data-action="home" aria-label="Home" title="Home">⌂</button>
-    <button type="button" data-action="reload" aria-label="Reload" title="Reload">↻</button>
+    <div class="chrome-group chrome-navigation" role="group" aria-label="Navigation">
+      <button type="button" data-action="home" aria-label="Home" title="Home">⌂</button>
+      <button type="button" data-action="reload" aria-label="Reload" title="Reload">↻</button>
+    </div>
     <span id="chrome-title" title="TE2 Termux">TE2 Termux</span>
-    <button type="button" data-action="scale-down" aria-label="Decrease UI scale" title="Decrease UI scale">−</button>
-    <button type="button" data-action="scale-reset" aria-label="Reset UI scale" title="Reset UI scale to 100%">100%</button>
-    <button type="button" data-action="scale-up" aria-label="Increase UI scale" title="Increase UI scale">+</button>
+    <div class="chrome-group chrome-scaling" role="group" aria-label="UI scaling">
+      <button type="button" data-action="scale-down" aria-label="Decrease UI scale" title="Decrease UI scale">−</button>
+      <button type="button" data-action="scale-reset" aria-label="Reset UI scale" title="Reset UI scale to 100%">100%</button>
+      <button type="button" data-action="scale-up" aria-label="Increase UI scale" title="Increase UI scale">+</button>
+    </div>
     <button type="button" data-action="recents" aria-label="Recent apps" title="Recent apps"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="6" width="11" height="11" rx="1"/><path d="M6 3h11v11"/></svg></button>
-    <button type="button" data-action="quit">Quit</button>
-    <button type="button" data-action="tools" aria-label="Tools" title="Tools">⚒</button>
+    <button type="button" class="chrome-quit" data-action="quit" aria-label="Quit current app" title="Quit current app" aria-pressed="false">Quit</button>
+    <button type="button" data-action="tools" aria-label="Tools and settings" title="Tools and settings">⚒</button>
   </nav>
   <div id="chrome-error" role="status" aria-live="polite"></div>
   <script type="module" src="./chrome.js"></script>

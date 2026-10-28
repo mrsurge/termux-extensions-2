@@ -75,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var settingsStore: AndroidAppSettingsStore
     private lateinit var diagnostics: AndroidDiagnostics
     private lateinit var assetManager: EditorAssetManager
+    private lateinit var assetRefreshGate: CefriumAssetRefreshGate
     private lateinit var shellGateway: AndroidShellGateway
     private lateinit var toolsStateStore: AndroidToolsStateStore
     private lateinit var sidebarPresentationStore: AndroidSidebarPresentationStore
@@ -466,6 +467,23 @@ class MainActivity : AppCompatActivity() {
     private fun initializeAssetsAndRelay() {
         assetManager = EditorAssetManager(this)
         val seeded = assetManager.seedFromApk()
+        val cachePreferences = getSharedPreferences("cefrium_asset_cache_policy", MODE_PRIVATE)
+        assetRefreshGate = CefriumAssetRefreshGate(
+            revision = { "local-assets-no-store-v1:${assetManager.getLocalVersion() ?: "missing"}" },
+            readApplied = { cachePreferences.getString("applied_revision", null) },
+            writeApplied = { revision ->
+                cachePreferences.edit().putString("applied_revision", revision).commit().also {
+                    if (!it) Log.w(TAG, "Asset cache migration receipt could not be persisted")
+                }
+            },
+            reloadBypassingCache = {
+                if (!::browser.isInitialized || isDestroyed) false else {
+                    browser.clearCache()
+                    com.cefrium.Te2CefriumBrowserAccess.reloadBypassingCache(browser)
+                }
+            },
+            initiallyDirty = seeded,
+        )
         if (!assetManager.getAssetRoot().isDirectory) {
             throw IllegalStateException("APK assets did not create the local asset root")
         }
@@ -565,10 +583,14 @@ class MainActivity : AppCompatActivity() {
                 termuxNavigationLoading = isLoading
                 this.canNavigateBack = canGoBack
                 if (isLoading) {
+                    assetRefreshGate.onLoadingStarted()
                     mainViewport.suspend()
                     mainBrowserReady = false
                 }
                 if (!isLoading) {
+                    if (inAppShell && isRelayOrigin(browser.url) && assetRefreshGate.onDocumentReady()) {
+                        return@runOnUiThread
+                    }
                     mainViewport.reapply()
                     selectionIntegration.installWhenReady()
                     browser.evaluateJavaScript(CefriumPagePolicy.installScript())
@@ -1330,8 +1352,7 @@ class MainActivity : AppCompatActivity() {
                         ).show()
                         consoleTitle.text = "Tools · v$serverVersion"
                         if (inAppShell) {
-                            browser.clearCache()
-                            browser.reload()
+                            refreshBrowserAssets()
                         }
                     }
                 }
@@ -1375,8 +1396,7 @@ class MainActivity : AppCompatActivity() {
                             Toast.LENGTH_SHORT,
                         ).show()
                     }
-                    browser.clearCache()
-                    browser.reload()
+                    refreshBrowserAssets()
                     if (showFeedback) hideTools()
                 } else if (showFeedback) {
                     Toast.makeText(this, "Asset update failed", Toast.LENGTH_SHORT).show()
@@ -1387,10 +1407,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun flushBrowserCache() {
-        browser.clearCache()
-        browser.reload()
+        refreshBrowserAssets()
         Toast.makeText(this, "Browser cache flushed", Toast.LENGTH_SHORT).show()
         hideTools()
+    }
+
+    private fun refreshBrowserAssets() {
+        assetRefreshGate.invalidate()
+        if (inAppShell) {
+            if (!assetRefreshGate.requestRefresh()) {
+                Log.w(TAG, "Asset bypass reload deferred until Chromium WebContents is ready")
+            }
+        } else {
+            // Launcher assets are already no-store; keep the migration pending
+            // until a framework document (and its embedded apps) is loaded.
+            browser.clearCache()
+            browser.reload()
+        }
     }
 
     private fun toggleTools() {

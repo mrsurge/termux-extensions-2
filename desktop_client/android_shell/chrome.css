@@ -1,7 +1,12 @@
 :root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #050c1f; color: #dae1ee; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
-nav { display: flex; align-items: center; gap: 3px; height: 44px; padding: 0 4px; overflow-x: auto; scrollbar-width: none; }
+nav { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 4px; overflow-x: auto; scrollbar-width: none; }
+.chrome-group { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }
+.chrome-navigation { gap: 8px; }
+.chrome-scaling { gap: 2px; }
+.chrome-quit { margin-inline: 4px; min-width: 6ch; }
+.chrome-quit[data-armed="true"] { background: #6e2634; border-color: #d77887; }
 button { flex: 0 0 auto; min-width: 32px; height: 44px; padding: 0 6px; border: 1px solid #263249; border-radius: 5px; background: #111b2e; color: inherit; font: inherit; touch-action: manipulation; }
 #chrome-title { flex: 1 1 auto; min-width: 24px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; padding-inline: 3px; }
 button[data-action="scale-reset"] { min-width: 44px; padding-inline: 3px; font-size: 12px; }

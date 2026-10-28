@@ -16,6 +16,8 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
+internal const val LOCAL_ASSET_CACHE_CONTROL = "no-store"
+
 data class LocalHttpRequest(
     val method: String,
     val path: String,
@@ -211,12 +213,9 @@ class LocalAssetServer(
         }
 
         Log.d(TAG, "Serving $requestPath -> $relativePath")
-        val cacheControl = if (requestPath.startsWith("/android-shell/") ||
-            assetPath.startsWith("/apps/als_rs/frontend/static/")) {
-            "no-store"
-        } else {
-            "max-age=31536000, immutable"
-        }
+        // APK/OTA replacements keep the same resource URL, including when the
+        // remote framework has an older version query. Never cache stale bytes.
+        val cacheControl = LOCAL_ASSET_CACHE_CONTROL
         sendFile(client, file, guessMimeType(file.name), cacheControl)
     }
 

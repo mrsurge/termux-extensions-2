@@ -1,5 +1,16 @@
 # 0.2.357 plan
 
+## Release dependency order: wheels before APKs
+
+User requires this order beginning with the next release (2026-10-28): finish
+and jointly validate companion/runtime wheels on Linux and Termux first, then
+make those exact versions available to the APK install/start workflow, then
+freeze/bundle/build the APKs and perform device acceptance against those wheels.
+APK-local assets do not remove the dependency on the installed framework/editor
+backend. Do not present a new APK tested against an older backend as complete
+release validation. Preserve separate wheel and APK acceptance gates; do not
+start final APK packaging before its wheel prerequisites are ready.
+
 ## Fail-closed built-in asset routing
 
 Deferred from .356 by the user on 2026-10-27 to preserve the release schedule.
