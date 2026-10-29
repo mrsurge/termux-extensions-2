@@ -4,7 +4,8 @@
 
 This ledger supersedes the earlier candidate artifact hashes below. Source fixes
 and portable-home behavior are user live-accepted; exact rebuilt package checks
-are recorded separately. No main merge, TE2 tag or package publication yet.
+are recorded separately. Release 0.2.356 is now merged, tagged and published;
+the production Android wheel receipt below supersedes the validation-only hash.
 
 - [x] Commit/push 920322c236d81cce892d921fa91103b3c1937886 with accepted home
   defaults and matching generated host/Android seed. User changes/untracked files
@@ -46,9 +47,34 @@ are recorded separately. No main merge, TE2 tag or package publication yet.
   six tracked source files under proxy_shell_wrapper/, no build/cache/user files.
   artifacts/final-extras-920322c2/te2-second-root-app-template.zip; SHA256
   db94d45f2f21d2a3e2e5d10a167b583eb24d41cb233931c6da5b3b6a468515e7.
-- [ ] Separate final wheel live-validation decision, main/tag and production-tag
-  Android rematerialization, final manifest/installers and publication
-  approval. Do not silently promote validation-only artifacts or rewrite receipts.
+- [x] User approves proceeding through final release gates after the wheel
+  acceptance status recap. Record automated wheel checks separately from the
+  earlier user APK/source acceptance; no new GUI acceptance is invented.
+- [x] Fast-forward origin/main to cae18996 (accepted source plus receipt-only
+  commit); annotated 0.2.356 tag points at frozen source 920322c2. Existing
+  validation-only wheel is preserved, not relabeled.
+- [x] Production Android wheel rematerialized on Pixel from the same native
+  binaries/domain with --release-tag 0.2.356 and clean source/tag guard. Wheel:
+  50,433,629 bytes; SHA256
+  dbef3c8f976a58beabca400a45d0a75b66158200e1edfac4e0753575951cd14d.
+  publicationEligible=true; server/worker hashes unchanged. Separate fresh
+  acceptance-production-venv passes 150 compiled-module imports, actual WBA,
+  native FWS pipe, uvloop, ALS MCP 38 tools/one resource/EOF, pip check and
+  retired-dependency absence. Pixel workspace remains under ~/projects/.
+- [x] Assemble clean-tag public manifest/installers, both wheels, three accepted
+  APK resource packages and second-root template. All local SHA256SUMS pass.
+  VPS artifacts/public-0.2.356; provenance/acceptance receipts retained under
+  artifacts/production-android and receipts/. No shared runtime replacement.
+- [x] Publish both wheels to PyPI; public PyPI JSON sizes/hashes match the exact
+  qualified wheels. Publish GitHub 0.2.356 as latest with ten assets including
+  manifest, checksums and installers. No source distribution is uploaded to PyPI.
+  https://pypi.org/project/te2/0.2.356/
+  https://github.com/mrsurge/termux-extensions-2/releases/tag/0.2.356
+- [x] Stream all ten actual public GitHub downloads through SHA256 and compare
+  against local release bytes; all pass. Public PyPI filename set, sizes and
+  hashes also match both release wheels. Receipt:
+  artifacts/public-0.2.356-verification.json on VPS. Release tag remains frozen;
+  final publication receipts are a documentation-only follow-up commit.
 
 ## Platform-agnostic filesystem home defaults — 2026-10-28
 
