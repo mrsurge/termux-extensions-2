@@ -4,7 +4,7 @@ import v8 from "node:v8";
 import path from "node:path";
 import process from "node:process";
 import { Buffer } from "node:buffer";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AdapterHttpRequest, AdapterHttpResponse, AdapterHttpHandler } from "./http-types.ts";
 import type {
   EditorWbaRequestContext,
   EditorWbaSocketServer,
@@ -307,7 +307,7 @@ function vscodeRemoteUri(authority: string, fsPath: string): string {
   return `vscode-remote://${authority}${pathPart}`;
 }
 
-function jsonResponse(res: ServerResponse, code: number, obj: unknown): void {
+function jsonResponse(res: AdapterHttpResponse, code: number, obj: unknown): void {
   const body = JSON.stringify(obj);
   res.writeHead(code, {
     "content-type": "application/json; charset=utf-8",
@@ -317,7 +317,7 @@ function jsonResponse(res: ServerResponse, code: number, obj: unknown): void {
   res.end(body);
 }
 
-function textResponse(res: ServerResponse, code: number, text: string): void {
+function textResponse(res: AdapterHttpResponse, code: number, text: string): void {
   res.writeHead(code, {
     "content-type": "text/plain; charset=utf-8",
     "content-length": Buffer.byteLength(text),
@@ -327,7 +327,7 @@ function textResponse(res: ServerResponse, code: number, text: string): void {
 }
 
 function bodyResponse(
-  res: ServerResponse,
+  res: AdapterHttpResponse,
   code: number,
   body: string | Uint8Array,
   contentType: string,
@@ -358,7 +358,7 @@ function httpOrigin(value: unknown): string {
 }
 
 async function readJson(
-  req: IncomingMessage,
+  req: AdapterHttpRequest,
   maxBytes = 2 * 1024 * 1024,
 ): Promise<unknown | null> {
   const chunks: Buffer[] = [];
@@ -665,7 +665,7 @@ const loadWebviewCodec = createStaticAssetLoader(new URL("../protocol/messagepac
 const loadSocketIoClient = createStaticAssetLoader(new URL(
   "../../../../vendor/node_socketio/node_modules/socket.io/client-dist/socket.io.min.js", import.meta.url,
 ));
-const server = http.createServer(async (req, res) => {
+const handleHttp: AdapterHttpHandler = async (req, res) => {
   try {
     const url = new URL(
       req.url ?? "/",
@@ -695,7 +695,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return jsonResponse(res, 200, { ok: true, ts_ms: nowMs(), io: runtimeIo });
+      return jsonResponse(res, 200, { ok: true, ts_ms: nowMs(), io: runtimeIo, socketEngine });
     }
 
     if (
@@ -797,15 +797,33 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     return jsonResponse(res, 500, { ok: false, error: errorMessage(e) });
   }
-});
+};
+
+// Node must never import Bun-only code. Missing optional code falls back;
+// an installed but broken engine is a startup error, not a silent downgrade.
+let bunEngine: ReturnType<typeof import("./bun-engine.ts").createBunEngine> | null = null;
+if (process.versions.bun && process.env.TE2_WBA_BUN_ENGINE !== "0") {
+  try {
+    const { createBunEngine } = await import("./bun-engine.ts");
+    bunEngine = createBunEngine(editorSocketMod.WBA_SOCKET_PATH);
+  } catch (error) {
+    const code = isRecord(error) ? error.code : null;
+    const message = errorMessage(error);
+    const missingOptional = /Cannot find (?:module|package) ["'](?:@socket\.io\/bun-engine|[^"']*\/bun-engine\.(?:mjs|ts))["']/.test(message);
+    if ((code !== "ERR_MODULE_NOT_FOUND" && code !== "MODULE_NOT_FOUND") || !missingOptional) throw error;
+    console.error("[wba/socket] optional Bun engine unavailable; using standard Socket.IO");
+  }
+}
+const socketEngine = bunEngine ? "@socket.io/bun-engine" : "engine.io";
+const server = bunEngine ? null : http.createServer(handleHttp);
 
 editorWbaSocketServer = attachEditorWbaSocket(server, {
   handleJsonRpc,
   nowMs,
   log: (...args: unknown[]) => console.log(...args),
-});
+}, bunEngine ? io => bunEngine?.bind(io) : undefined);
 
-server.listen(PORT, HOST, () => {
+function onListening(): void {
   if (/^(1|true|yes|on)$/i.test(String(process.env.TE2_RUNTIME_DEBUG ?? '').trim())) {
     console.error('[startup_timing]', JSON.stringify({
       appId: 'code_te2.wba', pid: process.pid, phase: 'socket.listener.ready', unixMs: Date.now(),
@@ -816,12 +834,19 @@ server.listen(PORT, HOST, () => {
     encodeStartupBeacon({
       type: "adapter/start",
       io: runtimeIo,
+      socketEngine,
       ts_ms: nowMs(),
       listen: `http://${HOST}:${PORT}`,
       config: state.config,
     }),
   );
-});
+}
+if (bunEngine) {
+  bunEngine.listen(HOST, PORT, handleHttp);
+  onListening();
+} else {
+  server?.listen(PORT, HOST, onListening);
+}
 
 // Process-pipe RPC keeps requests concurrent so readiness/control calls cannot
 // block one another. Frame errors are fatal; ordinary RPC errors remain replies.

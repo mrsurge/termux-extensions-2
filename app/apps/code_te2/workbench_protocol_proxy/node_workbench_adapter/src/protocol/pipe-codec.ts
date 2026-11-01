@@ -1,5 +1,7 @@
-import { encode as encodeMessagePack } from "@msgpack/msgpack";
-import { Unpackr } from "msgpackr/unpack";
+import {
+  createServerMessagePackDecoder,
+  encodeWbaRpcMessage,
+} from "./server-messagepack-codec.ts";
 
 export const MAX_PIPE_FRAME_BYTES = 32 * 1024 * 1024;
 
@@ -8,7 +10,7 @@ export const MAX_PIPE_FRAME_BYTES = 32 * 1024 * 1024;
 export class PipeMessagePackDecoder {
   private pending: Uint8Array = new Uint8Array();
   private pendingLength = 0;
-  private readonly decoder = new Unpackr({ useRecords: false, mapsAsObjects: true });
+  private readonly decoder = createServerMessagePackDecoder();
 
   constructor(private readonly limit = MAX_PIPE_FRAME_BYTES) {
     if (!Number.isSafeInteger(limit) || limit <= 0) throw new Error("Invalid pipe frame limit");
@@ -64,7 +66,7 @@ export class PipeMessagePackDecoder {
 }
 
 export function encodePipeMessage(payload: unknown): Uint8Array {
-  const frame = encodeMessagePack(payload, { ignoreUndefined: true });
+  const frame = encodeWbaRpcMessage(payload);
   if (frame.length > MAX_PIPE_FRAME_BYTES) throw new Error("MessagePack pipe frame exceeds limit");
   return frame;
 }

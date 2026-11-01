@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { Writable } from "node:stream";
+import { serverCodecStatus } from "../protocol/server-messagepack-codec.ts";
 
 interface BunFileRuntime {
   file(path: URL): { arrayBuffer(): Promise<ArrayBuffer> };
@@ -13,6 +14,7 @@ export const runtimeIo = {
   version: process.versions.bun ?? process.versions.node,
   fileReader: process.versions.bun && bun ? "bun.file" : "node:fs",
   socketEngine: "engine.io-node-compatible",
+  messagePack: serverCodecStatus(),
 } as const;
 
 export async function readRuntimeFile(path: URL): Promise<Uint8Array> {

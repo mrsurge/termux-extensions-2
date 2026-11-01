@@ -1,6 +1,9 @@
 import { build, context } from "esbuild";
+import { wbaRuntimeImports } from "../../scripts/wba-runtime-imports.mjs";
+import { bunEngineBuildConfig } from "../../scripts/wba-bun-engine-build.mjs";
 
 const isWatch = process.argv.includes("--watch");
+const bunEngineConfig = await bunEngineBuildConfig('.', isWatch);
 
 const moduleConfig = {
   entryPoints: [
@@ -53,6 +56,7 @@ const moduleConfig = {
   outdir: "dist",
   outbase: "src",
   bundle: false,
+  plugins: [wbaRuntimeImports],
   platform: "node",
   format: "esm",
   target: "node20",
@@ -81,16 +85,31 @@ const pipeCodecConfig = {
   ...codecConfig,
   entryPoints: ["src/protocol/pipe-codec.ts"],
   outfile: "dist/protocol/pipe-codec.mjs",
+  bundle: false,
+  platform: "node",
+  plugins: [wbaRuntimeImports],
+};
+
+const serverCodecConfig = {
+  ...codecConfig,
+  entryPoints: ["src/protocol/server-messagepack-codec.ts"],
+  outfile: "dist/protocol/server-messagepack-codec.mjs",
+  platform: "node",
+  mainFields: ["main", "module"],
+  external: ["msgpackr-extract"],
+  banner: { js: 'import { createRequire as createCodecRequire } from "node:module"; const require = createCodecRequire(import.meta.url);' },
 };
 
 if (isWatch) {
-  const [moduleCtx, codecCtx, pipeCodecCtx] = await Promise.all([
+  const [moduleCtx, codecCtx, pipeCodecCtx, serverCodecCtx] = await Promise.all([
     context(moduleConfig),
     context(codecConfig),
     context(pipeCodecConfig),
+    context(serverCodecConfig),
   ]);
-  await Promise.all([moduleCtx.watch(), codecCtx.watch(), pipeCodecCtx.watch()]);
+  const bunEngineCtx = bunEngineConfig ? await context(bunEngineConfig) : null;
+  await Promise.all([moduleCtx.watch(), codecCtx.watch(), pipeCodecCtx.watch(), serverCodecCtx.watch(), ...(bunEngineCtx ? [bunEngineCtx.watch()] : [])]);
   console.log("Watching Workbench Adapter TypeScript...");
 } else {
-  await Promise.all([build(moduleConfig), build(codecConfig), build(pipeCodecConfig)]);
+  await Promise.all([build(moduleConfig), build(codecConfig), build(pipeCodecConfig), build(serverCodecConfig), ...(bunEngineConfig ? [build(bunEngineConfig)] : [])]);
 }

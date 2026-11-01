@@ -51,6 +51,70 @@ async function panelHarness(t, options = {}) {
   } };
 }
 
+async function webviewMessageCodec(t, enabled = true) {
+  const { runtime, surface } = await panelHarness(t);
+  const source = wrapperModuleSource(runtime.wrapper(surface.surfaceId));
+  const declarations = source.split('\n').filter(line =>
+    line.startsWith('const typedArrayNames=') ||
+    line.startsWith('function serialize(value)') ||
+    line.startsWith('function deserialize(jsonMessage,buffers)'));
+  assert.equal(declarations.length, 3);
+  const context = vm.createContext({ ArrayBuffer, Uint8Array, Int8Array, Uint8ClampedArray,
+    Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array,
+    BigInt64Array, BigUint64Array });
+  vm.runInContext(`let serializeBuffers=${enabled};\n${declarations.join('\n')}\nglobalThis.codec={serialize,deserialize};`, context);
+  return context.codec;
+}
+
+test('webview bytes use VS Code numeric view IDs, not constructor-name strings', async t => {
+  const codec = await webviewMessageCodec(t);
+  const json = JSON.stringify(['bytes', { $$vscode_array_buffer_reference$$: true,
+    index: 0, view: { type: 2, byteLength: 3, byteOffset: 1 } }]);
+  const decoded = codec.deserialize(json, [Uint8Array.of(90, 1, 2, 255, 80)]);
+  assert.ok(decoded[1] instanceof Uint8Array, 'Codex requires bytes to remain a Uint8Array');
+  assert.deepEqual([...decoded[1]], [1, 2, 255]);
+  assert.equal(decoded[1].byteOffset, 1);
+  const encoded = codec.serialize(decoded);
+  assert.equal(JSON.parse(encoded.jsonMessage)[1].view.type, 2);
+  assert.deepEqual([...encoded.buffers[0]], [90, 1, 2, 255, 80]);
+});
+
+test('all eleven VS Code typed-array IDs preserve offsets, lengths and shared backing storage', async t => {
+  const codec = await webviewMessageCodec(t);
+  const constructors = [Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array,
+    Int32Array, Uint32Array, Float32Array, Float64Array, BigInt64Array, BigUint64Array];
+  const backing = new ArrayBuffer(64);
+  new Uint8Array(backing).fill(17);
+  const views = constructors.map(Ctor => new Ctor(backing, Ctor.BYTES_PER_ELEMENT, 2));
+  const encoded = codec.serialize({ backing, duplicate: backing, views });
+  assert.equal(encoded.buffers.length, 1, 'shared storage must not be split per view');
+  const wire = JSON.parse(encoded.jsonMessage);
+  assert.deepEqual(wire.views.map(view => view.view.type), [1,2,3,4,5,6,7,8,9,10,11]);
+  const decoded = codec.deserialize(encoded.jsonMessage, encoded.buffers);
+  assert.ok(decoded.backing instanceof ArrayBuffer);
+  assert.equal(decoded.backing, decoded.duplicate);
+  decoded.views.forEach((view, index) => {
+    const Ctor = constructors[index];
+    assert.ok(view instanceof Ctor);
+    assert.equal(view.buffer, decoded.backing);
+    assert.equal(view.byteOffset, Ctor.BYTES_PER_ELEMENT);
+    assert.equal(view.length, 2);
+    assert.deepEqual([...new Uint8Array(view.buffer)], [...new Uint8Array(backing)]);
+  });
+});
+
+test('webview codec leaves JSON-only mode intact and rejects invalid binary references', async t => {
+  const codec = await webviewMessageCodec(t, false);
+  assert.equal(codec.serialize({ hello: 'world' }).jsonMessage, '{"hello":"world"}');
+  assert.equal(codec.serialize({ hello: 'world' }).buffers.length, 0);
+  const ref = { $$vscode_array_buffer_reference$$: true, index: 0,
+    view: { type: 'Uint8Array', byteLength: 1, byteOffset: 0 } };
+  assert.throws(() => codec.deserialize(JSON.stringify(ref), [Uint8Array.of(1)]), /view type/);
+  assert.throws(() => codec.deserialize(JSON.stringify({ ...ref, index: 2 }), []), /buffer index/);
+  const cyclic = {}; cyclic.self = cyclic;
+  assert.throws(() => codec.serialize(cyclic), /circular|cyclic/i);
+});
+
 test("inner document waits for load and fences ready, messages and link clicks by incarnation", async t => {
   const { runtime, surface, attached } = await panelHarness(t);
   const html = runtime.document(surface.surfaceId, "http://127.0.0.1:8089", attached.bootstrapToken);

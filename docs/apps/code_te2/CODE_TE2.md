@@ -159,6 +159,13 @@ For `code_te2`, we intentionally separate responsibilities:
 - **App worker Socket.IO transport**: canonical public path `/api/app/code_te2/socket.io`, worker mount `/socket.io/`, namespaces `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`.
 - **Legacy app Socket.IO aliases**: `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`, and `/terminal_ws/socket.io` route to the same worker service declared by `sio_service.json`.
 - **Editor WBA transport**: canonical public path `/api/app/code_te2/services/wba/socket.io`, WBA namespace `/wba`, legacy alias `/wba_ws/socket.io`.
+  Under Bun (including native AOT), the optional bundled `@socket.io/bun-engine`
+  owns the native HTTP/WebSocket listener. Node, a missing optional module, or
+  `TE2_WBA_BUN_ENGINE=0` retain standard Engine.IO. Both paths share HTTP/RPC
+  handlers, namespace/identity checks and MessagePack; there is no additional
+  loopback proxy. Startup and `/health` expose `socketEngine`. An installed but
+  broken engine fails startup rather than being silently ignored. The code-server
+  UDS factory must leave the runtime's native global `WebSocket` intact.
 - **Execution**:
   - Worker owns drafts/saves/versioning and host/explorer state.
   - Rust pipe services own filesystem, Git, and search DTO production.
@@ -217,7 +224,7 @@ Spinner / Status indicator (host UI):
 
 ## 0.6) Current cross-cutting contracts
 
-- Explorer, direct editor/WBA, and UI IPC use strict `msgpack-v1` application payloads on their Socket.IO namespaces. Editor/Python additionally negotiates `msgpack-gzip-v1`: raw framed outbound browser requests and selectively gzip-compressed native replies/notifications. Legacy editor clients retain `msgpack-v1`. Browser codecs are owned by `src/rpc/codec.ts` and `gzip-codec.ts`; native encoding/decoding is owned by `framework/native_editor_worker/src/rpc_codec.rs`; WBA runtime encoding is owned by `workbench_protocol_proxy/node_workbench_adapter/src/protocol/messagepack-codec.ts`. Python frontend handlers exchange DTOs, not encoded bytes. See the native-worker README's **Frontend RPC codec boundary** for envelope limits, ordered async decoding and matched publication requirements.
+- Explorer, direct editor/WBA, and UI IPC use strict `msgpack-v1` application payloads on their Socket.IO namespaces. Editor/Python additionally negotiates `msgpack-gzip-v1`: raw framed outbound browser requests and selectively gzip-compressed native replies/notifications. Legacy editor clients retain `msgpack-v1`. Browser codecs are owned by `src/rpc/codec.ts` and `gzip-codec.ts`; native encoding/decoding is owned by `framework/native_editor_worker/src/rpc_codec.rs`; WBA server/pipe encoding is owned by `workbench_protocol_proxy/node_workbench_adapter/src/protocol/server-messagepack-codec.ts` (msgpackr, optional native extraction with JS fallback), while its browser-served webview codec remains `messagepack-codec.ts` (@msgpack/msgpack). Both use interoperable standard MessagePack maps. Python frontend handlers exchange DTOs, not encoded bytes. See the native-worker README's **Frontend RPC codec boundary** for envelope limits, ordered async decoding and matched publication requirements.
 - Sidebar IPC retains its current codec. Migrating `/ui_ipc` must not implicitly change the sibling `/sidebar_ipc` namespace.
 - Shared document membership is the bounded `ProjectSidecar` recent/logical-document set. Each stable `clientInstanceId` owns one backend-projected foreground path through `open_state_backend.py`; `ProjectSidecar.last_file` is only a one-time migration seed. Frontend `currentPath` values are exact-client projections.
 - Shared content projections carry a durable per-path `document_revision` drawn from one monotonic project stream. Matched frontends reject missing or lower revisions before changing Monaco or active-path chrome; equal revisions are valid for the correlated mirror/cache pair emitted by one backend transition.

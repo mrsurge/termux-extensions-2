@@ -3,10 +3,10 @@ import type { Server as HttpServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Server as SocketIoServerCtor } from "socket.io";
 import {
-  WBA_RPC_CODEC_MSGPACK_V1,
   decodeWbaRpcMessage,
   encodeWbaRpcMessage,
-} from "../protocol/messagepack-codec.ts";
+} from "../protocol/server-messagepack-codec.ts";
+import { WBA_RPC_CODEC_MSGPACK_V1 } from "../protocol/messagepack-codec.ts";
 
 type SocketIoModule = {
   Server: typeof SocketIoServerCtor;
@@ -85,20 +85,25 @@ function shouldDeliverReply(
 }
 
 export function attachEditorWbaSocket(
-  httpServer: HttpServer,
+  httpServer: HttpServer | null,
   runtime: EditorWbaSocketRuntime,
+  bindEngine?: (io: InstanceType<typeof SocketIoServer<RpcEvents, RpcEvents, Record<string, never>, SocketData>>) => void,
 ): EditorWbaSocketServer {
-  const io = new SocketIoServer<RpcEvents, RpcEvents, Record<string, never>, SocketData>(httpServer, {
+  const options = {
     path: WBA_SOCKET_PATH,
     serveClient: false,
-    transports: ["websocket"],
+    transports: ["websocket"] as ["websocket"],
     // Leave connectionStateRecovery unset; explicit adapter resync owns reconnect state.
     cors: {
       origin: true,
       credentials: true,
     },
     maxHttpBufferSize: 8 * 1024 * 1024,
-  });
+  };
+  const io = httpServer
+    ? new SocketIoServer<RpcEvents, RpcEvents, Record<string, never>, SocketData>(httpServer, options)
+    : new SocketIoServer<RpcEvents, RpcEvents, Record<string, never>, SocketData>(options);
+  if (bindEngine) bindEngine(io);
   const namespace = io.of(WBA_SOCKET_NAMESPACE);
   // Correlate transport arrival with the browser manager, before namespace auth.
   let startupTransportEvents = 0;

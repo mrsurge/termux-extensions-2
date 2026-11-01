@@ -7,10 +7,12 @@ import { buildTree } from './src/explorer/history/vscode_scm/tree/build.mjs';
 import { readFileSync } from 'node:fs';
 import { validateCache } from '../../../scripts/build_textmate_cache.mjs';
 import { wbaRuntimeImports } from './scripts/wba-runtime-imports.mjs';
+import { bunEngineBuildConfig } from './scripts/wba-bun-engine-build.mjs';
 
 validateCache(JSON.parse(readFileSync('monaco_editor/textmate/markdown-cache.json', 'utf8')));
 
 const isWatch = process.argv.includes('--watch');
+const bunEngineConfig = await bunEngineBuildConfig('workbench_protocol_proxy/node_workbench_adapter', isWatch);
 
 async function copyHostCss() {
   await mkdir('static/dist', { recursive: true });
@@ -116,6 +118,8 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/server/server.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/stdio-protocol.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/webview-resource-response.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/server/error-format.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/server/runtime-io.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/workspace/document-registry.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/workspace/file-search.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/workspace/lifecycle.ts',
@@ -155,16 +159,32 @@ const workbenchAdapterPipeCodecConfig = {
   ...workbenchAdapterCodecConfig,
   entryPoints: ['workbench_protocol_proxy/node_workbench_adapter/src/protocol/pipe-codec.ts'],
   outfile: 'workbench_protocol_proxy/node_workbench_adapter/dist/protocol/pipe-codec.mjs',
+  bundle: false,
+  platform: 'node',
+  plugins: [wbaRuntimeImports],
+};
+
+// Bundle the portable implementation; the optional native addon stays external.
+const workbenchAdapterServerCodecConfig = {
+  ...workbenchAdapterCodecConfig,
+  entryPoints: ['workbench_protocol_proxy/node_workbench_adapter/src/protocol/server-messagepack-codec.ts'],
+  outfile: 'workbench_protocol_proxy/node_workbench_adapter/dist/protocol/server-messagepack-codec.mjs',
+  platform: 'node',
+  mainFields: ['main', 'module'],
+  external: ['msgpackr-extract'],
+  banner: { js: 'import { createRequire as createCodecRequire } from "node:module"; const require = createCodecRequire(import.meta.url);' },
 };
 
 if (isWatch) {
-  const [hostCtx, workbenchAdapterCtx, workbenchAdapterCodecCtx, pipeCodecCtx, preparationCtx] = await Promise.all([
+  const [hostCtx, workbenchAdapterCtx, workbenchAdapterCodecCtx, pipeCodecCtx, preparationCtx, serverCodecCtx] = await Promise.all([
     context(hostConfig),
     context(workbenchAdapterConfig),
     context(workbenchAdapterCodecConfig),
     context(workbenchAdapterPipeCodecConfig),
     context(preparationConfig),
+    context(workbenchAdapterServerCodecConfig),
   ]);
+  const bunEngineCtx = bunEngineConfig ? await context(bunEngineConfig) : null;
   await copyHostCss();
   await Promise.all([
     hostCtx.watch(),
@@ -172,6 +192,8 @@ if (isWatch) {
     pipeCodecCtx.watch(),
     workbenchAdapterCtx.watch(),
     workbenchAdapterCodecCtx.watch(),
+    serverCodecCtx.watch(),
+    ...(bunEngineCtx ? [bunEngineCtx.watch()] : []),
   ]);
   console.log('Watching for changes...');
 } else {
@@ -181,6 +203,8 @@ if (isWatch) {
     build(workbenchAdapterConfig),
     build(workbenchAdapterCodecConfig),
     build(workbenchAdapterPipeCodecConfig),
+    build(workbenchAdapterServerCodecConfig),
+    ...(bunEngineConfig ? [build(bunEngineConfig)] : []),
   ]);
   await copyHostCss();
 }

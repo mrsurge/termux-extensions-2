@@ -312,8 +312,8 @@ class UdsWebSocket {
   }
 }
 
-// The adapter relies on code-server's UDS WebSocket endpoint; no network fallback is valid.
-globalThis.WebSocket = UdsWebSocket;
+// Code-server uses UdsWebSocket explicitly below. Do not replace the runtime's
+// global WebSocket: the optional Bun engine needs its native ready-state constants.
 
 class NodeWebSocket {
   constructor({ socketPath, requestPath, headers = {}, debugUrl }) {

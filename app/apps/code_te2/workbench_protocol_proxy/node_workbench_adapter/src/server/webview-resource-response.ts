@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AdapterHttpRequest, AdapterHttpResponse } from "./http-types.ts";
 import {
   brotliCompress,
   constants as zlibConstants,
@@ -74,8 +74,8 @@ function brotliAsync(payload: Buffer): Promise<Buffer> {
 }
 
 export async function sendWebviewResourceResponse(
-  req: IncomingMessage,
-  res: ServerResponse,
+  req: Pick<AdapterHttpRequest, "headers">,
+  res: AdapterHttpResponse,
   resource: WebviewResourceBody,
 ): Promise<void> {
   const commonHeaders: Record<string, string> = {
@@ -97,7 +97,7 @@ export async function sendWebviewResourceResponse(
   const encoding =
     original.byteLength >= 1024 &&
     compressibleWebviewContent(resource.contentType)
-      ? preferredContentEncoding(req.headers["accept-encoding"])
+      ? preferredContentEncoding(typeof req.headers["accept-encoding"] === "string" ? req.headers["accept-encoding"] : undefined)
       : null;
   const payload =
     encoding === "br"
