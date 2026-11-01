@@ -216,10 +216,13 @@ async function reconstructionStorage(t) {
   return root;
 }
 
-async function waitFor(predicate, message, attempts = 100) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+async function waitFor(predicate, message, timeoutMs = 5000) {
+  // Bun can execute 100 zero-delay ticks before Android filesystem-backed
+  // reconstruction completes. Bound elapsed time, not event-loop iteration count.
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.fail(message);
 }

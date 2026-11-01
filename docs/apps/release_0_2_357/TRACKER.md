@@ -169,8 +169,10 @@ exit-127 logs, then used Bash time in v2/v3 without installing system packages.
   No mypyc/Rust/frontend OTA/APK change
   is required for this server-only WBA integration. User reports works and fast;
   checkpoint/Pixel PoC now tracked in docs/apps/wba_bun_aot/TRACKER.md.
-- [ ] Pixel Termux compile test with user's ~/bun-binary, after this comparison;
-  user approves dedicated branch and visible ~/te2-android workspace.
+- [x] Pixel Termux native compile and isolated protocol test with user's
+  ~/bun-binary pass. Source checkpoint be6d7a5c on feature/0.2.357-wba-bun-aot;
+  visible ~/te2-android workspace. Full receipts and pending live activation:
+  docs/apps/wba_bun_aot/TRACKER.md. No installed runtime replacement or APK build.
 
 Receipts: /mnt/vdb/te2-wba-aot-20261031/bun-engine-trial-20261101
 (logs/, artifacts/wba-aot, comparison/{summary,runtime-results}.json).
