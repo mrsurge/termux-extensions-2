@@ -3,6 +3,9 @@
   "type": "module",
   "name": "terminal",
   "description": "TE2 terminal frontend and stream transport",
+  "allowScripts": {
+    "node-pty@1.1.0": true
+  },
   "scripts": {
     "build": "node build.mjs",
     "build:watch": "node build.mjs --watch",

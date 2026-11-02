@@ -6,11 +6,59 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from typing import NotRequired, TypedDict
+
+import msgspec
 
 from app.apps.terminal import node_runtime
 
 
+class RuntimeScriptPolicy(TypedDict):
+    allowScripts: dict[str, bool]
+
+
+class LockedRuntimePackage(TypedDict):
+    version: NotRequired[str]
+
+
+class RuntimePackageLock(TypedDict):
+    packages: dict[str, LockedRuntimePackage]
+
+
 class TerminalNodeRuntimeTests(unittest.TestCase):
+    def test_only_locked_node_pty_install_scripts_are_approved(self) -> None:
+        package = msgspec.json.decode(
+            node_runtime.PACKAGE_JSON.read_bytes(), type=RuntimeScriptPolicy,
+        )
+        lock = msgspec.json.decode(
+            node_runtime.PACKAGE_LOCK.read_bytes(), type=RuntimePackageLock,
+        )
+        version = lock["packages"]["node_modules/node-pty"].get("version")
+        if version is None:
+            self.fail("Locked node-pty version is required for script approval")
+        self.assertEqual(package["allowScripts"], {f"node-pty@{version}": True})
+
+    def test_staged_install_retains_project_script_policy(self) -> None:
+        commands: list[list[str]] = []
+
+        def run_checked(
+            command: list[str], *, env: dict[str, str], cwd: Path, label: str,
+        ) -> None:
+            commands.append(command)
+            self.assertEqual(cwd, self.root / "stage")
+
+        with patch.object(node_runtime, "_run_checked", side_effect=run_checked):
+            node_runtime._install_runtime(
+                self.root / "stage", self.root / "node", self.root / "npm",
+                {"platform": "android", "arch": "arm64"},
+            )
+        self.assertEqual(
+            (self.root / "stage/package.json").read_bytes(),
+            node_runtime.PACKAGE_JSON.read_bytes(),
+        )
+        self.assertEqual(len(commands), 2)
+        self.assertNotIn("--dangerously-allow-all-scripts", commands[0])
+
     def setUp(self) -> None:
         scratch_root = Path(
             os.environ.get("TEMPDIR")
@@ -52,7 +100,7 @@ class TerminalNodeRuntimeTests(unittest.TestCase):
 
     def test_runtime_marker_requires_every_production_package(self) -> None:
         runtime_root = self.root / "runtime"
-        expected = {"fingerprint": "test"}
+        expected: dict[str, object] = {"fingerprint": "test"}
         runtime_root.mkdir()
         (runtime_root / ".te2-runtime.json").write_text(json.dumps(expected), encoding="utf-8")
         self.assertFalse(node_runtime._runtime_is_ready(runtime_root, expected))
