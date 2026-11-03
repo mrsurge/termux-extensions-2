@@ -323,6 +323,7 @@ class DesktopElectronRuntimeTests(unittest.TestCase):
         )
         self.assertIn("app/static/js/te_dialog.mjs", names)
         self.assertIn("app/static/js/te_modal_surface_portal.mjs", names)
+        self.assertIn("app/apps/code_te2/src/rpc/value-types.ts", names)
         self.assertFalse(any("node_modules" in name for name in names))
         self.assertFalse(any(name.startswith("electron/build/") for name in names))
         self.assertFalse(any(name.endswith(".test.ts") for name in names))
@@ -330,6 +331,44 @@ class DesktopElectronRuntimeTests(unittest.TestCase):
         self.assertFalse(any("tracemalloc" in name for name in names))
         self.assertFalse(any("process-tree-samples" in name for name in names))
         self.assertFalse(any(name.endswith("/README.md") for name in names))
+
+    def test_staged_component_runtime_dependency_resolves(self) -> None:
+        workspace = self.home / "source-stage"
+        electron_runtime._copy_packaged_source(workspace)
+        runtime = workspace / "app/apps/code_te2/main_page/frontend/ui/component-runtime"
+        dependency = (runtime / "../../../../src/rpc/value-types.ts").resolve()
+        self.assertTrue(dependency.is_file())
+        self.assertEqual(
+            dependency.read_bytes(),
+            electron_runtime.SHARED_COMPONENT_DEPENDENCIES[0].read_bytes(),
+        )
+        self.assertIn(
+            "../../../../src/rpc/value-types.ts",
+            (runtime / "jsx-runtime.ts").read_text(encoding="utf-8"),
+        )
+
+    def test_shared_component_dependency_changes_source_digest(self) -> None:
+        before = electron_runtime._source_digest()
+        dependency = electron_runtime.SHARED_COMPONENT_DEPENDENCIES[0]
+        original_read_bytes = Path.read_bytes
+
+        def changed_read_bytes(path: Path) -> bytes:
+            content = original_read_bytes(path)
+            return content + b"\n// changed dependency\n" if path == dependency else content
+
+        with patch.object(Path, "read_bytes", changed_read_bytes):
+            self.assertNotEqual(before, electron_runtime._source_digest())
+
+    def test_missing_shared_component_dependency_fails_before_build(self) -> None:
+        dependency = electron_runtime.SHARED_COMPONENT_DEPENDENCIES[0]
+        original_is_file = Path.is_file
+
+        def dependency_is_file(path: Path) -> bool:
+            return False if path == dependency else original_is_file(path)
+
+        with patch.object(Path, "is_file", dependency_is_file):
+            with self.assertRaisesRegex(electron_runtime.ElectronRuntimeError, "value-types"):
+                electron_runtime._iter_source_files()
 
 
 if __name__ == "__main__":

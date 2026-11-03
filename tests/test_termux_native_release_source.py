@@ -1,6 +1,6 @@
 import pytest
 
-from release.termux.build_native_wheel import validate_release_source
+from release.termux.build_native_wheel import validate_release_source, validate_server_version
 
 
 def test_validation_is_never_publication_eligible():
@@ -16,3 +16,19 @@ def test_clean_matching_release_tag_is_required():
     ):
         with pytest.raises(ValueError):
             validate_release_source(tag, '0.2.352', commit, dirty, resolved)
+
+
+def test_packaging_revision_reuses_same_server() -> None:
+    validate_server_version('0.2.356', '0.2.356')
+    validate_server_version('0.2.356', '0.2.356.1')
+    validate_server_version('0.2.356', '0.2.356.12')
+
+
+@pytest.mark.parametrize('server,package', [
+    ('0.2.355', '0.2.356.1'), ('0.2.356', '0.2.357'),
+    ('0.2.356', '0.2.356rc1'), ('0.2.356', '0.2.356.1.2'),
+    ('', '0.2.356.1'), ('0.2.356.1', '0.2.356.2'),
+])
+def test_other_server_version_mismatches_are_rejected(server: str, package: str) -> None:
+    with pytest.raises(ValueError):
+        validate_server_version(server, package)

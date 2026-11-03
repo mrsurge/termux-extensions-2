@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import sysconfig
@@ -33,6 +34,16 @@ def validate_release_source(tag: str | None, version: str, commit: str,
     return True
 
 
+def validate_server_version(server_version: str, package_version: str) -> None:
+    """A fourth release component can repackage the same three-part server."""
+    if server_version == package_version:
+        return
+    if (re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", server_version)
+            and re.fullmatch(re.escape(server_version) + r"\.[0-9]+", package_version)):
+        return
+    raise ValueError('server/package versions differ beyond a packaging revision')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshot', type=Path, required=True)
@@ -53,8 +64,13 @@ def main() -> None:
         parser.error('server lacks ferrous-framework-native')
     import tomllib
     version = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']['version']
-    if info.get('version') != version:
-        parser.error('server/package versions differ')
+    server_version = info.get('version')
+    if not isinstance(server_version, str):
+        parser.error('server build info has no version')
+    try:
+        validate_server_version(server_version, version)
+    except ValueError as exc:
+        parser.error(str(exc))
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     dirty = subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True)
     tag_commit = (subprocess.check_output(
@@ -77,7 +93,7 @@ def main() -> None:
                           output=output / 'payload', package_version=version,
                           rust_fingerprint=sha256(args.worker))
     env = dict(os.environ, TE2_RELEASE_SERVER_BIN=str(server),
-               TE2_RELEASE_SERVER_VERSION=version,
+               TE2_RELEASE_SERVER_VERSION=server_version,
                TE2_RELEASE_CODE_TE2_RUNTIME=str(payload),
                TE2_RELEASE_PLATFORM_TAG='android_24_arm64_v8a',
                TE2_RELEASE_MINIMUM_GLIBC='none',
@@ -102,6 +118,7 @@ def main() -> None:
                             'vendor/node_socketio/node_modules/' + path)
     metadata = {'publicationEligible': eligible, 'releaseTag': env['TE2_RELEASE_TAG'], 'sourceCommit': commit,
                 'sourceDirty': dirty.splitlines(), 'packageVersion': version,
+                'serverVersion': server_version,
                 'wheel': wheel.name, 'sha256': sha256(wheel),
                 'serverSha256': sha256(server), 'workerSha256': sha256(args.worker)}
     (output / 'build-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')

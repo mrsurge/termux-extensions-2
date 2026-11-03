@@ -43,6 +43,9 @@ SHARED_DIALOG_SOURCES: Final = (
     SOURCE_ROOT.parent / "app" / "static" / "js" / "te_dialog.mjs",
     SOURCE_ROOT.parent / "app" / "static" / "js" / "te_modal_surface_portal.mjs",
 )
+SHARED_COMPONENT_DEPENDENCIES: Final = (
+    SOURCE_ROOT.parent / "app" / "apps" / "code_te2" / "src" / "rpc" / "value-types.ts",
+)
 PACKAGE_JSON: Final = ELECTRON_SOURCE / "package.json"
 PACKAGE_LOCK: Final = ELECTRON_SOURCE / "package-lock.json"
 BOOTSTRAP_VERSION: Final = "te2-electron-source-v1"
@@ -207,6 +210,10 @@ def _iter_source_files() -> list[tuple[str, Path]]:
             continue
         relative = path.relative_to(COMPONENT_RUNTIME_SOURCE)
         files.append((f"{component_prefix}/{relative.as_posix()}", path))
+    for path in SHARED_COMPONENT_DEPENDENCIES:
+        if not path.is_file():
+            raise ElectronRuntimeError(f"Packaged desktop source is missing: {path}")
+        files.append((path.relative_to(SOURCE_ROOT.parent).as_posix(), path))
     for path in SHARED_DIALOG_SOURCES:
         if not path.is_file():
             raise ElectronRuntimeError(f"Packaged desktop source is missing: {path}")
@@ -226,6 +233,7 @@ def _iter_source_files() -> list[tuple[str, Path]]:
         "android_shell/index.html",
         "desktop_asset_inventory.json",
         "app/apps/code_te2/main_page/frontend/ui/component-runtime/index.ts",
+        "app/apps/code_te2/src/rpc/value-types.ts",
         "app/static/js/te_dialog.mjs",
         "app/static/js/te_modal_surface_portal.mjs",
     }
