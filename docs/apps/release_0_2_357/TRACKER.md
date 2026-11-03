@@ -1,5 +1,55 @@
 # 0.2.357 tracker
 
+## First priority: second editor area — 2026-11-02
+
+This takes precedence over the older intake below. Concrete design, source
+findings and validation scope: PLAN.md, "First priority: second editor area".
+
+- [x] User approves read-only investigation and planning only. Record independent
+  group membership, shared cross-client tab sets, client-specific foreground,
+  desktop browser support and secondary extension-panel hosting requirements.
+- [x] Confirm desktop mismatch: secondary host/vertical handle span terminal
+  row; terminal/horizontal handle span only primary column. Electron overlay
+  consumes measured host bounds with zoom.
+- [x] Confirm one shared document membership today, with separate client
+  foregrounds; secondary historical descriptor is not a persisted tab set.
+  Plan editor-group ownership, not cloned document/draft/WBA state machines.
+- [x] Confirm ordinary desktop browser exclusion is an explicit mobile/layout
+  gate. Monaco already mounts inline; outer page isolation cannot be removed
+  safely without addressing non-disposable working-editor providers.
+- [x] Identify extension panel/view distinction and surface/presentation identity
+  as rehosting boundaries. Keep native Electron overlays and webview isolation.
+- [x] S1 approved and implemented (2026-11-03): secondary host and vertical
+  divider stop at grid line 4; terminal and horizontal handle span columns 2/3.
+  Keep desktop horizontal hitbox inside terminal row so the native secondary
+  WebContentsView cannot cover it. Mobile geometry and side rails unchanged.
+  Existing host ResizeObserver/native placement path follows the new rectangle;
+  no JS/backend/state changes or native rebuild. Regression demonstrated failing
+  old spans before the fix. Fourteen focused layout/terminal/lifecycle tests pass;
+  frontend and WBA strict no-Any typechecks report zero findings/diagnostics;
+  node build.mjs and git diff --check pass. Existing Node module-type warning
+  remains visible; no source suppression. Generated tracked bundles unchanged.
+- [x] User live acceptance: "Its fixed" (2026-11-03). Desktop layout accepted;
+  no separate exhaustive mode/zoom matrix is claimed by this confirmation.
+- [ ] S2 approve typed backend group contract/migration and lifetime semantics;
+  implement primary/secondary membership with existing client foregrounds.
+- [ ] S2 secondary tab bar and direct Explorer-to-secondary open; close one
+  group's tab without closing the other group's document. Validate model
+  ownership union, draft/save consent, revisions and multi-client races.
+- [ ] S3 ordinary desktop browser host and shared presentation behavior;
+  separately qualify any iframe-removal/provider-disposal refactor. Browser
+  storage is not authoritative opened-file state.
+- [ ] S4 extension-created secondary panels as tabs and sidebar transfer;
+  preserve surface identity, live state, messages, readiness, focus/visibility,
+  retained contexts, disposal, native reparenting and project/WBA generation.
+- [ ] Later-slice strict type/build/tests and grouped live acceptance on
+  Electron/desktop browser/mobile, multi-client foreground, close/open,
+  project switch/cold restore/reconnect and historical/extension content.
+
+Initial intake was planning-only; S1 source/build scope was subsequently
+approved above. No asset publication, shared restart, APK update or new live
+acceptance is claimed. Remaining state/browser/extension slices need approval.
+
 ## First priorities — user intake 2026-10-31
 
 These precede all older work below. Keep room for further user priorities.

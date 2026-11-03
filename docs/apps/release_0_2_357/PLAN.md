@@ -1,5 +1,104 @@
 # 0.2.357 plan
 
+## First priority: second editor area — 2026-11-02
+
+This precedes the earlier intake and backlog below. User approves read-only
+investigation and recording the implementation plan; source changes, builds,
+asset publication and runtime restarts still require slice approval.
+
+### S1. Align the desktop editor rectangle
+
+Make the primary and docked secondary editor share the same bottom edge. The
+terminal/bottom panel and its horizontal resize boundary belong underneath both
+editor columns. Preserve Explorer/right-sidebar rails, footer, secondary width,
+collapse/detach behavior and Electron's native WebContentsView overlay.
+
+Source finding: template.html puts the secondary host and vertical resize handle
+in grid rows 2 / 5 (including terminal row 4), while the terminal and horizontal
+handle occupy only column 2. Adjust these related grid spans together. Native
+placement in main.ts measures the host rectangle; secondary-editor-registry.ts
+applies those bounds with zoom, so verify actual overlay placement rather than
+assuming CSS alone proves native correctness. This is a small independent slice.
+
+### S2. Backend-owned editor-group membership and secondary tabs
+
+Extend existing open-state methods with explicit primary/secondary groups; do
+not clone the document/draft/autosave/WBA state machines. Both groups refer to
+the same authoritative document model. Persist each group's ordered opened-file
+membership in project state and publish it across connected clients. Foreground
+file/presentation stays client-specific, using the existing authenticated client
+and role/presentation identity rather than a browser-local authority.
+
+- Closing a primary tab must leave secondary membership/model intact, and vice
+  versa. Opening from Explorer directly into secondary must not add primary
+  membership. A file can belong to both groups without duplicate document state.
+- Give secondary its own tab bar. Separate close-tab, hide/collapse/detach pane
+  and dispose-document actions. Audit model/WBA lifetime consumers against the
+  union of group ownership before changing global close notifications; closing
+  the last group must preserve existing draft/save-consent semantics.
+- Migrate existing shared membership to primary without inventing secondary
+  tabs. Preserve a currently admitted secondary working file if present; define
+  legacy historical-content restoration explicitly rather than fabricating it.
+- Fence revisions/project generations, concurrent mutations, project switches,
+  reconnect and cold restoration. A stale snapshot must not resurrect closed
+  tabs or redirect another client's foreground. Reuse typed DTOs/codecs/lanes.
+
+Source findings: open_state_backend.py currently admits files into one shared
+recent_files membership; remove_sidecar_recent_file removes a document globally
+and updates affected client foregrounds. Existing client_foregrounds already
+separates foreground selection. host/secondary_content_state.py holds a bounded
+worker-local exact-client content descriptor, not a durable shared tab list.
+Therefore this is a state-contract change, not merely a second frontend tab bar.
+
+### S3. Browser presentation and container lifecycle
+
+Support ordinary desktop web clients as well as Electron and mobile. Current
+mobile-secondary-editor.ts explicitly gates non-Electron support by mobile UA
+and mobile layout; this does not establish an inherent backend identity limit.
+Use backend group state for opened tabs; browser storage may remember local
+presentation preferences, not authoritative membership. Preserve mobile focus,
+special-key routing and exact-client presentation commands.
+
+Prefer a regular outer pane/tab container with isolated content hosts where
+needed. Monaco itself is already mounted into a regular element through
+bootInlineEditorHost. Electron presents that page in a WebContentsView; mobile
+loads a secondary-role page in an outer iframe. Do not simply remove the iframe:
+SecondaryContentLifecycle documents non-disposable working-editor providers and
+reloads between working/historical content kinds. Audit editor/global/provider
+ownership and disposal before same-realm multi-editor mounting. Retaining an
+isolated working-editor host initially is acceptable; tab state must not depend
+on that implementation choice. Historical diffs stay read-only immutable content.
+
+### S4. Secondary extension panels as tabs
+
+Allow extension-created secondary panels (surfaceKind=panel, such as toolbar
+actions) to be hosted in the second area, including an explicit transfer from
+the sidebar. Do not move primary contributed sidebar views by default. Reuse
+existing ExtensionWebviewSurface identity and presentation registration; move
+the presentation rather than duplicating extension/backend instances.
+
+Preserve sandbox/CSP/resource scopes, typed binary messages, readiness/replay,
+visibility/focus callbacks, retainContextWhenHidden, disposal and project/WBA
+generation fences. Tab switches or moves must not imply extension-panel close.
+Keep Electron's native overlay/reparent/detach approach. An extension reload is
+not an acceptable substitute for a presentation move when it loses live state.
+Audit which panel state is shared versus client-specific before defining restore
+semantics. Existing WBA panel/view distinctions and sidebar presentation IDs are
+the reuse points; this is a separate integration slice after group ownership.
+
+### Validation and implementation gates
+
+Approve S1 first; validate desktop panel closed/open/collapsed/resized, secondary
+docked/collapsed/detached and zoom/scaling bounds with both side rails. For later
+slices add backend migration/open-close/ownership/concurrency tests and strict
+frontend/WBA/Python gates as applicable. Live groups: Electron, desktop browser,
+mobile; multiple clients with differing foregrounds; direct secondary opens,
+closing either/both memberships, drafts/autosave/project switch, cold restore and
+reconnect. Extension panels additionally need messages, focus/visibility,
+transfer, hide/reveal, real close and WBA restart tests. Preserve existing
+historical-diff behavior. No Android packaging or shared restart is authorized
+by this planning intake. No live acceptance is claimed for the new work.
+
 ## User-priority intake — ahead of the existing backlog (2026-10-31)
 
 Work in this order; further user additions may precede the older sections below.
