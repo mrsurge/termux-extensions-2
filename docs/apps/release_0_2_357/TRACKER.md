@@ -5,15 +5,17 @@
 This takes precedence over the older intake below. Concrete design, source
 findings and validation scope: PLAN.md, "First priority: second editor area".
 
-- [x] User approves read-only investigation and planning only. Record independent
-  group membership, shared cross-client tab sets, client-specific foreground,
-  desktop browser support and secondary extension-panel hosting requirements.
+- [x] Initial investigation/planning recorded. User's 2026-11-04 clarification
+  supersedes shared cross-client primary/secondary tab groups: one backend shared
+  opened-document set, per-client area placement/order/foreground, unknown
+  placement defaulting to primary. No duplicate tab within either area.
 - [x] Confirm desktop mismatch: secondary host/vertical handle span terminal
   row; terminal/horizontal handle span only primary column. Electron overlay
   consumes measured host bounds with zoom.
 - [x] Confirm one shared document membership today, with separate client
   foregrounds; secondary historical descriptor is not a persisted tab set.
-  Plan editor-group ownership, not cloned document/draft/WBA state machines.
+  Reuse document authority and client presentation state, not cloned
+  document/draft/WBA state machines.
 - [x] Confirm ordinary desktop browser exclusion is an explicit mobile/layout
   gate. Monaco already mounts inline; outer page isolation cannot be removed
   safely without addressing non-disposable working-editor providers.
@@ -31,24 +33,43 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   remains visible; no source suppression. Generated tracked bundles unchanged.
 - [x] User live acceptance: "Its fixed" (2026-11-03). Desktop layout accepted;
   no separate exhaustive mode/zoom matrix is claimed by this confirmation.
-- [ ] S2 approve typed backend group contract/migration and lifetime semantics;
-  implement primary/secondary membership with existing client foregrounds.
-- [ ] S2 secondary tab bar and direct Explorer-to-secondary open; close one
-  group's tab without closing the other group's document. Validate model
-  ownership union, draft/save consent, revisions and multi-client races.
-- [ ] S3 ordinary desktop browser host and shared presentation behavior;
-  separately qualify any iframe-removal/provider-disposal refactor. Browser
-  storage is not authoritative opened-file state.
+- [x] Record close contract: remove one of two local presentations locally;
+  closing the last local presentation requests global document closure across
+  all clients, regardless of other-client placement/counts. Disconnect never
+  closes documents. Derive 0/1/2 from explicit placement flags, not client totals.
+- [x] Record unified desktop/mobile behavior: shared File menu targets the
+  last-focused editor area; no redundant secondary hamburger. Extension panels
+  need no editor File menu; disable inapplicable editor actions for panel tabs.
+- [x] Record terminal-drawer focus/extra-key pattern reuse and mobile regression:
+  extra-key ownership sticks to secondary after focus returns to primary.
+  Outer working-editor iframe removal is an explicit lifecycle prerequisite
+  for unified same-DOM menu/focus integration, not an assumed tab-bar side effect.
+- [ ] S2 approve typed shared-document/per-client-placement contract, migration
+  and validated backend close semantics; implement through existing state owners.
+- [ ] S2 secondary tab bar/direct Explorer-to-secondary open; unique tabs per
+  area, unknown remote placement -> primary, restore/reconnect reconciliation.
+  Test local presentation removal versus global last-local close, other-client
+  dual placement, disconnect, draft/save/cancel and stale open/close revisions.
+- [ ] S3 ordinary desktop browser support and one responsive outer pane/tab
+  container; implement safe outer working-editor iframe removal with explicit
+  provider/global/editor identity/disposal ownership. Preserve historical and
+  extension isolation and native Electron overlay/detach behavior.
+- [ ] S3 shared mobile/desktop File menu active-area targeting with menu-focus
+  retention, stale target guards and extension-panel action policy.
+- [ ] S3 reuse terminal drawer's focus/modifier/extra-key ownership for primary
+  and secondary; fix secondary -> primary key routing and verify sticky/consumed
+  modifiers, file switches, pane close/hide and terminal transitions.
 - [ ] S4 extension-created secondary panels as tabs and sidebar transfer;
   preserve surface identity, live state, messages, readiness, focus/visibility,
   retained contexts, disposal, native reparenting and project/WBA generation.
 - [ ] Later-slice strict type/build/tests and grouped live acceptance on
-  Electron/desktop browser/mobile, multi-client foreground, close/open,
+  Electron/desktop browser/mobile, multi-client placement/foreground, close/open,
   project switch/cold restore/reconnect and historical/extension content.
 
 Initial intake was planning-only; S1 source/build scope was subsequently
-approved above. No asset publication, shared restart, APK update or new live
-acceptance is claimed. Remaining state/browser/extension slices need approval.
+approved above and live-accepted. User approves this 2026-11-04 plan/tracker
+revision only. No asset publication, shared restart, APK update or additional
+live acceptance is claimed. Remaining implementation slices need approval.
 
 ## First priorities — user intake 2026-10-31
 

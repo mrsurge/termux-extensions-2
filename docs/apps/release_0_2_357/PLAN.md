@@ -2,9 +2,11 @@
 
 ## First priority: second editor area — 2026-11-02
 
-This precedes the earlier intake and backlog below. User approves read-only
-investigation and recording the implementation plan; source changes, builds,
-asset publication and runtime restarts still require slice approval.
+This precedes the earlier intake and backlog below. S1 is implemented and
+user-live-accepted (2026-11-03), commit ad98ca81. The 2026-11-04 requirements
+below supersede the earlier globally shared primary/secondary membership design.
+User approves updating this plan; remaining source changes, builds, asset
+publication and runtime restarts still require slice approval.
 
 ### S1. Align the desktop editor rectangle
 
@@ -13,61 +15,115 @@ terminal/bottom panel and its horizontal resize boundary belong underneath both
 editor columns. Preserve Explorer/right-sidebar rails, footer, secondary width,
 collapse/detach behavior and Electron's native WebContentsView overlay.
 
-Source finding: template.html puts the secondary host and vertical resize handle
+Pre-fix source finding: template.html put the secondary host and vertical resize handle
 in grid rows 2 / 5 (including terminal row 4), while the terminal and horizontal
 handle occupy only column 2. Adjust these related grid spans together. Native
 placement in main.ts measures the host rectangle; secondary-editor-registry.ts
 applies those bounds with zoom, so verify actual overlay placement rather than
-assuming CSS alone proves native correctness. This is a small independent slice.
+assuming CSS alone proves native correctness. This small independent slice is
+complete; preserve its accepted geometry throughout the remaining work.
 
-### S2. Backend-owned editor-group membership and secondary tabs
+### S2. Shared opened documents, per-client placement and secondary tabs
 
-Extend existing open-state methods with explicit primary/secondary groups; do
-not clone the document/draft/autosave/WBA state machines. Both groups refer to
-the same authoritative document model. Persist each group's ordered opened-file
-membership in project state and publish it across connected clients. Foreground
-file/presentation stays client-specific, using the existing authenticated client
-and role/presentation identity rather than a browser-local authority.
+Keep one backend-authoritative project opened-document set, shared by all
+clients. Primary/secondary placement, tab ordering and foreground are per-client
+presentation state, not globally shared group membership. Reuse authenticated
+client/presentation identity and existing project state owners; do not clone
+document/draft/autosave/WBA state machines or let a frontend own global admission.
 
-- Closing a primary tab must leave secondary membership/model intact, and vice
-  versa. Opening from Explorer directly into secondary must not add primary
-  membership. A file can belong to both groups without duplicate document state.
-- Give secondary its own tab bar. Separate close-tab, hide/collapse/detach pane
-  and dispose-document actions. Audit model/WBA lifetime consumers against the
-  union of group ownership before changing global close notifications; closing
-  the last group must preserve existing draft/save-consent semantics.
-- Migrate existing shared membership to primary without inventing secondary
-  tabs. Preserve a currently admitted secondary working file if present; define
-  legacy historical-content restoration explicitly rather than fabricating it.
-- Fence revisions/project generations, concurrent mutations, project switches,
-  reconnect and cold restoration. A stale snapshot must not resurrect closed
-  tabs or redirect another client's foreground. Reuse typed DTOs/codecs/lanes.
+- A globally open document is projected into every connected client. Each
+  client may present it in primary, secondary, or both; at most one tab for a
+  given file in each area. Two presentations still reference the same document.
+  Do not create duplicate tabs in an area or duplicate backend document models.
+- Give secondary its own tab bar. Direct Explorer-to-secondary open adds only
+  that local presentation, not a primary tab in the initiating client. Other
+  clients retain their known placement; a client receiving a newly opened file
+  without known placement defaults to primary. This also applies after offline
+  opens, initial connection and reconnect. Reconcile against current backend
+  membership; stale stored placement must not reopen a globally closed document.
+- Represent placement with explicit primary/secondary flags (or equivalent
+  typed enum/bitmask). Derive the local 0/1/2 presentation count; count alone
+  cannot identify which area presents the file. Never sum counts across clients
+  or use network connections as document owners. A disconnected client does not
+  close documents, release ownership or prevent a later global close.
+- Closing one of two local presentations removes only that presentation and
+  leaves the shared document open. Closing the last presentation in the
+  initiating client requests a backend global document close: remove the file
+  from every client's areas, regardless of their different placement or counts.
+  Example: client A secondary-only and B primary-only both close when either
+  requests its last-local-presentation close. Another client's two presentations
+  do not veto that global close. Preserve draft/save/discard consent and cancel
+  behavior before backend closure; do not silently discard content.
+- Distinguish local presentation removal, global document close, pane
+  hide/collapse/detach, and actual model disposal in typed commands and handlers.
+  If an explicit close-everywhere action exists, keep it distinct from closing
+  one of two local tabs. Hiding a pane or focusing an extension panel is not a
+  file close. Publish document-close/WBA disposal only for committed global
+  closure, not presentation removal. Trace active-editor/focus notifications;
+  WBA should otherwise need little change and no parallel ownership protocol.
+- Migrate existing shared opened documents without inventing secondary tabs.
+  Restore valid known local placement/current secondary file where available;
+  default unknown placement to primary. Define historical-content restoration
+  separately rather than treating immutable diff snapshots as working files.
+- Fence revisions/project generations, global-close versus open/reconnect races,
+  stale local close intents, project switches and cold restoration. The backend
+  must serialize authoritative mutations and validate the initiating client's
+  presentation transition; a client-supplied integer is not lifetime authority.
+  Reuse concrete DTOs/codecs/RPC lanes and bounded presentation storage. Browser
+  storage, if used for presentation hints, cannot own shared opened documents.
 
 Source findings: open_state_backend.py currently admits files into one shared
 recent_files membership; remove_sidecar_recent_file removes a document globally
 and updates affected client foregrounds. Existing client_foregrounds already
 separates foreground selection. host/secondary_content_state.py holds a bounded
 worker-local exact-client content descriptor, not a durable shared tab list.
-Therefore this is a state-contract change, not merely a second frontend tab bar.
+These are reuse points for the revised contract, not evidence that independent
+per-client area placement is already implemented. This is a state-contract
+change, not merely a second frontend tab bar.
 
-### S3. Browser presentation and container lifecycle
+### S3. Unified container, menu/focus ownership and browser support
 
 Support ordinary desktop web clients as well as Electron and mobile. Current
 mobile-secondary-editor.ts explicitly gates non-Electron support by mobile UA
 and mobile layout; this does not establish an inherent backend identity limit.
-Use backend group state for opened tabs; browser storage may remember local
-presentation preferences, not authoritative membership. Preserve mobile focus,
-special-key routing and exact-client presentation commands.
+Use S2's shared document set and per-client placement. Mobile and desktop must
+have the same secondary-area behavior, tabs, File menu targeting and focus/key
+ownership; only responsive element placement and platform-native presentation
+mechanics differ. Do not create a second mobile implementation of these rules.
 
-Prefer a regular outer pane/tab container with isolated content hosts where
-needed. Monaco itself is already mounted into a regular element through
+Implement a regular outer pane/tab container and remove the outer working-editor
+iframe as an explicit lifecycle step, not an assumed consequence of adding tabs.
+Monaco itself is already mounted into a regular element through
 bootInlineEditorHost. Electron presents that page in a WebContentsView; mobile
 loads a secondary-role page in an outer iframe. Do not simply remove the iframe:
 SecondaryContentLifecycle documents non-disposable working-editor providers and
 reloads between working/historical content kinds. Audit editor/global/provider
-ownership and disposal before same-realm multi-editor mounting. Retaining an
-isolated working-editor host initially is acceptable; tab state must not depend
-on that implementation choice. Historical diffs stay read-only immutable content.
+ownership, identifiers, handlers and disposal before same-realm multi-editor
+mounting; do not replace isolation with singleton collisions. Establish this
+lifecycle before wiring the unified menu/focus behavior against the shared DOM
+host. Retain iframe isolation where appropriate for historical/extension content
+and preserve Electron native overlay/reparent/detach capabilities. Historical
+diffs stay read-only immutable content. Escalate any required isolation/design
+change rather than quietly dropping the outer-iframe removal requirement.
+
+- One shared File menu on desktop **and mobile** targets the last-focused editor
+  area. Remove the secondary editor's redundant hamburger/File menu to free tab
+  space. Opening/clicking the shared menu must retain the intended editor target
+  instead of resetting it through menu focus. Capture a valid target for an
+  action; reject stale/disposed/project-switched targets, with no cross-client
+  focus changes. Preserve document-scoped save/run/draft consent rules.
+- Extension panels retain their existing content/menu behavior and do not gain
+  an editor File menu. When a panel is the active tab, disable inapplicable
+  editor-only actions rather than accidentally applying them to a hidden file.
+- Trace and reuse the terminal drawer's working focus/extra-key ownership,
+  modifier and focus-restoration conventions before adding new mechanisms.
+  Both editor areas must share one active-area routing pattern with the menu;
+  preserve terminal ownership rather than installing a competing global owner.
+- Fix the reported mobile regression: after secondary receives focus, extra keys
+  remain stuck targeting it when the user returns to primary. Editor focus must
+  update ownership; tapping an extra key must preserve the editor target instead
+  of stealing or latching focus. Cover sticky/consumed modifiers, tab switches,
+  pane close/hide, foreground restoration and transitions to/from the terminal.
 
 ### S4. Secondary extension panels as tabs
 
@@ -84,20 +140,30 @@ Keep Electron's native overlay/reparent/detach approach. An extension reload is
 not an acceptable substitute for a presentation move when it loses live state.
 Audit which panel state is shared versus client-specific before defining restore
 semantics. Existing WBA panel/view distinctions and sidebar presentation IDs are
-the reuse points; this is a separate integration slice after group ownership.
+the reuse points; this is a separate integration slice after shared-document and
+per-client placement semantics. Reuse the same tab/container behavior on mobile
+and desktop; extension panels do not require their own editor File menu.
 
 ### Validation and implementation gates
 
-Approve S1 first; validate desktop panel closed/open/collapsed/resized, secondary
-docked/collapsed/detached and zoom/scaling bounds with both side rails. For later
-slices add backend migration/open-close/ownership/concurrency tests and strict
+S1 is complete and user-live-accepted; retain its desktop geometry regression
+coverage. Next approve the concrete S2 state contract/migration and close paths,
+then S3 lifecycle/container work followed by unified menu/focus integration, then
+S4 panel rehosting. Do not begin source implementation from this plan-only update.
+Add backend migration/open-close/placement/concurrency tests and strict
 frontend/WBA/Python gates as applicable. Live groups: Electron, desktop browser,
-mobile; multiple clients with differing foregrounds; direct secondary opens,
-closing either/both memberships, drafts/autosave/project switch, cold restore and
-reconnect. Extension panels additionally need messages, focus/visibility,
+mobile; multiple clients with differing placement and foregrounds; direct
+secondary opens; duplicate admission; close one of two local presentations versus
+global close of the last local presentation; another client's two-presentation
+case; disconnected/rejoining clients; drafts/autosave/cancel/project switch and
+cold restore. Verify shared File menu targeting on **both** mobile and desktop,
+menu focus retention, extension-tab disabled actions and mobile primary ->
+secondary -> extra key -> primary -> extra key ownership, including modifiers,
+file switches, pane closure and terminal transitions. Extension panels additionally
+need messages, focus/visibility,
 transfer, hide/reveal, real close and WBA restart tests. Preserve existing
 historical-diff behavior. No Android packaging or shared restart is authorized
-by this planning intake. No live acceptance is claimed for the new work.
+by this planning intake. No new live acceptance is claimed beyond completed S1.
 
 ## User-priority intake — ahead of the existing backlog (2026-10-31)
 
