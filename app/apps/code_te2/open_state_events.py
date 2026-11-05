@@ -8,7 +8,8 @@ from typing import cast
 from .client_presentation import client_presentation_room
 from .monaco_editor.editor_rpc_contract import EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED
 from .monaco_editor.editor_rpc_emit import emit_editor_rpc_notification
-from .open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
+from .open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload, read_client_open_states
+from .editor_renderer_bindings import editor_renderer_bindings
 from .host.secondary_content_backend import (
     reconcile_secondary_foreground,
     secondary_content_projection,
@@ -214,7 +215,20 @@ async def _handle_open_state_changed_event(event: WorkerEvent) -> None:
     request_id = _event_text(event, "request_id") or event.get("correlation_id")
     payload = _surface_payload(open_state, source=source, request_id=request_id)
     await _emit_editor_open_state(payload)
-    await _emit_ui_open_state(payload)
+    if generation is not None and current_project_generation(project) != generation:
+        return
+    bindings = editor_renderer_bindings()
+    if not bindings:
+        await _emit_ui_open_state(payload)
+    else:
+        client_states = read_client_open_states(project, tuple(binding.renderer_id for binding in bindings),
+                                               reason=open_state["reason"])
+        for binding in bindings:
+            if generation is not None and current_project_generation(project) != generation:
+                return
+            client_state = client_states[binding.renderer_id]
+            await _emit_ui_open_state(_surface_payload(client_state, source=source, request_id=request_id),
+                                      client_id=binding.renderer_id)
 
 
 async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
@@ -230,6 +244,13 @@ async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
     client_foreground = client_foreground_payload_from_event(event)
     if open_state is None or client_foreground is None:
         return
+    from .project_sidecar import ProjectSidecar
+    latest = ProjectSidecar(project).get_client_foreground_entry(client_foreground["clientInstanceId"])
+    if latest is not None:
+        latest_revision = latest.get("revision")
+        if isinstance(latest_revision, int) and latest_revision > client_foreground["revision"]:
+            record_stale_drop("open_state_events:client_revision", event["type"])
+            return
     reconcile_secondary_foreground(client_foreground)
     source = _event_text(event, "source") or event["source"]
     request_id = _event_text(event, "request_id") or event.get("correlation_id")
@@ -268,6 +289,11 @@ async def _handle_document_closed_event(event: WorkerEvent) -> None:
         return
     open_state = open_state_payload_from_event(event)
     if open_state is None:
+        return
+    from .project_sidecar import ProjectSidecar
+    closed_path = _event_text(event, "closedPath")
+    if closed_path is not None and closed_path in ProjectSidecar(project).read_editor_open_state().documents:
+        record_stale_drop("open_state_events:document_reopened", event["type"])
         return
     source = _event_text(event, "source") or event["source"]
     await publish_open_state_changed(
@@ -343,14 +369,14 @@ async def _emit_editor_open_state(payload: JsonObject) -> None:
         pass
 
 
-async def _emit_ui_open_state(payload: JsonObject) -> None:
+async def _emit_ui_open_state(payload: JsonObject, *, client_id: str | None = None) -> None:
     try:
         method = UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED
         await emit_code_te2_socketio(
             UI_IPC_RPC_NOTIFICATION_EVENT,
             build_jsonrpc_notification(method, payload),
             namespace="/ui_ipc",
-            room="ui_ipc",
+            room=client_presentation_room(client_id) if client_id else "ui_ipc",
         )
     except Exception:
         pass

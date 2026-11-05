@@ -285,12 +285,14 @@ test('socket identity publishes the validated editor role on every app lane', as
     clientInstanceId: 'client_aaaaaaaaaaaa',
     windowId: 'window_aaaaaaaaaaaaaaaaaaaa',
     clientRole: 'secondary',
+    mainPageClientInstanceId: 'client_bbbbbbbbbbbb',
   });
 
   assert.deepEqual(topology.fileEditorSocketQuery(), {
     app_id: 'code_te2',
     client_instance_id: 'client_aaaaaaaaaaaa',
     client_role: 'secondary',
+    main_page_client_instance_id: 'client_bbbbbbbbbbbb',
     window_id: 'window_aaaaaaaaaaaaaaaaaaaa',
   });
 });

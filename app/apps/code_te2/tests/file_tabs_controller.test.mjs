@@ -56,6 +56,57 @@ test('host chrome uses file tabs without a duplicate filename projection', async
   assert.doesNotMatch(template, /\.fe-file-tab\.fe-draft::after/);
 });
 
+test('tab projection uses this area only, keeps more than twelve files and rejects stale snapshots', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController } = await importFileTabs();
+    const track = new FakeElement();
+    const controller = createFileTabsController({
+      viewport: new FakeElement(), track, formatFileNameDisplay: value => value,
+      openFile: async () => {}, closeRecentFile: async () => {}, resetToNewFile() {},
+    });
+    const paths = Array.from({ length: 16 }, (_, index) => `/workspace/${index}`);
+    const snapshot = revision => ({ projectPath: '/workspace', revision, projectGeneration: 9,
+      recents: paths.map(path => ({ path, exists: true })),
+      editorPlacement: { paths: paths.slice(1), revision, area: 'primary' },
+    });
+    controller.broadcastOpenState(snapshot(7));
+    assert.equal(track.children.length, 15);
+    assert.ok(!track.children.some(tab => tab.dataset.path === paths[0]));
+    controller.refreshOpenState({ ...snapshot(6), editorPlacement: { paths: [paths[0]], revision: 6 } });
+    assert.equal(track.children.length, 15);
+  } finally { dom.restore(); }
+});
+
+test('tab close submits revision and project fences before opening its backend-selected successor', async () => {
+  for (const changeFocus of [false, true]) {
+    const dom = installDom();
+    try {
+      const { createFileTabsController } = await importFileTabs();
+      const track = new FakeElement();
+      const calls = [];
+      let finish;
+      const controller = createFileTabsController({
+        viewport: new FakeElement(), track, formatFileNameDisplay: value => value,
+        openFile: async path => calls.push(['open', path]),
+        closeRecentFile: (...args) => { calls.push(['close', ...args]); return new Promise(resolve => { finish = resolve; }); },
+        resetToNewFile() { calls.push(['reset']); },
+      });
+      controller.installWindowHooks();
+      controller.broadcastOpenState({ projectPath: '/workspace', revision: 12, projectGeneration: 9,
+        clientForeground: { path: '/workspace/a' }, recents: ['a', 'b', 'c'].map(name => ({ path: `/workspace/${name}`, exists: true })),
+      });
+      track.children[0].children[3].click();
+      assert.deepEqual(calls, [['close', '/workspace/a', 12, '/workspace', 9]]);
+      if (changeFocus) window.dispatchEvent(new CustomEvent('code-te2:active-file-changed', { detail: { path: '/workspace/c' } }));
+      finish({ successor: '/workspace/b' });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(calls.length, changeFocus ? 1 : 2);
+      if (!changeFocus) assert.deepEqual(calls[1], ['open', '/workspace/b']);
+    } finally { dom.restore(); }
+  }
+});
+
 async function importFileTabs() {
   const result = await build({
     entryPoints: [path.join(appRoot, 'main_page/frontend/ui/file-tabs.ts')],

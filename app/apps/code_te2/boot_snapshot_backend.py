@@ -24,12 +24,12 @@ from .client_presentation import (
 from .explorer.contracts.watcher import WatcherConfigPayload, build_watcher_config_payload
 from .explorer.transport.connection_manager import abs_to_rel
 from .monaco_editor.editor_backend_services.contracts import JsonMap
-from .open_state_backend import read_client_foreground, read_sidecar_open_state
+from .open_state_backend import read_client_foreground, read_sidecar_open_state, read_client_open_state
 from .run_profile_state import build_run_profile_state_projection
 from .project_sidecar import ProjectSidecar
 from .sidecar_profile import emit_window as emit_sidecar_profile_window
 from .history_store import HistoryStore
-from .host.secondary_content_backend import secondary_content_projection
+from .host.secondary_content_backend import secondary_content_projection, reconcile_secondary_restore
 from .stores import get_history_store, get_preferences_store
 from app.libs.runtime_startup_trace import StartupTrace
 
@@ -389,6 +389,12 @@ def _overlay_client_foreground(
             "lastFileMessage": "",
         }
     )
+    if isinstance(project, str) and project:
+        client_open_state = read_client_open_state(project, client_instance_id, reason="boot_reconnect")
+        host_state["openState"] = dict(client_open_state)
+        host_state["recents"] = [dict(entry) for entry in client_open_state["recents"]]
+        if editor_ssot is not None:
+            editor_ssot["openState"] = dict(client_open_state)
     snapshot["host_state"] = host_state
 
     if editor_ssot is not None:
@@ -426,6 +432,7 @@ async def handle_boot_snapshot_request(
     trace.mark("request.begin")
     client_instance_id = _client_identity(_data, source_name=source_name)
     client_role = normalize_client_role((_data or {}).get("clientRole"))
+    await reconcile_secondary_restore(client_instance_id, client_role)
     scope = str((_data or {}).get("scope") or "").strip()
     if scope == "hostState":
         host_state = await asyncio.to_thread(_build_host_state_payload)

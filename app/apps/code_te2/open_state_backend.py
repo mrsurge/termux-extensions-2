@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Literal, TypeAlias, TypedDict
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 from .client_presentation import (
     ClientRole,
@@ -13,6 +13,8 @@ from .client_presentation import (
     normalize_client_role,
 )
 from .project_sidecar import ProjectSidecar
+from .editor_open_state import EditorOpenState
+from .editor_renderer_bindings import editor_renderer_binding, registered_editor_renderer_binding
 
 _OPEN_STATE_LOCK = threading.RLock()
 OpaqueValue: TypeAlias = object
@@ -40,6 +42,8 @@ class SidecarOpenStatePayload(TypedDict):
     reason: str
     ts: int
     recents: list[RecentFilePayload]
+    projectGeneration: NotRequired[int]
+    editorPlacement: NotRequired[EditorPlacementPayload]
 
 
 class RecentFilePayload(TypedDict):
@@ -61,6 +65,14 @@ class ClientForegroundPayload(TypedDict):
     clientRole: ClientRole
     reason: str
     ts: int
+    editorPlacement: NotRequired[EditorPlacementPayload]
+
+
+class EditorPlacementPayload(TypedDict):
+    mainPageClientInstanceId: str
+    area: ClientRole
+    revision: int
+    paths: list[str]
 
 
 def _normalize_path(path: str) -> str:
@@ -93,7 +105,12 @@ def _rel_to_project(project_path: str, abs_path: str) -> str | None:
 
 def _recent_files_from_sidecar(sidecar: ProjectSidecar) -> list[RecentFilePayload]:
     recents: list[RecentFilePayload] = []
-    for entry in sidecar.list_recent_files():
+    entries = {str(entry.get("path")): entry for entry in sidecar.list_recent_files()}
+    documents = sidecar.read_editor_open_state().documents
+    ordered = [path for path in entries if path in documents]
+    ordered.extend(path for path in documents if path not in entries)
+    for document in ordered:
+        entry = entries.get(document, {"path": document})
         raw_path = entry.get("path")
         if not isinstance(raw_path, str) or not raw_path.strip():
             continue
@@ -113,7 +130,7 @@ def _recent_files_from_sidecar(sidecar: ProjectSidecar) -> list[RecentFilePayloa
                 "scroll_line": entry.get("scroll_line"),
             }
         )
-    return recents[:12]
+    return recents
 
 
 def _valid_member_paths(
@@ -145,7 +162,7 @@ def _client_foreground_payload(
     )
     raw_revision = entry.get("revision")
     revision = raw_revision if isinstance(raw_revision, int) else 0
-    return {
+    payload: ClientForegroundPayload = {
         "projectPath": project_path,
         "clientInstanceId": client_instance_id,
         "path": path if exists else None,
@@ -157,6 +174,17 @@ def _client_foreground_payload(
         "reason": reason,
         "ts": int(time.time() * 1000),
     }
+    binding = editor_renderer_binding(client_instance_id)
+    state = sidecar.read_editor_open_state()
+    for client in state.clients:
+        if client.client_id == binding.main_page_id:
+            payload["editorPlacement"] = {
+                "mainPageClientInstanceId": binding.main_page_id,
+                "area": binding.area, "revision": state.revision,
+                "paths": list(client.paths(binding.area)),
+            }
+            break
+    return payload
 
 
 def _require_client_instance_id(value: str) -> str:
@@ -178,6 +206,7 @@ def _payload_from_sidecar(
     open_file_exists = False
     invalid_open_file: str | None = None
 
+    from .worker_services.event_bus import current_project_generation
     return {
         "projectPath": normalized_project,
         "sidecarPath": str(ProjectSidecar.get_sidecar_path(normalized_project)),
@@ -189,7 +218,187 @@ def _payload_from_sidecar(
         "reason": reason,
         "ts": int(time.time() * 1000),
         "recents": _recent_files_from_sidecar(sidecar),
+        "projectGeneration": current_project_generation(project_path) or 0,
     }
+
+
+def read_client_open_state(project_path: str, client_id: str, *, reason: str) -> SidecarOpenStatePayload:
+    """Project only this renderer's placement; never broadcast all client tabs."""
+    return read_client_open_states(project_path, (client_id,), reason=reason)[client_id]
+
+
+def read_client_open_states(
+    project_path: str, client_ids: tuple[str, ...], *, reason: str,
+) -> dict[str, SidecarOpenStatePayload]:
+    """One disk read and document projection for a complete client fan-out."""
+    normalized = _normalize_path(project_path)
+    with _OPEN_STATE_LOCK:
+        sidecar = ProjectSidecar.load_or_create(normalized)
+        sidecar.reload()
+        common = _payload_from_sidecar(project_path=normalized, sidecar=sidecar, reason=reason)
+        state = sidecar.read_editor_open_state()
+        clients = {client.client_id: client for client in state.clients}
+        results: dict[str, SidecarOpenStatePayload] = {}
+        for client_id in client_ids:
+            payload = common.copy()
+            binding = registered_editor_renderer_binding(client_id)
+            if binding is not None:
+                client = clients.get(binding.main_page_id)
+                paths = (client.paths(binding.area) if client else state.documents if binding.area == "primary" else ())
+                payload["editorPlacement"] = {
+                    "mainPageClientInstanceId": binding.main_page_id, "area": binding.area,
+                    "revision": state.revision, "paths": list(paths),
+                }
+            results[client_id] = payload
+        return results
+
+
+class ClientCloseResult(TypedDict):
+    kind: Literal["presentation", "document"]
+    openState: SidecarOpenStatePayload
+    affectedForegrounds: list[ClientForegroundPayload]
+    clientForeground: ClientForegroundPayload
+    successor: str | None
+
+
+class ClientAreaCloseResult(TypedDict):
+    closedDocuments: list[str]
+    openState: SidecarOpenStatePayload
+    affectedForegrounds: list[ClientForegroundPayload]
+    clientForeground: ClientForegroundPayload
+
+
+class SecondaryRestoreRecovery(TypedDict):
+    openState: SidecarOpenStatePayload
+    affectedForegrounds: list[ClientForegroundPayload]
+
+
+def recover_orphaned_secondary(
+    project_path: str, client_id: str, *, expected_generation: int,
+) -> SecondaryRestoreRecovery | None:
+    """Caller excludes active/pending content on the event loop before this transaction."""
+    from .worker_services.event_bus import current_project_generation
+    project = _normalize_path(project_path)
+    with _OPEN_STATE_LOCK:
+        if (current_project_generation(project) or 0) != expected_generation:
+            raise ValueError("editor_project_generation_stale")
+        binding = registered_editor_renderer_binding(client_id)
+        if binding is None or binding.area != "secondary":
+            return None
+        sidecar = ProjectSidecar.load_or_create(project)
+        sidecar.reload()
+        if sidecar.get_client_foreground(client_id) is not None:
+            return None
+        state = sidecar.read_editor_open_state()
+        if not any(client.client_id == binding.main_page_id for client in state.clients):
+            return None
+        repaired = state.recover_secondary_to_primary(binding.main_page_id)
+        if repaired is state:
+            return None
+        sidecar.set_editor_open_state(repaired, expected_revision=state.revision)
+        changed: list[str] = []
+        if sidecar.get_client_foreground(binding.main_page_id) is None:
+            selected = next((path for path in repaired.placement(binding.main_page_id).primary
+                             if Path(path).is_file()), None)
+            if selected is not None:
+                sidecar.set_client_foreground(binding.main_page_id, selected, client_role="primary")
+                changed.append(binding.main_page_id)
+        sidecar.save()
+        return {
+            "openState": _payload_from_sidecar(project_path=project, sidecar=sidecar, reason="secondary_restore_recovered"),
+            "affectedForegrounds": [_client_foreground_payload(
+                project_path=project, sidecar=sidecar, client_instance_id=renderer,
+                reason="secondary_restore_recovered",
+            ) for renderer in changed],
+        }
+
+
+def close_client_area(
+    project_path: str, client_id: str, *, expected_revision: int, expected_generation: int,
+) -> ClientAreaCloseResult:
+    """Close an area's presentations in one transaction, not merely its foreground."""
+    from .worker_services.event_bus import current_project_generation
+    project = _normalize_path(project_path)
+    with _OPEN_STATE_LOCK:
+        if (current_project_generation(project) or 0) != expected_generation:
+            raise ValueError("editor_project_generation_stale")
+        binding = registered_editor_renderer_binding(client_id)
+        if binding is None or binding.area != "secondary":
+            raise ValueError("secondary_renderer_association_required")
+        sidecar = ProjectSidecar.load_or_create(project)
+        sidecar.reload()
+        state = sidecar.read_editor_open_state()
+        state.require_revision(expected_revision)
+        previous_foregrounds = sidecar.list_client_foreground_entries()
+        closed: list[str] = []
+        for path in state.placement(binding.main_page_id).secondary:
+            transition = state.close_presentation(binding.main_page_id, path, "secondary",
+                                                  expected_revision=state.revision)
+            if transition.kind == "document":
+                sidecar.remove_recent_file(path)
+                closed.append(path)
+            else:
+                sidecar.set_editor_open_state(transition.state, expected_revision=state.revision)
+            state = sidecar.read_editor_open_state()
+        sidecar.set_client_foreground(client_id, None, client_role="secondary")
+        sidecar.save()
+        changed = [renderer for renderer, entry in sidecar.list_client_foreground_entries().items()
+                   if previous_foregrounds.get(renderer) != entry]
+        return {
+            "closedDocuments": closed,
+            "openState": _payload_from_sidecar(project_path=project, sidecar=sidecar, reason="secondary_editor_closed"),
+            "affectedForegrounds": [_client_foreground_payload(
+                project_path=project, sidecar=sidecar, client_instance_id=renderer,
+                reason="secondary_editor_closed",
+            ) for renderer in changed],
+            "clientForeground": _client_foreground_payload(
+                project_path=project, sidecar=sidecar, client_instance_id=client_id,
+                reason="secondary_editor_closed",
+            ),
+        }
+
+
+def close_client_presentation(
+    project_path: str, file_path: str, client_id: str, *,
+    expected_revision: int, expected_generation: int,
+) -> ClientCloseResult:
+    """One locked mutation; consent/discard remain with their existing owners."""
+    from .worker_services.event_bus import current_project_generation
+    project, path = _normalize_path(project_path), _normalize_path(file_path)
+    with _OPEN_STATE_LOCK:
+        if (current_project_generation(project) or 0) != expected_generation:
+            raise ValueError("editor_project_generation_stale")
+        binding = registered_editor_renderer_binding(client_id)
+        if binding is None:
+            raise ValueError("editor_renderer_association_required")
+        sidecar = ProjectSidecar.load_or_create(project)
+        sidecar.reload()
+        state = sidecar.read_editor_open_state()
+        state.require_revision(expected_revision)
+        transition = state.close_presentation(binding.main_page_id, path, binding.area,
+                                              expected_revision=expected_revision)
+        if transition.kind == "document":
+            _, changed = sidecar.remove_recent_file(path)
+        else:
+            sidecar.set_editor_open_state(transition.state, expected_revision=state.revision)
+            changed = []
+            if sidecar.get_client_foreground(client_id) == path:
+                remaining = transition.state.placement(binding.main_page_id).paths(binding.area)
+                sidecar.set_client_foreground(client_id, remaining[0] if remaining else None,
+                                              client_role=binding.area)
+                changed.append(client_id)
+        sidecar.save()
+        foreground = _client_foreground_payload(project_path=project, sidecar=sidecar,
+                                                client_instance_id=client_id, reason="presentation_closed")
+        return {
+            "kind": transition.kind,
+            "openState": _payload_from_sidecar(project_path=project, sidecar=sidecar, reason="presentation_closed"),
+            "affectedForegrounds": [_client_foreground_payload(
+                project_path=project, sidecar=sidecar, client_instance_id=renderer_id,
+                reason="presentation_closed",
+            ) for renderer_id in changed],
+            "clientForeground": foreground, "successor": foreground["path"],
+        }
 
 
 def read_sidecar_open_state(
@@ -232,8 +441,9 @@ def write_sidecar_open_file(
     with _OPEN_STATE_LOCK:
         sidecar = ProjectSidecar.load_or_create(normalized_project)
         sidecar.reload()
+        state = sidecar.read_editor_open_state()
+        sidecar.set_editor_open_state(state.admit_document(normalized_file), expected_revision=state.revision)
         sidecar.record_document_activity(normalized_file)
-        sidecar.bump_open_state_revision()
         sidecar.save()
         return _payload_from_sidecar(
             project_path=normalized_project,
@@ -255,13 +465,25 @@ def read_client_foreground(
     with _OPEN_STATE_LOCK:
         sidecar = ProjectSidecar.load_or_create(normalized_project)
         sidecar.reload()
+        state = sidecar.read_editor_open_state()
+        binding = registered_editor_renderer_binding(normalized_client)
+        connected = state.connect(binding.main_page_id) if binding is not None else state
+        sidecar.set_editor_open_state(connected, expected_revision=state.revision)
         entry = sidecar.get_client_foreground_entry(normalized_client)
-        valid_members = _valid_member_paths(normalized_project, sidecar)
+        role = normalize_client_role(client_role if client_role is not None else binding.area if binding else None)
+        placement = connected.placement(binding.main_page_id) if binding else None
+        current_path = sidecar.get_client_foreground(normalized_client)
+        if binding and role == "secondary" and current_path is not None and current_path in connected.documents:
+            restored = connected.open_document(binding.main_page_id, current_path, "secondary")
+            sidecar.set_editor_open_state(restored, expected_revision=connected.revision)
+            placement = restored.placement(binding.main_page_id)
+        candidates = placement.paths(role) if placement else connected.documents
+        valid_members = [path for path in candidates if Path(path).is_file()]
         current = sidecar.get_client_foreground(normalized_client)
         if entry is None and seed_if_missing:
             legacy = sidecar.get_last_file()
             legacy_valid = legacy in valid_members if legacy else False
-            resolved_role = normalize_client_role(client_role)
+            resolved_role = role
             selected = (
                 None
                 if resolved_role == "secondary"
@@ -275,8 +497,7 @@ def read_client_foreground(
             )
             if legacy is not None and resolved_role == "primary":
                 sidecar.set_last_file(None)
-            sidecar.save()
-        elif entry is not None and current not in valid_members and current is not None:
+        elif entry is not None and current not in valid_members and (current is not None or valid_members):
             resolved_role = normalize_client_role(
                 client_role if client_role is not None else entry.get("client_role")
             )
@@ -289,7 +510,6 @@ def read_client_foreground(
                 ),
                 client_role=resolved_role,
             )
-            sidecar.save()
         elif entry is not None and client_role is not None:
             resolved_role = normalize_client_role(client_role)
             if entry.get("client_role") != resolved_role:
@@ -299,7 +519,7 @@ def read_client_foreground(
                     client_role=resolved_role,
                     seeded_from_legacy=entry.get("seeded_from_legacy") is True,
                 )
-                sidecar.save()
+        sidecar.save()
         return _client_foreground_payload(
             project_path=normalized_project,
             sidecar=sidecar,
@@ -329,9 +549,13 @@ def write_client_document_open(
     with _OPEN_STATE_LOCK:
         sidecar = ProjectSidecar.load_or_create(normalized_project)
         sidecar.reload()
+        state = sidecar.read_editor_open_state()
+        binding = registered_editor_renderer_binding(normalized_client)
+        updated = (state.connect(binding.main_page_id).open_document(binding.main_page_id, normalized_file, binding.area)
+                   if binding else state.admit_document(normalized_file))
+        sidecar.set_editor_open_state(updated, expected_revision=state.revision)
         sidecar.record_document_activity(normalized_file)
-        sidecar.bump_open_state_revision()
-        sidecar.set_client_foreground(normalized_client, normalized_file)
+        sidecar.set_client_foreground(normalized_client, normalized_file, client_role=binding.area if binding else None)
         sidecar.set_last_file(None)
         sidecar.save()
         return (
@@ -443,7 +667,6 @@ def remove_sidecar_recent_file(
         sidecar.reload()
         removed, changed_clients = sidecar.remove_recent_file(normalized_file)
         if removed:
-            sidecar.bump_open_state_revision()
             sidecar.save()
         open_state = _payload_from_sidecar(
             project_path=normalized_project,
@@ -476,7 +699,6 @@ def clear_sidecar_recent_files(
         sidecar = ProjectSidecar.load_or_create(normalized_project)
         sidecar.reload()
         sidecar.clear_recent_files()
-        sidecar.bump_open_state_revision()
         sidecar.save()
         return _payload_from_sidecar(
             project_path=normalized_project,

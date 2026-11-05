@@ -20,6 +20,7 @@ class ClientPresentationIdentityTests(unittest.TestCase):
                     "app_id=code_te2&client_instance_id=client_aaaaaaaaaaaa"
                     "&window_id=window_aaaaaaaaaaaaaaaaaaaa"
                     "&client_role=secondary"
+                    "&main_page_client_instance_id=client_bbbbbbbbbbbb"
                 )
             }
         )
@@ -29,6 +30,7 @@ class ClientPresentationIdentityTests(unittest.TestCase):
                 "clientInstanceId": "client_aaaaaaaaaaaa",
                 "windowId": "window_aaaaaaaaaaaaaaaaaaaa",
                 "clientRole": "secondary",
+                "mainPageClientInstanceId": "client_bbbbbbbbbbbb",
             },
         )
         self.assertEqual(
@@ -43,6 +45,16 @@ class ClientPresentationIdentityTests(unittest.TestCase):
             client_presentation_identity_from_environ(
                 {"QUERY_STRING": "client_instance_id=window_wrong"}
             )
+
+    def test_secondary_requires_explicit_parent_and_primary_cannot_claim_another(self) -> None:
+        with self.assertRaisesRegex(ValueError, "parent_identity_required"):
+            client_presentation_identity_from_environ({
+                "QUERY_STRING": "client_instance_id=client_aaaaaaaaaaaa&client_role=secondary",
+            })
+        with self.assertRaisesRegex(ValueError, "parent_identity_mismatch"):
+            client_presentation_identity_from_environ({
+                "QUERY_STRING": "client_instance_id=client_aaaaaaaaaaaa&main_page_client_instance_id=client_bbbbbbbbbbbb",
+            })
 
     def test_boot_overlay_keeps_shared_snapshot_and_foregrounds_independent(self) -> None:
         shared: dict[str, object] = {

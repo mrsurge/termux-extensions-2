@@ -459,11 +459,11 @@ export class SecondaryEditorRegistry {
       window.on("close", (event) => {
         if (this.#closingWindowInternally || this.#disposing) return;
         event.preventDefault();
-        void this.setMode("closed").catch((error) => {
-          console.error(
-            `[te2-desktop] Secondary editor close failed: ${errorMessage(error)}`,
-          );
-        });
+        const contents = this.#view?.webContents;
+        if (contents && !contents.isDestroyed()) {
+          const command: ElectronSecondEditorCommand = { type: "close" };
+          contents.send("te2-desktop:second-editor-command", command);
+        }
       });
       window.on("closed", () => {
         if (this.#window === window) this.#window = null;

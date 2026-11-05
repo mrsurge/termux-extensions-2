@@ -120,6 +120,12 @@ class SecondaryContentState:
     def close(self, client_id: str) -> None:
         self._slots.pop(client_id, None)
 
+    def has_content_or_pending(self, client_id: str, project_path: str, project_generation: int) -> bool:
+        slot = self._slots.get(client_id)
+        if slot is None or (slot.snapshot.project_path, slot.snapshot.project_generation) != (project_path, project_generation):
+            return False
+        return slot.pending is not None or slot.snapshot.content is not None
+
     def clear_project(self, project_path: str) -> None:
         for client_id, slot in tuple(self._slots.items()):
             if slot.snapshot.project_path == project_path:

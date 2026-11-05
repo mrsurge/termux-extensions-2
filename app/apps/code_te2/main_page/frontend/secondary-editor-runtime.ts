@@ -2,6 +2,7 @@ import { isUnknownArray } from '../../src/rpc/value-types.ts';
 import { bootInlineEditorHost } from '../../monaco_editor/inline_host.ts';
 import { bootHistoricalDiff, type HistoricalEditorView } from '../../monaco_editor/historical_monaco_boot.ts';
 import { SecondaryContentLifecycle } from './secondary-content-lifecycle.ts';
+import { closeSecondaryArea } from './secondary-area-close.ts';
 import {
   UI_IPC_RPC_METHODS,
   UI_IPC_RPC_NOTIFICATIONS,
@@ -48,6 +49,7 @@ interface SecondaryPresentation {
 }
 
 type SecondaryCommand =
+  | { type: 'close' }
   | { type: 'history'; projectPath: string; ticket: string; requestId?: string }
   | { type: 'open'; projectPath: string; path: string; requestId?: string }
   | { type: 'state'; projectPath: string; presentation: SecondaryPresentation }
@@ -513,6 +515,7 @@ export async function bootSecondaryEditorRuntime(
   let editorReady = false;
   let nativeReadySent = false;
   let busy = false;
+  let closeInFlight = false;
   let bootComplete = false;
   let pendingStateRefresh = false;
   let stateReadEpoch = 0;
@@ -691,30 +694,30 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function closeSecondaryEditor(): Promise<void> {
-    if (presentationBridge.kind === 'electron') {
-      await setMode('closed');
-      return;
-    }
     if (busy) return;
     busy = true;
+    closeInFlight = true;
     setStatus('Closing…');
     try {
-      await connection.request(
-        UI_IPC_RPC_METHODS.hostClientForegroundClear,
-        {},
-        8_000,
-      );
-      setCurrentPath('');
-      await setMode('closed');
+      await closeSecondaryArea({
+        readState: requestHostState,
+        closeMembership: fence => connection.request(UI_IPC_RPC_METHODS.hostClientForegroundClear, fence, 8_000),
+        closePresentation: async () => { setCurrentPath(''); await setMode('closed'); },
+      });
     } catch (error) {
       setStatus('');
       host.toast(`Close failed: ${errorMessage(error)}`);
     } finally {
+      closeInFlight = false;
       busy = false;
     }
   }
 
   async function handleNativeCommand(command: SecondaryCommand): Promise<void> {
+    if (command.type === 'close') {
+      await closeSecondaryEditor();
+      return;
+    }
     if (command.type === 'inputState') {
       setMobileEditorOwner(window, command.owner);
       publishMobileEditorModifierState(window, command.modifiers);
@@ -803,7 +806,7 @@ export async function bootSecondaryEditorRuntime(
         clientForeground: { path: nextPath },
         secondaryContent: params.secondaryContent,
       }).then(() => {
-        if (shouldClosePresentation) void setMode('closed');
+        if (shouldClosePresentation && !closeInFlight) void setMode('closed');
       }).catch((error: unknown) => setStatus(`Content unavailable: ${errorMessage(error)}`));
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
       setStatus('Switching project…');

@@ -19,7 +19,7 @@ const GECKO_IDENTITY_RESPONSE = "te2.clientIdentity.response";
 const ID_PATTERN = /^client_[a-z0-9]{12,64}$/;
 
 interface ElectronIdentityBridge {
-  readClientIdentity?: () => Promise<{ clientInstanceId: string }>;
+  readClientIdentity?: () => Promise<{ clientInstanceId: string; mainPageClientInstanceId?: string }>;
   resetClientIdentity?: () => Promise<{ clientInstanceId: string }>;
 }
 
@@ -29,6 +29,7 @@ interface NativeIdentityWindow extends Window {
 
 export interface CodeTe2ClientIdentity {
   clientInstanceId: string;
+  mainPageClientInstanceId?: string;
   windowId: string;
   consoleWorkerId: string;
   provider: "browser" | "electron" | "gecko" | "cefrium";
@@ -80,7 +81,7 @@ function requestGeckoClientIdentity(
   reset: boolean,
   role: CodeTe2ClientRole,
 ): Promise<string> {
-  const requestTarget = role === "secondary" && window.parent !== window
+  const requestTarget = codeTe2ClientRoleFromLocation() === "secondary" && window.parent !== window
     ? window.parent
     : window;
   return new Promise((resolve, reject) => {
@@ -131,6 +132,7 @@ async function nativeClientInstanceId(
   role: CodeTe2ClientRole,
 ): Promise<{
   clientInstanceId: string;
+  mainPageClientInstanceId?: string;
   provider: CodeTe2ClientIdentity["provider"];
   label: string;
 }> {
@@ -142,6 +144,8 @@ async function nativeClientInstanceId(
         : await electron.readClientIdentity();
     return {
       clientInstanceId: validatedClientInstanceId(result.clientInstanceId),
+      ...('mainPageClientInstanceId' in result && typeof result.mainPageClientInstanceId === 'string'
+        ? { mainPageClientInstanceId: validatedClientInstanceId(result.mainPageClientInstanceId) } : {}),
       provider: "electron",
       label: "Electron desktop installation",
     };
@@ -180,9 +184,21 @@ export async function resolveCodeTe2ClientIdentity(
 ): Promise<CodeTe2ClientIdentity> {
   const role = options.role === "secondary" ? "secondary" : "primary";
   const resolved = await nativeClientInstanceId(options.reset === true, role);
+  let mainPageClientInstanceId = resolved.clientInstanceId;
+  if (role === 'secondary') {
+    if (resolved.provider === 'electron') {
+      if (!('mainPageClientInstanceId' in resolved) || typeof resolved.mainPageClientInstanceId !== 'string') {
+        throw new Error('Update the Electron client before opening the second editor');
+      }
+      mainPageClientInstanceId = validatedClientInstanceId(resolved.mainPageClientInstanceId);
+    } else {
+      mainPageClientInstanceId = (await nativeClientInstanceId(false, 'primary')).clientInstanceId;
+    }
+  }
   const windowId = windowIdentity(role);
   return Object.freeze({
     ...resolved,
+    mainPageClientInstanceId,
     windowId,
     consoleWorkerId: `main_page:${resolved.clientInstanceId}:${windowId}`,
   });

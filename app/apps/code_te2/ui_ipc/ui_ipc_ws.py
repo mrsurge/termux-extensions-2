@@ -28,6 +28,7 @@ from ..client_presentation import (
     client_presentation_room,
     normalize_client_instance_id,
 )
+from ..editor_renderer_bindings import bind_editor_renderer
 from ..frontend_rpc_codec import (
     FrontendRpcCodecError,
     require_msgpack_v1_auth,
@@ -206,6 +207,14 @@ class UIIPCNamespace(NativeNamespace):
             except ValueError as exc:
                 raise ConnectionRefusedError(str(exc)) from exc
             assert browser_identity is not None
+            try:
+                bind_editor_renderer(
+                    browser_identity["clientInstanceId"],
+                    browser_identity.get("mainPageClientInstanceId", browser_identity["clientInstanceId"]),
+                    browser_identity["clientRole"],
+                )
+            except ValueError as exc:
+                raise ConnectionRefusedError(str(exc)) from exc
             _BROWSER_CLIENT_BY_SID[sid_text] = browser_identity["clientInstanceId"]
             await ns.enter_room(
                 sid_text,

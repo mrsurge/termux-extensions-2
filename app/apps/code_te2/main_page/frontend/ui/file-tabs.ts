@@ -23,7 +23,8 @@ interface FileTabsControllerDeps {
   formatFileNameDisplay: (name: string) => string;
   openFile: (path: string, options?: { keyboard: boolean }) => Promise<unknown>;
   openInSecondWindow?: (path: string) => Promise<unknown>;
-  closeRecentFile: (path: string) => Promise<unknown>;
+  closeRecentFile: (path: string, revision: number, projectPath: string, projectGeneration: number) => Promise<unknown>;
+  onError?: (message: string) => void;
   resetToNewFile: () => void;
   onActiveDraftChanged?: (path: string, hasDraft: boolean) => void;
 }
@@ -31,6 +32,8 @@ interface FileTabsControllerDeps {
 interface FileTabsOpenState {
   projectPath: string;
   recents: RecentFileEntry[];
+  revision: number;
+  projectGeneration: number;
 }
 
 const ORDER_STORAGE_PREFIX = 'code-te2:file-tabs:v1:';
@@ -101,13 +104,23 @@ function normalizedOpenState(state: unknown): FileTabsOpenState {
   const record = isRecord(state) ? state : {};
   const nestedOpenState = isRecord(record.openState) ? record.openState : null;
   const projection = nestedOpenState || record;
-  const recents = isUnknownArray(projection.recents)
+  let recents = isUnknownArray(projection.recents)
     ? projection.recents
       .map((entry) => recentFileEntry(entry))
       .filter((entry): entry is RecentFileEntry => entry !== null)
-      .slice(0, 12)
     : [];
+  const foreground = isRecord(record.clientForeground) ? record.clientForeground : {};
+  const placement = isRecord(projection.editorPlacement) ? projection.editorPlacement
+    : isRecord(foreground.editorPlacement) ? foreground.editorPlacement : null;
+  if (placement && isUnknownArray(placement.paths)) {
+    const byPath = new Map(recents.map(entry => [entry.path, entry]));
+    recents = placement.paths.filter((path): path is string => typeof path === 'string')
+      .map(path => byPath.get(path)).filter((entry): entry is RecentFileEntry => entry !== undefined);
+  }
   return {
+    revision: placement && typeof placement.revision === 'number' ? placement.revision
+      : typeof projection.revision === 'number' ? projection.revision : 0,
+    projectGeneration: typeof projection.projectGeneration === 'number' ? projection.projectGeneration : 0,
     projectPath: typeof projection.projectPath === 'string'
       ? projection.projectPath
       : !nestedOpenState && typeof record.activeProject === 'string'
@@ -259,6 +272,8 @@ async function applyFileIcon(icon: HTMLElement, fileName: string): Promise<void>
 
 export function createFileTabsController(deps: FileTabsControllerDeps) {
   let projectPath = '';
+  let openRevision = 0;
+  let projectGeneration = 0;
   let activePath = '';
   let recents: RecentFileEntry[] = [];
   let decorations = new Map<string, FileTabDecoration>();
@@ -391,22 +406,27 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     if (pendingClosePath) return;
     pendingClosePath = entry.path;
     let activeSuccessor: string | null = null;
+    const wasActive = entry.path === activePath;
+    const requestedProject = projectPath;
     try {
-      if (entry.path === activePath) {
+      if (wasActive) {
         const availablePaths = visualEntries()
           .filter((candidate) => candidate.exists)
           .map((candidate) => candidate.path);
         activeSuccessor = chooseFileTabCloseSuccessor(availablePaths, entry.path);
-        if (activeSuccessor) {
-          await deps.openFile(activeSuccessor);
-        }
       }
-      await deps.closeRecentFile(entry.path);
-      if (entry.path === activePath && !activeSuccessor) {
-        deps.resetToNewFile();
+      const result = await deps.closeRecentFile(entry.path, openRevision, requestedProject, projectGeneration);
+      if (projectPath !== requestedProject) return;
+      if (isRecord(result) && Object.hasOwn(result, 'successor')) {
+        activeSuccessor = typeof result.successor === 'string' ? result.successor : null;
+      }
+      if (wasActive && (activePath === entry.path || activePath === activeSuccessor || !activePath)) {
+        if (activeSuccessor) await deps.openFile(activeSuccessor);
+        else deps.resetToNewFile();
       }
     } catch (error) {
       console.error('[FileTabs] Failed to close recent file:', error);
+      deps.onError?.(error instanceof Error ? error.message : String(error));
     } finally {
       pendingClosePath = '';
     }
@@ -505,6 +525,9 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
 
   function refreshOpenState(state: unknown): void {
     const next = normalizedOpenState(state);
+    if (next.projectPath === projectPath && next.revision < openRevision) return;
+    openRevision = next.revision;
+    projectGeneration = next.projectGeneration;
     projectPath = next.projectPath;
     recents = next.recents;
     const order = mergeFileTabOrder(
@@ -732,6 +755,8 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
 
   function broadcastOpenState(state: unknown): void {
     if (!state) return;
+    const next = normalizedOpenState(state);
+    if (next.projectPath === projectPath && next.revision < openRevision) return;
     window.__codeTe2EditorState = state;
     refreshOpenState(state);
     refreshClientForeground(state);

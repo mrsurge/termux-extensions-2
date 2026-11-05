@@ -145,6 +145,7 @@ export type ElectronSecondEditorPlaceRequest = {
 };
 
 export type ElectronSecondEditorCommand =
+  | { type: "close" }
   | { type: "history"; projectPath: string; ticket: string }
   | {
       type: "open";
@@ -248,7 +249,7 @@ export type ElectronAppViewBridge = {
   inspect(): Promise<ElectronAppViewInspection>;
   reload(): Promise<{ ok: true }>;
   home(): Promise<{ ok: true }>;
-  readClientIdentity(): Promise<{ clientInstanceId: string }>;
+  readClientIdentity(): Promise<{ clientInstanceId: string; mainPageClientInstanceId: string }>;
   resetClientIdentity(): Promise<{ clientInstanceId: string }>;
   waitForAppPrerequisites(appId: string): Promise<{ ok: true }>;
   forceAssetUpdate(): Promise<AssetUpdateResult>;

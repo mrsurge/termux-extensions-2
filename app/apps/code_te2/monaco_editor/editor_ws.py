@@ -484,7 +484,6 @@ def editor_runtime_build_connect_snapshot(
     client_foreground: dict[str, object] | None = None
     if project and client_instance_id is not None:
         try:
-            open_state = read_sidecar_open_state(project, reason=reason)
             client_foreground = dict(
                 read_client_foreground(project, client_instance_id, reason=reason)
                 if client_role is None
@@ -497,6 +496,7 @@ def editor_runtime_build_connect_snapshot(
                     ),
                 )
             )
+            open_state = read_sidecar_open_state(project, reason=reason)
             current_path = client_foreground.get("path")
         except Exception:
             current_path = None

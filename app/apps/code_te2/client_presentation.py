@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Literal, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 from urllib.parse import parse_qs
 
 
@@ -15,6 +15,7 @@ class ClientPresentationIdentity(TypedDict):
     clientInstanceId: str
     windowId: str | None
     clientRole: ClientRole
+    mainPageClientInstanceId: NotRequired[str]
 
 
 def normalize_client_instance_id(value: object) -> str | None:
@@ -58,12 +59,19 @@ def client_presentation_identity_from_environ(
         if required:
             raise ValueError("client_identity_required")
         return None
+    role = normalize_client_role((query.get("client_role") or ["primary"])[0])
+    main_page_id = normalize_client_instance_id(
+        (query.get("main_page_client_instance_id") or [client_instance_id if role == "primary" else ""])[0]
+    )
+    if main_page_id is None:
+        raise ValueError("secondary_editor_parent_identity_required")
+    if role == "primary" and main_page_id != client_instance_id:
+        raise ValueError("primary_editor_parent_identity_mismatch")
     return {
         "clientInstanceId": client_instance_id,
         "windowId": normalize_window_id((query.get("window_id") or [""])[0]),
-        "clientRole": normalize_client_role(
-            (query.get("client_role") or ["primary"])[0]
-        ),
+        "clientRole": role,
+        "mainPageClientInstanceId": main_page_id,
     }
 
 

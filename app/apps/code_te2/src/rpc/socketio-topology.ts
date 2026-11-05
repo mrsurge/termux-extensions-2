@@ -29,6 +29,7 @@ export const SOCKET_IO_NAMESPACES = {
 
 interface SocketClientIdentity {
   clientInstanceId: string;
+  mainPageClientInstanceId?: string;
   windowId?: string | null;
   clientRole?: 'primary' | 'secondary';
 }
@@ -41,6 +42,11 @@ export function configureCodeTe2SocketIdentity(
   const clientInstanceId = String(identity.clientInstanceId || '').trim().toLowerCase();
   const windowId = String(identity.windowId || '').trim().toLowerCase();
   const clientRole = identity.clientRole === 'secondary' ? 'secondary' : 'primary';
+  const mainPageClientInstanceId = identity.mainPageClientInstanceId || (clientRole === 'primary' ? clientInstanceId : '');
+  if (!/^client_[a-z0-9]{12,64}$/.test(mainPageClientInstanceId)
+      || (clientRole === 'primary' && mainPageClientInstanceId !== clientInstanceId)) {
+    throw new Error('Code TE2 logical main-page identity is invalid');
+  }
   if (!/^client_[a-z0-9]{12,64}$/.test(clientInstanceId)) {
     throw new Error('Code TE2 socket client identity is invalid');
   }
@@ -49,6 +55,7 @@ export function configureCodeTe2SocketIdentity(
   }
   socketClientIdentity = Object.freeze({
     clientInstanceId,
+    mainPageClientInstanceId,
     windowId: windowId || null,
     clientRole,
   });
@@ -63,6 +70,7 @@ export function fileEditorSocketQuery(
   return {
     app_id: CODE_TE2_APP_ID,
     client_instance_id: socketClientIdentity.clientInstanceId,
+    main_page_client_instance_id: socketClientIdentity.mainPageClientInstanceId,
     client_role: socketClientIdentity.clientRole,
     ...(socketClientIdentity.windowId
       ? { window_id: socketClientIdentity.windowId }

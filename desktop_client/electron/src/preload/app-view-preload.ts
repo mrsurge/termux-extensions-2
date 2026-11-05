@@ -66,7 +66,7 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   home(): Promise<{ ok: true }> {
     return invokeElectron("home");
   },
-  readClientIdentity(): Promise<{ clientInstanceId: string }> {
+  readClientIdentity(): Promise<{ clientInstanceId: string; mainPageClientInstanceId: string }> {
     return invokeElectron("read_client_identity");
   },
   resetClientIdentity(): Promise<{ clientInstanceId: string }> {

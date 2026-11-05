@@ -410,6 +410,7 @@ async function handleAppViewControl(
   }
   if (command === "read_client_identity") {
     return {
+      mainPageClientInstanceId: electronClientIdentities.primaryClientInstanceId,
       clientInstanceId: role === "secondary"
         ? electronClientIdentities.secondaryClientInstanceId
         : electronClientIdentities.primaryClientInstanceId,

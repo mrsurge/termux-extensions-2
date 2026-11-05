@@ -124,10 +124,10 @@ test("native identity providers override relay-origin browser storage", async ()
   geckoHostWindow.document.body.appendChild(geckoFrame);
   const geckoWindow = geckoFrame.contentWindow;
   assert.ok(geckoWindow);
-  let geckoRole = "";
+  const geckoRoles = [];
   geckoHostWindow.postMessage = (message) => {
     if (message?.channel !== "te2.clientIdentity.request") return;
-    geckoRole = message.role;
+    geckoRoles.push(message.role);
     queueMicrotask(() => {
       geckoWindow.dispatchEvent(
         new geckoWindow.MessageEvent("message", {
@@ -148,7 +148,8 @@ test("native identity providers override relay-origin browser storage", async ()
     const gecko = await resolveCodeTe2ClientIdentity({ role: "secondary" });
     assert.equal(gecko.provider, "gecko");
     assert.equal(gecko.clientInstanceId, "client_a1b2c3d4e5f6");
-    assert.equal(geckoRole, "secondary");
+    assert.deepEqual(geckoRoles, ["secondary", "primary"]);
+    assert.equal(gecko.mainPageClientInstanceId, "client_a1b2c3d4e5f6");
   } finally {
     delete globalThis.window;
     geckoHostWindow.close();
@@ -175,7 +176,7 @@ test("native identity providers override relay-origin browser storage", async ()
     const cefrium = await resolveCodeTe2ClientIdentity({ role: "secondary" });
     assert.equal(cefrium.provider, "cefrium");
     assert.equal(cefrium.clientInstanceId, "client_abcdef123456");
-    assert.equal(cefriumRole, "secondary");
+    assert.equal(cefriumRole, "primary");
     const reset = await resolveCodeTe2ClientIdentity({ reset: true });
     assert.equal(reset.clientInstanceId, "client_112233445566");
   } finally {

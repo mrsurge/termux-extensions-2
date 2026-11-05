@@ -4003,12 +4003,35 @@ framework connection changes or the desktop process exits.
 
 ### Second editor surface
 
-Electron exposes one **Open in a Second Window** surface. It is a complete
-second Code TE2 client with a stable `clientInstanceId`, not another
-presentation id for the primary client. The backend-owned
-`ProjectSidecar.client_foregrounds` entry therefore remains its canonical file
-state, while shared membership, drafts, writes, diagnostics, and WBA logical
-documents retain their existing project-scoped authorities.
+Electron exposes one **Open in a Second Window** surface. Each physical
+renderer retains a stable `clientInstanceId`, but declares its logical
+`mainPageClientInstanceId` and primary/secondary area during connection.
+`editor_renderer_bindings.py` fixes that association for the worker lifetime;
+RPC payloads cannot reassign it. This uses the existing app identity trust
+boundary, not a new external authentication mechanism. Updated Electron
+preload/main code supplies the parent identity; older Electron clients must
+update before opening a secondary renderer.
+
+`ProjectSidecar.editor_open_state` owns shared document membership and ordered
+per-logical-client area placements, independently of bounded recent-file history.
+Unknown clients default existing documents to primary. Direct secondary opens
+need not add a primary presentation for that logical client. Close requests
+carry project-generation and state-revision fences: closing one of two local
+presentations is local; closing the last local presentation closes the shared
+document everywhere, even if another client presents it in both areas. Only
+that global close publishes DocumentClosed. Disconnect does not close documents.
+Foreground remains renderer-specific in `client_foregrounds`; UI open-state
+projections carry only that renderer's area membership. Closing a tab preserves
+persisted draft content. Secondary area closure removes its working-file
+placements in one revision/project-fenced backend transaction before mobile or
+Electron disposes the presentation; last-local files close globally while local
+primary copies remain open. A secondary boot with assigned working files but no
+foreground and no active/pending content rehomes orphaned placements to primary
+and publishes its repaired foreground. It does not infer closure from disconnect,
+remove global documents, disturb valid secondary views or replace history.
+The secondary tab-bar and same-DOM container/menu/focus
+cutover remain separate work; the current reduced renderer still uses its
+existing lifecycle below.
 
 Electron main owns one retained framework-partition `WebContentsView`. Dock,
 Collapse, Detach, and Attach reparent that exact renderer between the main

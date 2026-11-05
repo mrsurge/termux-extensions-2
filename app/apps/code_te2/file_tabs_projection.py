@@ -153,7 +153,7 @@ def _build_projection_sync(
     )
 
     items: list[FileTabDecoration] = []
-    for entry in sidecar.list_recent_files()[:12]:
+    for entry in sidecar.list_open_documents():
         raw_path = entry.get("path")
         if not isinstance(raw_path, str) or not raw_path:
             continue

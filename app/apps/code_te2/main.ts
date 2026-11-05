@@ -252,6 +252,12 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       ...openState,
       source,
     };
+    if (isUnknownArray(clientForeground.editorPlacement)) {
+      throw new Error('Invalid editor placement projection');
+    }
+    if (clientForeground.editorPlacement && typeof clientForeground.editorPlacement === 'object') {
+      openStatePayload.editorPlacement = clientForeground.editorPlacement;
+    }
     if (projectPath) openStatePayload.projectPath = projectPath;
     window.dispatchEvent(
       new CustomEvent('code-te2:open-state-changed', {
@@ -1063,10 +1069,11 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     )
       ? (path: string) => openInSecondWindow(path)
       : undefined,
-    closeRecentFile: (path: string) => uiIpcConnections.requestUiIpc(
+    closeRecentFile: (path: string, revision: number, projectPath: string, projectGeneration: number) => uiIpcConnections.requestUiIpc(
       UI_IPC_RPC_METHODS.hostRecentFileClose,
-      { path },
+      { path, revision, projectPath, projectGeneration },
     ),
+    onError: message => host.toast(message),
     resetToNewFile: () => resetActiveFileState({ resetPicker: false }),
     onActiveDraftChanged: (_path, hasDraft) => {
       restoredSessionActive = hasDraft;

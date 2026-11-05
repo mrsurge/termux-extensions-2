@@ -93,6 +93,33 @@ def close_secondary_content(client_id: str) -> None:
     _foreground_revisions.pop(client_id, None)
 
 
+async def reconcile_secondary_restore(client_id: str, client_role: str) -> bool:
+    """Repair empty secondary restores, never disconnects or retained content.
+
+    The content check and locked sidecar transaction run without an intervening
+    await on the event loop, so a pending history activation cannot slip between.
+    """
+    if client_role != "secondary":
+        return False
+    project = get_history_store().get_active_project()
+    if not project:
+        return False
+    generation = event_bus.current_project_generation(project) or 0
+    if _state.has_content_or_pending(client_id, project, generation):
+        return False
+    from ..open_state_backend import recover_orphaned_secondary
+    from ..open_state_events import publish_open_state_changed, publish_client_foreground_changed
+    recovered = recover_orphaned_secondary(project, client_id, expected_generation=generation)
+    if recovered is None:
+        return False
+    await publish_open_state_changed(recovered["openState"], source="secondary_restore_recovered",
+                                     project_generation=generation)
+    for foreground in recovered["affectedForegrounds"]:
+        await publish_client_foreground_changed(recovered["openState"], foreground,
+            source="secondary_restore_recovered", project_generation=generation, project_editor_snapshot=True)
+    return True
+
+
 def reconcile_secondary_foreground(foreground: ClientForegroundPayload) -> None:
     # Queued working-file facts may precede the historical commit. They must not
     # erase the newly committed content when the event bus catches up.

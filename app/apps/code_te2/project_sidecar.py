@@ -13,6 +13,7 @@ from typing import ClassVar, Literal, TypeAlias, cast
 
 from .code_te2_paths import code_te2_paths
 from . import sidecar_profile
+from .editor_open_state import EditorOpenState, StaleEditorOpenState
 
 JsonDict: TypeAlias = dict[str, object]
 StringDict: TypeAlias = dict[str, str]
@@ -196,6 +197,9 @@ class ProjectSidecar:
             "tracked_jobs": [],
             # Per-project MRU list. This is now the SSOT for recent files.
             "recent_files": [],
+            # S2 foundation only: separate open membership from bounded MRU.
+            # None is lazy legacy migration; live RPCs do not use this yet.
+            "editor_open_state": None,
             # Last opened file for this project (SSOT).
             # This field is migration input only. Client foreground authority
             # lives in client_foregrounds and clears this value on first seed.
@@ -869,6 +873,10 @@ class ProjectSidecar:
         """Increment and return the open-file state revision."""
         revision = self.get_open_state_revision() + 1
         self._data["open_state_revision"] = revision
+        raw = self._data.get("editor_open_state")
+        if raw is not None:
+            state = EditorOpenState.from_data(raw)
+            self._data["editor_open_state"] = EditorOpenState(revision, state.documents, state.clients).to_data()
         return revision
 
     def set_last_file(self, file_path: str | None) -> str | None:
@@ -951,6 +959,7 @@ class ProjectSidecar:
         return revision
 
     def reconcile_client_foregrounds_after_close(self, file_path: str) -> list[str]:
+        from .editor_renderer_bindings import editor_renderer_binding, registered_editor_renderer_binding
         normalized = _normalize_file_path(file_path)
         remaining = [
             str(entry.get("path"))
@@ -963,29 +972,83 @@ class ProjectSidecar:
             if entry.get("path") != normalized:
                 continue
             role: ClientRole = "secondary" if entry.get("client_role") == "secondary" else "primary"
+            binding = editor_renderer_binding(client_id)
+            state = self.read_editor_open_state()
+            group_remaining: tuple[str, ...] = ()
+            for placement in state.clients:
+                if placement.client_id == binding.main_page_id:
+                    group_remaining = placement.paths(role)
+                    break
             self.set_client_foreground(
                 client_id,
-                None if role == "secondary" else fallback,
+                (group_remaining[0] if group_remaining else None)
+                if registered_editor_renderer_binding(client_id) is not None
+                else (None if role == "secondary" else fallback),
                 client_role=role,
             )
             changed.append(client_id)
         return changed
+
+    def read_editor_open_state(self) -> EditorOpenState:
+        """Read S2 state, or derive legacy membership without mutating disk."""
+        raw = self._data.get("editor_open_state")
+        if raw is not None:
+            return EditorOpenState.from_data(raw)
+        documents: list[str] = []
+        root = Path(self.project_path)
+        for entry in self.list_recent_files():
+            path = entry.get("path")
+            if not isinstance(path, str) or not path.strip():
+                continue
+            normalized = _normalize_file_path(path)
+            if Path(normalized).is_relative_to(root) and normalized not in documents:
+                documents.append(normalized)
+        return EditorOpenState(revision=self.get_open_state_revision(), documents=tuple(documents))
+
+    def set_editor_open_state(self, state: EditorOpenState, *, expected_revision: int) -> None:
+        """Stage S2 state; caller owns transaction lock/reload/save and consent.
+
+        Not wired to legacy mutations: activation must migrate all read/write
+        paths together, including logical primary/secondary client association.
+        """
+        current = self.read_editor_open_state()
+        current.require_revision(expected_revision)
+        if state.revision < current.revision or (state.revision == current.revision and state != current):
+            raise StaleEditorOpenState("editor_open_state_revision_must_advance")
+        root = Path(self.project_path)
+        for path in state.documents:
+            if _normalize_file_path(path) != path or not Path(path).is_relative_to(root):
+                raise ValueError("editor_document_outside_project_or_noncanonical")
+        self._data["editor_open_state"] = state.to_data()
+        self._data["open_state_revision"] = state.revision
 
     def list_recent_files(self) -> list[DraftEntry]:
         """Return list of recent files for this project."""
         recent = _as_dict_list(self._data.get("recent_files"))
         return [dict(e) for e in recent]
 
+    def list_open_documents(self) -> list[DraftEntry]:
+        entries = {str(entry.get("path")): entry for entry in self.list_recent_files()}
+        paths = self.read_editor_open_state().documents
+        ordered = [path for path in entries if path in paths]
+        ordered.extend(path for path in paths if path not in entries)
+        return [dict(entries.get(path, {"path": path})) for path in ordered]
+
     def remove_recent_file(self, file_path: str) -> tuple[bool, list[str]]:
         """Remove one shared document and reconcile affected client foregrounds."""
         normalized = _normalize_file_path(file_path)
+        state = self.read_editor_open_state()
+        if normalized not in state.documents:
+            return False, []
+        self.set_editor_open_state(
+            state.close_document(normalized, expected_revision=state.revision),
+            expected_revision=state.revision,
+        )
         recent = _as_dict_list(self._data.get("recent_files"))
         remaining = [
             entry for entry in recent
             if entry.get("path") != normalized
         ]
-        if len(remaining) == len(recent):
-            return False, []
         self._data["recent_files"] = remaining
         if self.get_last_file() == normalized:
             self._data["last_file"] = None
@@ -994,6 +1057,11 @@ class ProjectSidecar:
 
     def clear_recent_files(self) -> None:
         """Clear shared document membership and every client foreground."""
+        from .editor_open_state import EditorPlacement
+        state = self.read_editor_open_state()
+        self.set_editor_open_state(EditorOpenState(
+            state.revision + 1, (), tuple(EditorPlacement(client.client_id) for client in state.clients),
+        ), expected_revision=state.revision)
         self._data["recent_files"] = []
         self._data["last_file"] = None
         entries = self._client_foreground_entries()

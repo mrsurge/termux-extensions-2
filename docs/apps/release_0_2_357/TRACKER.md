@@ -46,6 +46,101 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   for unified same-DOM menu/focus integration, not an assumed tab-bar side effect.
 - [ ] S2 approve typed shared-document/per-client-placement contract, migration
   and validated backend close semantics; implement through existing state owners.
+- [x] S2a foundation approved/implemented (2026-11-04), **not live cut over**:
+  editor_open_state.py supplies immutable typed shared document membership and
+  per-logical-client ordered primary/secondary placements, revision-fenced close
+  transitions and validated JSON persistence. Duplicate tabs within an area are
+  idempotent; direct secondary admission defaults other clients to primary;
+  reconnect retains known placement. One-of-two close is local; last-local close
+  removes all clients' presentations even when another client has two. Disconnect
+  is not a mutation. Capacity rejects new clients without evicting existing ones.
+- [x] ProjectSidecar read/set helpers add a dormant editor_open_state field.
+  Lazy migration derives current legacy MRU membership/revision without disk
+  mutation; persisted S2 membership is independent of the 12-entry MRU. Store
+  checks revision/canonical project paths; existing lock/reload/save owns the
+  transaction. No live legacy reader/writer/RPC/WBA behavior switched yet.
+- [x] 37 targeted state/persistence/legacy-open/secondary-content tests pass;
+  strict mypy plus extra/disallow-Any checks pass on editor_open_state.py,
+  project_sidecar.py and test_editor_open_state.py. This is a scoped typing gate,
+  not a whole-tree claim. New module mypyc C generation passes (two extension
+  targets); no native compilation/activation, frontend/OTA build or restart.
+- [x] S2b approved/implemented: explicit immutable renderer-to-logical-client
+  association, atomic open/close/bootstrap/restore membership and targeted area
+  projections. Close checks project generation and membership revision. Local
+  closes retain the shared document; last-local closes publish DocumentClosed
+  globally. Draft content survives tab closure. Reopened documents reject delayed
+  close publication. Gecko secondary identity queries target their parent even
+  when requesting its primary ID. Electron supplies the parent ID explicitly.
+- [ ] S2b live acceptance: refresh Python worker (interpreted or new activated
+  mypyc build), frontend and Electron client. No shared framework restart or
+  Android/OTA publication performed. Secondary tabs/container/focus remain below.
+- [ ] S2b **live failure reported 2026-11-04; not accepted**: opening
+  pyproject.toml only in a client's second editor correctly opens it in other
+  clients' primary editors, but closing that second-editor presentation leaves
+  the initiating client with zero open files while the other clients retain
+  pyproject.toml. The last-local close must close every presentation in every
+  client. Reload also fails to project a backend-open file into primary when
+  that client has no corresponding presentation. Trace both paths before
+  claiming the shared-membership/placement cutover correct; the automated tests
+  did not cover this failing live sequence. User requested recording only in
+  this pass, not an editor-behavior fix. Iframe removal and extra-key focus
+  routing are still unimplemented.
+- [x] Follow-up semantic repair implemented (2026-11-04), pending live test:
+  the actual secondary close RPC now closes all secondary-area working-file
+  presentations atomically, retaining local primary copies and globally closing
+  last-local files. Revision/project fences reject stale closes. Both mobile
+  and Electron header closes commit backend membership before hiding; detached
+  Electron window X asks its renderer to run the same transaction rather than
+  silently disposing it. In-flight close notifications cannot dispose that
+  renderer before its RPC acknowledgement. Restore repairs an existing empty
+  primary foreground when its placement has a valid backend-open file. Persisted
+  draft contents and disk contents survive document closure.
+- [x] Semantic-repair automated gate: 59 backend tests, strict extra/no-Any
+  checks on the three touched Python modules/tests, 30 focused frontend tests,
+  frontend/WBA no-Any checks and build, Electron typecheck/127 tests/compile pass.
+- [ ] First live gate: refresh worker/frontend/Electron; repeat secondary-only
+  open -> secondary close -> all clients empty -> reload; repeat primary+secondary
+  local ownership -> secondary close retains primary; repeat remote open into
+  an already-empty client's primary and reload. Existing stale placement from
+  the failed old close must also be checked, not assumed repaired by new close
+  routing. No new mypyc activation, shared runtime restart or OTA publication.
+- [x] Orphaned-secondary restore repair implemented after live Pixel inspection:
+  README.md was globally open but assigned only to that client's secondary,
+  with both working foregrounds empty and a hidden frame displaying No file open.
+  On the bound secondary's boot-snapshot request, backend reconciliation now
+  rehomes those orphaned assignments to primary and seeds its empty foreground.
+  Global membership, other clients' placements, existing primary foregrounds and
+  document lifetime are unchanged. Valid secondary foregrounds and active/pending
+  historical content block recovery. Content guard and sidecar mutation have no
+  intervening await; revision/generation fencing and targeted foreground
+  publication preserve restore/open races and an already-booted primary.
+- [x] Recovery gate: 64 backend tests pass, including the actual boot-snapshot
+  route, exact orphaned state, idempotence, valid working view, pending/active
+  history and stale project generation. Strict extra/no-Any checks pass on six
+  changed modules/tests. This follow-up is Python-only: requires matching mypyc
+  build/activation and worker refresh, not another frontend/OTA publication.
+- [ ] Live orphaned-state acceptance remains open. No saved client/project
+  state was cleared and no live runtime was restarted during investigation/fix.
+- [x] 2026-11-05 live close receipt: user updated runtime/assets, opened a
+  document only in mobile secondary with no other files open, then closed it.
+  Read-only inspection confirmed backend revision 4259 has zero global documents,
+  empty primary/secondary placements for all three stored logical clients and
+  cleared foregrounds for those clients. The sole console-connected main page
+  had no tabs or secondary frame. Other clients were disconnected: their stored
+  state was verified, not their rendered UI. This accepts that global-close
+  scenario, not the still-pending iframe/focus work or every restore scenario.
+- [ ] Combined foundation approved: after semantic gate, replace one-shot
+  m_editor_app.ts/global boot state and fixed DOM-ID ownership with explicit
+  instance-scoped working-editor lifecycle and safe shared model/provider
+  ownership; remove the mobile/browser secondary working iframe. Historical and
+  extension isolation and Electron native detach/overlay remain. Unify active-area
+  focus/extra-key ownership before secondary tab UI. Current source still uses
+  the working iframe; these lifecycle/focus changes are not yet implemented.
+- [x] S2b automated: backend integration/state/legacy tests and focused frontend
+  identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
+  pass. Electron strict checks and unit suite pass. Four existing TextMate
+  transport fixtures still use the retired full-grammar request instead of the
+  chunk protocol; that wider suite is not green and is not claimed as passing.
 - [ ] S2 secondary tab bar/direct Explorer-to-secondary open; unique tabs per
   area, unknown remote placement -> primary, restore/reconnect reconciliation.
   Test local presentation removal versus global last-local close, other-client

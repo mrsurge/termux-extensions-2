@@ -41,6 +41,9 @@ document/draft/autosave/WBA state machines or let a frontend own global admissio
   without known placement defaults to primary. This also applies after offline
   opens, initial connection and reconnect. Reconcile against current backend
   membership; stale stored placement must not reopen a globally closed document.
+- Explorer context-menu wording: change "Open in a second window" to
+  "Open in second window". Apply with the upcoming presentation UI work;
+  this note does not change the current label yet.
 - Represent placement with explicit primary/secondary flags (or equivalent
   typed enum/bitmask). Derive the local 0/1/2 presentation count; count alone
   cannot identify which area presents the file. Never sum counts across clients
