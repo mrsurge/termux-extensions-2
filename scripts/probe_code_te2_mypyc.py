@@ -32,7 +32,7 @@ from profile_code_te2_import import check_event
 from mypyc_build_workflow import (
     activate, build_lock, cache_key, compiler_cache, publish_snapshot,
     prune, source_digest, toolchain, build_fingerprint, reusable_snapshot, snapshot_status,
-    mypy_build_args, progress_build_ext,
+    mypy_build_args, progress_build_ext, generated_cache_inputs, report_cache_inputs,
 )
 from framework.bootstrap.compiler_cache_preflight import ccache_health
 
@@ -209,17 +209,24 @@ def build(output: Path, cache_root: Path, *, fingerprinted: bool = False) -> Pat
                     "explicitly disabled; full changed-extension rebuilds" if os.environ.get('NO_CACHE') == '1'
                     else "unavailable; full changed-extension rebuilds")
                 print(f'Build cache: {cache}; ccache: {cache_status}', flush=True)
-                progress_command = progress_build_ext(sys.stdout, cache_enabled=cached)
+                progress_stream = sys.stdout
+                progress_command = progress_build_ext(progress_stream, cache_enabled=cached)
                 with log_path.open("w") as log, redirect_stdout(log), redirect_stderr(log):
                     extensions = mypycify(
                         mypy_build_args(REPO, sources),
                         opt_level="3", multi_file=True, target_dir=str(cache / "csrc"),
                     )
+                    inputs = generated_cache_inputs(cache, identity)
+                    report_cache_inputs(cache / 'compile-inputs.json', inputs, progress_stream)
                     setup(
                         name="te2-mypyc-domain-probe", ext_modules=extensions,
                         cmdclass={"build_ext": progress_command},
                         script_args=["build_ext", "--build-lib", str(cache / "lib"), "--build-temp", str(cache / "temp")],
                     )
+                    inputs_path = cache / 'compile-inputs.json'
+                    staged_inputs = inputs_path.with_suffix('.json.tmp')
+                    staged_inputs.write_text(json.dumps(inputs, indent=2, sort_keys=True))
+                    staged_inputs.replace(inputs_path)
             publish_snapshot(REPO, cache, output, manifest, [ext.name for ext in extensions],
                              identity, digest, time.monotonic() - started, link_resources)
         except BaseException:

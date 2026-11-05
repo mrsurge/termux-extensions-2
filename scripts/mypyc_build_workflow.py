@@ -333,6 +333,70 @@ def build_lock(path: Path) -> Generator[None]:
 
 @contextmanager
 def compiler_cache(cache_root: Path, identity: dict[str, object]) -> Generator[bool]:
+    """Keep compiler diagnostics and ccache's locale inputs stable across launchers."""
+    keys = ('LANG', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES')
+    saved = {key: os.environ.get(key) for key in keys}
+    os.environ.update({key: 'C' for key in keys})
+    try:
+        with _compiler_cache(cache_root, identity) as enabled:
+            yield enabled
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def generated_cache_inputs(cache: Path, identity: dict[str, object]) -> dict[str, object]:
+    """Content-only evidence; timestamps must not imply changed compilation inputs."""
+    generated: dict[str, str] = {}
+    for path in sorted((cache / 'csrc').rglob('*')):
+        if path.is_file() and path.suffix in {'.c', '.h'}:
+            generated[path.relative_to(cache / 'csrc').as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    environment = {key: os.environ[key] for key in (
+        'LANG', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'GCC_COLORS', 'CPATH',
+        'C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH', 'OBJC_INCLUDE_PATH',
+        'SOURCE_DATE_EPOCH', 'COMPILER_PATH', 'GCC_EXEC_PREFIX', 'CC',
+        'CCACHE_COMPILERCHECK', 'CCACHE_DIR', 'CCACHE_SLOPPINESS',
+    ) if key in os.environ}
+    return {'schema': 1, 'generated': generated, 'environment': environment,
+            'toolchain': hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()}
+
+
+def report_cache_inputs(previous_path: Path, current: dict[str, object], stream: TextIO) -> None:
+    """Compare with the last successful build, including interrupted-build recovery."""
+    try:
+        previous = cast(object, json.loads(previous_path.read_text()))
+    except (OSError, ValueError):
+        print('[mypyc cache inputs] No previous successful-build input record', file=stream, flush=True)
+        return
+    if not isinstance(previous, dict):
+        print('[mypyc cache inputs] Previous input record is invalid', file=stream, flush=True)
+        return
+    prior = cast(dict[object, object], previous)
+    before = prior.get('generated')
+    after = current.get('generated')
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        print('[mypyc cache inputs] Previous generated-file record is invalid', file=stream, flush=True)
+        return
+    old = cast(dict[object, object], before)
+    new = cast(dict[object, object], after)
+    changed = sorted(key for key in old.keys() | new.keys()
+                     if isinstance(key, str) and old.get(key) != new.get(key))
+    sources = sum(name.endswith('.c') for name in changed)
+    headers = sum(name.endswith('.h') for name in changed)
+    environment_changed = prior.get('environment') != current.get('environment')
+    toolchain_changed = prior.get('toolchain') != current.get('toolchain')
+    print(f'[mypyc cache inputs] Changed/added/removed: {sources} C sources, {headers} headers; '
+          f'compiler environment changed={environment_changed}; toolchain changed={toolchain_changed}',
+          file=stream, flush=True)
+    for name in changed:
+        print(f'[mypyc cache inputs] {name}', file=stream, flush=True)
+
+
+@contextmanager
+def _compiler_cache(cache_root: Path, identity: dict[str, object]) -> Generator[bool]:
     """Content/header/flags-aware compiler reuse; never cache linking."""
     if os.environ.get('NO_CACHE') == '1':
         previous = os.environ.get('CCACHE_DISABLE')

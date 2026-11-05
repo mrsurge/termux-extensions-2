@@ -6243,6 +6243,18 @@ and retain strict payload/ABI validation. No startup mypyc compile or packaged
 Cargo fallback is introduced. See the native worker README for snapshot recipes,
 ccache probing/progress and activation contracts.
 
+The compiler-cache context fixes LANG/LC_ALL/LC_CTYPE/LC_MESSAGES to portable
+`C` for compiler subprocesses and restores the caller environment afterward.
+Ccache hashes locale inputs, so otherwise identical terminal/agent launches can
+miss despite generating byte-identical objects. This does not disable header,
+compiler, flags or source validation. A first build under the normalized locale
+may need to warm its entries once. Each successful compilation atomically records
+`compile-inputs.json` in its toolchain cache: generated C/header content hashes,
+selected compiler environment and toolchain digest. Subsequent builds report
+changed/added/removed generated files and environment/toolchain drift. Timestamps
+alone are not reported as content changes; interrupted compilations retain the
+previous successful input record. Compiler commands remain in build.log.
+
 Mypyc type-check/shared-library success does not prove domain runtime parity.
 Retain interpreted islands or adapt them with behavior tests: mutable `ClassVar`
 dataclass caches, async-generator/coroutine deletion, builtin-exception inheritance
