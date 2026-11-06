@@ -30,6 +30,7 @@ type DirectionLike = unknown;
 
 export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
   let layoutObserver: ResizeObserver | null = null;
+  let disposed = false;
   let lastKnownReadOnly: boolean | null = null;
   let transientReadOnlyDepth = 0;
 
@@ -47,6 +48,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
   }
 
   function layoutEditors(): void {
+    if (disposed) return;
     const diffEditor = deps.getDiffEditor() as { layout?(): void } | null;
     const editor = deps.getEditor() as { layout?(): void } | null;
     try { if (diffEditor && diffEditor.layout) diffEditor.layout(); } catch (_) {}
@@ -55,7 +57,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
 
   function ensureLayoutObserver(): void {
     try {
-      if (layoutObserver) return;
+      if (disposed || layoutObserver) return;
       const win = deps.getWindow() as Window & { ResizeObserver?: typeof ResizeObserver };
       if (!win.ResizeObserver) return;
       const container = getEditorContainer();
@@ -187,6 +189,13 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
   }
 
   return {
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      layoutObserver?.disconnect();
+      layoutObserver = null;
+      deps.getWindow().removeEventListener('resize', layoutEditors);
+    },
     getEditorContainer,
     layoutEditors,
     ensureLayoutObserver,

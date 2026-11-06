@@ -431,7 +431,7 @@ test('file tab context menu opens the selected tab in the second editor', async 
     assert.equal(contextMenu.defaultPrevented, true);
     assert.equal(globalThis.document.body.children.length, 1);
     const menu = globalThis.document.body.children[0];
-    assert.equal(menu.children[0].textContent, 'Open in a Second Window');
+    assert.equal(menu.children[0].textContent, 'Open in Second Window');
     menu.children[0].click();
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(openedSecond, ['/workspace/b.go']);

@@ -12,10 +12,11 @@ export function installEditorKeyboardRuntime(deps: {
   updatePreference(key: string, value: boolean): Promise<unknown>;
 }) {
   const bound = new WeakSet<object>();
+  let disposed = false;
   let toggling = false;
   const current = () => deps.getEditor() as KeyboardEditor | null;
   async function toggleRelative(): Promise<void> {
-    if (toggling) return;
+    if (disposed || toggling) return;
     toggling = true;
     try {
       await deps.updatePreference('relativeLineNumbers', !getBooleanPref(deps.getPrefs(), 'relativeLineNumbers'));
@@ -46,14 +47,19 @@ export function installEditorKeyboardRuntime(deps: {
   window.addEventListener('code-te2:focus-editor', focus);
   document.addEventListener('keydown', keydown, true);
   function dispose() {
+    if (disposed) return;
+    disposed = true;
     window.removeEventListener('code-te2:relative-numbers-query', query);
     window.removeEventListener('code-te2:palette-action', action);
     window.removeEventListener('code-te2:focus-editor', focus);
     document.removeEventListener('keydown', keydown, true);
+    window.removeEventListener('pagehide', dispose);
   }
   window.addEventListener('pagehide', dispose, { once: true });
   return {
+    dispose,
     bindEditor() {
+      if (disposed) return;
       const editor = current();
       if (!editor || bound.has(editor)) return;
       bound.add(editor);

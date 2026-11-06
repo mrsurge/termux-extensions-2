@@ -303,7 +303,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     const openSecond = document.createElement('button');
     openSecond.type = 'button';
     openSecond.setAttribute('role', 'menuitem');
-    openSecond.textContent = 'Open in a Second Window';
+    openSecond.textContent = 'Open in Second Window';
     openSecond.addEventListener('click', () => {
       closeContextMenu();
       void deps.openInSecondWindow?.(entry.path).catch((error: unknown) => {

@@ -303,13 +303,25 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
 - `app/apps/code_te2/monaco_editor/inline_host.ts`
   - Mounts the inline editor into `#editor-frame`
   - Injects the inline host markup (`#te2-breadcrumbs`, `#fh-monaco`)
-  - Loads required CSS/vendor assets and then imports `m_editor_app.ts`
+  - Loads required CSS/vendor assets, imports `m_editor_app.ts`, and explicitly
+    calls `startWorkingEditorRuntime` with the snapshot and mention callback.
+    Importing that module alone no longer boots an editor.
+  - `editor_boot_owner.ts` retains one boot promise per page's working mount;
+    repeated requests do not replace live DOM or overwrite boot inputs. A failed
+    partial boot remains failed until reload. A second mount in the same realm
+    is deliberately rejected while provider/model and fixed-ID ownership is
+    still page-scoped. This is a migration guard, not same-DOM multi-editor support.
 - `app/apps/code_te2/monaco_editor/m_editor_app.ts`
   - Monaco editor bootstrap source of truth
   - Model management (plain editor vs diff editor)
   - Draft overlay decorations (blue inserts / yellow deletes)
   - Editor RPC client wiring for `/rpc/editor`
   - Direct WBA Socket.IO client wiring for `/wba`
+  - Page teardown releases host-action RPC subscriptions/input bindings,
+    keyboard listeners, and the UI layout observer/resize handler. Those owners
+    have idempotent disposal and reject rebinding/late callbacks after disposal.
+    Global provider/model ownership, iframe removal, and shared active-area
+    menu/extra-key routing remain subsequent lifecycle work.
 - `app/apps/code_te2/monaco_editor/editor_rpc_transport.ts`
   - Editor-facing JSON-RPC transport over `/rpc/editor`
 - `app/apps/code_te2/monaco_editor/editor_wba_rpc_transport.ts`

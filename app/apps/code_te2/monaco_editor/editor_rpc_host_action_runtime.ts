@@ -52,11 +52,13 @@ interface EditorRpcHostActionRuntimeDeps {
 interface EditorRpcHostActionRuntime {
   connect(): void;
   bindEditorHooks(): void;
+  dispose(): void;
 }
 
 export function createEditorRpcHostActionRuntime(
   deps: EditorRpcHostActionRuntimeDeps,
 ): EditorRpcHostActionRuntime {
+  let disposed = false;
   let adapterStateUnsubscribe: (() => void) | null = null;
   let projectSwitchingUnsubscribe: (() => void) | null = null;
   let projectSwitchedUnsubscribe: (() => void) | null = null;
@@ -75,9 +77,11 @@ export function createEditorRpcHostActionRuntime(
   }
 
   function connect(): void {
+    if (disposed) return;
     try {
       if (adapterStateUnsubscribe && projectSwitchingUnsubscribe && projectSwitchedUnsubscribe) return;
       adapterStateUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.adapterState, (params) => {
+        if (disposed) return;
         const status = typeof params.status === 'string' ? params.status : '';
         const project = typeof params.project === 'string' ? params.project : null;
         console.log('[adapter_state] editor rpc received:', status);
@@ -99,6 +103,7 @@ export function createEditorRpcHostActionRuntime(
         }
       });
       projectSwitchingUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.projectSwitching, (params) => {
+        if (disposed) return;
         const win = deps.getWindow();
         const project = typeof params.projectPath === 'string' ? params.projectPath : null;
         const switchId = typeof params.switchId === 'string' ? params.switchId : null;
@@ -109,6 +114,7 @@ export function createEditorRpcHostActionRuntime(
         deps.onProjectSwitching?.(params);
       });
       projectSwitchedUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.projectSwitched, (params) => {
+        if (disposed) return;
         const win = deps.getWindow();
         const project = typeof params.projectPath === 'string' ? params.projectPath : null;
         const switchId = typeof params.switchId === 'string' ? params.switchId : null;
@@ -223,6 +229,7 @@ export function createEditorRpcHostActionRuntime(
   }
 
   function bindEditorHooks(): void {
+    if (disposed) return;
     bindSaveKey();
     bindFocus();
     bindMobileCtrlHelper();
@@ -234,5 +241,25 @@ export function createEditorRpcHostActionRuntime(
   return {
     connect,
     bindEditorHooks,
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      const cleanups = [
+        adapterStateUnsubscribe, projectSwitchingUnsubscribe, projectSwitchedUnsubscribe,
+        () => focusDisposable?.dispose?.(),
+        () => mobileCtrlDisposable?.dispose?.(),
+        () => androidKeyboardRecoveryDisposable?.dispose?.(),
+        () => cefriumImeDismissalDisposable?.dispose?.(),
+        () => mobileSpecialKeysDisposable?.dispose?.(),
+      ];
+      adapterStateUnsubscribe = projectSwitchingUnsubscribe = projectSwitchedUnsubscribe = null;
+      for (const cleanup of cleanups) {
+        try { cleanup?.(); } catch (error) {
+          console.warn('[editor_rpc_host_actions] dispose failed', error);
+        }
+      }
+      focusDisposable = mobileCtrlDisposable = androidKeyboardRecoveryDisposable = null;
+      cefriumImeDismissalDisposable = mobileSpecialKeysDisposable = null;
+    },
   };
 }

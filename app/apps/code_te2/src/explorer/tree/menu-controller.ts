@@ -339,7 +339,7 @@ export function createExplorerTreeMenuController(
 
     if (isFile && deps.supportsSecondEditor()) {
       items.push({
-        label: 'Open in a Second Window',
+        label: 'Open in Second Window',
         type: 'openSecondWindow',
       });
       items.push({ divider: true });

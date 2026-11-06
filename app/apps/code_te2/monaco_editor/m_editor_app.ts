@@ -375,18 +375,15 @@ interface CachedPrefsLike extends Record<string, unknown> {
   };
 }
 
-interface MonacoBootWindowLike extends Window {
-  __te2InlineMonacoHost?: boolean;
-  __te2InlineMonacoBootSnapshot?: unknown;
-  __te2InlineMonacoBuildSidebarMentionPayload?: (
+interface WorkingEditorBootOptions {
+  bootSnapshot?: unknown;
+  buildSidebarMentionPayload?: (
     payload: Record<string, unknown>,
   ) => Record<string, unknown>;
-  __te2InlineMonacoRuntimeBoot?: Promise<void>;
 }
 
-(function () {
-  const bootWindow = window as MonacoBootWindowLike;
-  let initialBootSnapshot = bootWindow.__te2InlineMonacoBootSnapshot || null;
+export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Promise<void> {
+  let initialBootSnapshot = options.bootSnapshot || null;
   let resolveInlineRuntimeBoot: (() => void) | null = null;
   let rejectInlineRuntimeBoot: ((error: unknown) => void) | null = null;
   let inlineRuntimeReady = false;
@@ -394,12 +391,10 @@ interface MonacoBootWindowLike extends Window {
   function resolveUsableInlineBoot(): void {
     if (inlineRuntimeReady && !initialProjectionPending) resolveInlineRuntimeBoot?.();
   }
-  if (bootWindow.__te2InlineMonacoHost) {
-    bootWindow.__te2InlineMonacoRuntimeBoot = new Promise<void>((resolve, reject) => {
-      resolveInlineRuntimeBoot = resolve;
-      rejectInlineRuntimeBoot = reject;
-    });
-  }
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveInlineRuntimeBoot = resolve;
+    rejectInlineRuntimeBoot = reject;
+  });
 
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
   // You can disable at runtime in the inline editor console with:
@@ -503,7 +498,7 @@ interface MonacoBootWindowLike extends Window {
     sendEditorMentionRequest: createEditorMentionSender({
       isConnected: () => isEditorRpcConnected(),
       buildTargetedPayload(payload) {
-        const build = bootWindow.__te2InlineMonacoBuildSidebarMentionPayload;
+        const build = options.buildSidebarMentionPayload;
         if (typeof build !== 'function') throw new Error('No active agent presentation');
         return build(payload);
       },
@@ -782,7 +777,7 @@ interface MonacoBootWindowLike extends Window {
 
   var textmateRuntime = createEditorTextmateRuntime({
     onSnippetSyntaxChanged: function () {
-      if (bootWindow.__te2InlineMonacoHost) refreshSnippetSyntax();
+      refreshSnippetSyntax();
     },
     getWindow: function () {
       return window;
@@ -1222,6 +1217,9 @@ interface MonacoBootWindowLike extends Window {
       extensionEditorStateRuntime?.dispose();
       hoverCommands?.dispose();
       quickFixes?.dispose();
+      editorHostActionRuntime.dispose();
+      keyboardRuntime.dispose();
+      uiEditorRuntime.dispose();
     },
     { once: true },
   );
@@ -2883,7 +2881,7 @@ interface MonacoBootWindowLike extends Window {
         emitToHost: emitToHost,
         updateDebug: updateDebug,
         onReady: function () {
-          if (bootWindow.__te2InlineMonacoHost) setSnippetSyntaxProvider(textmateRuntime.tokenizeSnippet);
+          setSnippetSyntaxProvider(textmateRuntime.tokenizeSnippet);
           inlineRuntimeReady = true;
           resolveUsableInlineBoot();
         },
@@ -2896,5 +2894,6 @@ interface MonacoBootWindowLike extends Window {
 
   updateDebug("boot=init");
   bcInit();
-  bootMonaco();
-})();
+  void bootMonaco().catch((error: unknown) => rejectInlineRuntimeBoot?.(error));
+  return ready;
+}

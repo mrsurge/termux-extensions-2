@@ -200,7 +200,7 @@ test("Explorer routes file cards to the source client's second editor", async ()
   );
   const secondWindowItem = Array.from(
     document.querySelectorAll(".fe-card-menu > .fe-dd-item"),
-  ).find((element) => element.textContent === "Open in a Second Window");
+  ).find((element) => element.textContent === "Open in Second Window");
   assert.ok(secondWindowItem);
   secondWindowItem.dispatchEvent(new dom.MouseEvent("click", { bubbles: true }));
   await Promise.resolve();

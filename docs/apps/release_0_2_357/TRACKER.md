@@ -154,6 +154,27 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   extension isolation and Electron native detach/overlay remain. Unify active-area
   focus/extra-key ownership before secondary tab UI. Current source still uses
   the working iframe; these lifecycle/focus changes are not yet implemented.
+- [x] 2026-11-06 first lifecycle prerequisite: replace import-time editor boot
+  and window snapshot/mention/readiness mailboxes with an explicit typed boot
+  function and retained mount promise. Repeated mount is idempotent; a second
+  same-realm mount fails before DOM mutation while provider/model ownership is
+  still page-scoped. Failed partial boot is not silently retried. Host-action,
+  keyboard and UI-layout owners now expose idempotent teardown, reject rebinding,
+  and fence late callbacks; pagehide uses those disposers. This is not complete
+  editor disposal or shared provider/model ownership. Existing iframe isolation,
+  Electron overlays, shared document authority and WBA protocol are unchanged.
+- [x] Explorer card menu, file-tab menu and File-menu wording now consistently
+  read "Open in Second Window" (remove "a").
+- [x] First prerequisite automated gate: 68 focused boot/keyboard/mobile-key/tab/
+  theme/history tests pass; frontend and WBA checks report zero Any findings and
+  compiler diagnostics; frontend build passes. Three unrelated terminal-menu
+  tests still expect frontend destination selection and fail against the unchanged
+  backend-owned terminal route; the full menu suite is not claimed green.
+- [x] Live prerequisite accepted 2026-11-06: user reports everything seems to be
+  working after this change. No exhaustive additional mode matrix is claimed.
+  No Python/mypyc/Rust rebuild or shared runtime restart needed; Android
+  bundled-asset publication not performed. Continue with shared
+  provider/model and DOM ownership before iframe removal, focus fix and tabs.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
   pass. Electron strict checks and unit suite pass. Four existing TextMate

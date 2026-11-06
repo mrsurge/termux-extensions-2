@@ -1,3 +1,6 @@
+import { EditorBootOwner } from './editor_boot_owner.ts';
+
+const workingEditorBoot = new EditorBootOwner();
 const INLINE_EDITOR_API_BASE = '/api/app/code_te2';
 const INLINE_EDITOR_HOST_STYLE_ID = 'fe-inline-monaco-host-style';
 const INLINE_EDITOR_STYLE_ASSETS = [
@@ -236,14 +239,8 @@ interface InlineEditorBootOptions {
 
 declare global {
   interface Window {
-    __te2InlineMonacoHost?: boolean;
     __te2InlineMonacoApiBase?: string;
-    __te2InlineMonacoBootSnapshot?: unknown;
-    __te2InlineMonacoBuildSidebarMentionPayload?: (
-      payload: Record<string, unknown>,
-    ) => Record<string, unknown>;
     __te2InlineMonacoBoot?: Promise<void>;
-    __te2InlineMonacoRuntimeBoot?: Promise<void>;
   }
 }
 
@@ -354,20 +351,17 @@ export async function mountInlineEditorHost(
   if (!(editorFrame instanceof HTMLElement)) {
     throw new Error('Inline Monaco host requires an HTMLElement mount point.');
   }
-  window.__te2InlineMonacoHost = true;
-  window.__te2InlineMonacoApiBase = INLINE_EDITOR_API_BASE;
-  window.__te2InlineMonacoBootSnapshot = options.bootSnapshot || null;
-  window.__te2InlineMonacoBuildSidebarMentionPayload =
-    options.buildSidebarMentionPayload;
-  markNativeRenderer(editorFrame);
-  editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
-  await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
-  await import('./m_editor_app.ts');
-  const runtimeBoot = window.__te2InlineMonacoRuntimeBoot;
-  if (!runtimeBoot) {
-    throw new Error('Inline Monaco runtime did not publish its boot lifecycle.');
-  }
-  await runtimeBoot;
+  await workingEditorBoot.mount(editorFrame, async () => {
+    window.__te2InlineMonacoApiBase = INLINE_EDITOR_API_BASE;
+    markNativeRenderer(editorFrame);
+    editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
+    await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
+    const { startWorkingEditorRuntime } = await import('./m_editor_app.ts');
+    await startWorkingEditorRuntime({
+      bootSnapshot: options.bootSnapshot,
+      buildSidebarMentionPayload: options.buildSidebarMentionPayload,
+    });
+  });
 }
 
 export function bootInlineEditorHost(
