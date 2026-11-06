@@ -1035,32 +1035,13 @@ Obtain a concrete renderer/interaction/test approval when this item is resumed.
 
 ## Deferred — shell execution profiles and command-palette terminal commands
 
-User intake 2026-10-25; record only, then return to the logging/native-debug
-work. This does not authorize implementation or change the release cut line.
-
-- Add a shell-execution run-profile type: execute the configured shell command
-  in the running editor terminal, or open/create one when necessary, using the
-  same execution/terminal ownership as the built-in Python/Node/GCC runners.
-  This is not a new web-server/preview profile or another shell backend.
-- Support current-file self-reference in command templates: `%` for the current
-  file and `%<` for its extensionless counterpart. Preserve the user's example:
-  `gcc % -o %< && ./%<`. Allow additional run arguments appended to the command
-  tail. Before implementation, qualify existing runner substitutions, cwd/path
-  conventions, shell quoting (spaces/Unicode/metacharacters), placeholder
-  escaping and argument placement for compound commands; reuse existing helpers
-  instead of inventing an incompatible substitution/dispatch system.
-- Add a root command-palette option that accepts a shell command and executes
-  it in that same editor-terminal path, opening a terminal if needed. Typing or
-  previewing the palette entry must not execute it; explicit acceptance does.
-- Whenever a user action invokes the editor terminal (including run profiles,
-  palette execution and existing terminal-open actions), reveal it and transfer
-  keyboard focus from the editor to the terminal after it is ready. Preserve
-  exact-client ownership; background updates/restoration must not steal focus.
-
-Implementation requires a bounded source-backed plan/approval and tests for
-existing-terminal reuse, creation/readiness, active-file substitutions, trailing
-arguments, explicit palette acceptance/cancellation and focus on desktop/mobile.
-Preserve existing run/save/draft consent and disconnected/no-replay behavior.
+Transferred at the user's request to the active
+[.357 consolidated terminal/run-profile plan](../release_0_2_357/PLAN.md#shell-execution-run-profiles-and-command-palette-commands)
+and its TRACKER.md. Original intake 2026-10-25: shell profiles, `%` / `%<`,
+`gcc % -o %< && ./%<`, trailing arguments, palette execution and terminal focus.
+All requirements and guards are preserved there, with the newer `%f` request.
+Do not maintain a second active implementation checklist here. This transfer
+does not move or reactivate the rest of the .356 plan.
 
 ## Deferred — Cefrium 0.13 staging comparison (before CDP work)
 

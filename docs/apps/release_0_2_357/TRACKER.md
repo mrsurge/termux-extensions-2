@@ -1,5 +1,23 @@
 # 0.2.357 tracker
 
+## Git push upstream projection refresh — 2026-11-05
+
+- [x] Replace frontend-triggered post-push refresh with a worker-lifetime pipe
+  completion bridge and existing backend GitSnapshotChanged publication. Success
+  invalidates the original repository cache; active matching generations refresh
+  even without Explorer clients. Stale results cannot retarget a new project.
+  Pull/clone behavior and dirty-submodule decorations remain unchanged.
+- [x] 13 Python tests (real pipe ingress, no Explorer connection, project/generation
+  fencing, nested workspace routing, shutdown and fresh dirty-submodule snapshot
+  publication), 7 focused frontend tests, strict Python extra/no-Any checks,
+  frontend/WBA no-Any gates and frontend build pass.
+- [ ] Live upstream-projection acceptance after Python worker and frontend refresh.
+  The changed runtime/listener modules are lazy interpreted imports, absent from
+  the inspected active compiled inventory; no new mypyc build or Rust rebuild is
+  required. User confirms the push succeeds after correcting ALS origin to HTTPS;
+  automatic upstream/decorations refresh is not separately confirmed. External
+  shell pushes remain watcher/manual-refresh territory, not these notifications.
+
 ## First priority: second editor area — 2026-11-02
 
 This takes precedence over the older intake below. Concrete design, source
@@ -371,6 +389,55 @@ from short Python-driven ping trials. Running-process replacement remains user-o
   through the shared generic text dialog; retain saved bookmarks and host APIs.
 - [ ] Validate narrow/wide layout, save/cancel/validation errors and all clients;
   separately approve Android assets/builds and collect live acceptance.
+
+## Consolidated terminal and app-install UX
+
+Canonical active scope: matching section in this release's PLAN.md. Only the
+deferred shell-execution section is carried from .356, not the entire old plan.
+
+- [x] Transfer shell-execution profile, `%` / `%<` example, trailing arguments,
+  command-palette execution and terminal-focus requirements without losing notes.
+- [x] Add explicit `.desktop`-style `%f` field-code support to that scope.
+- [x] Record Termux login shells inheriting a venv prompt without the matching
+  active environment; cause not yet diagnosed. Preserve explicit environment use.
+- [x] Record terminal profile/setup modal: exec/command, arguments, shell/login,
+  sizes; audit persistence/defaults and existing per-surface preferences first.
+- [x] Clarify second-root app backend already exists; missing work is install/
+  open UX for app files/ZIPs, not reimplementing second-root discovery/lifecycle.
+- [ ] Audit login-shell environment and prompt setup; approve/fix the specific
+  inheritance issue and test real shell/Python/PATH identity on Termux/Linux.
+- [ ] Audit and approve terminal profile modal schema, persistence/defaults and
+  backend-owned application across supported terminal surfaces; implement/test.
+- [ ] Audit current run-profile substitution/dispatch, define supported field
+  codes/quoting and implement approved shell profile plus palette command entry.
+- [ ] Validate terminal reuse/create/readiness, trailing args, acceptance/cancel,
+  run/save/draft guards and exact-client terminal focus on desktop/mobile.
+- [ ] Audit existing package/archive/picker/launcher integration; approve the
+  install UX and package-validation/atomic-install/registry-refresh contract.
+- [ ] Implement user-consented file/ZIP app installation and open flow; test
+  invalid packages, path traversal, duplicate/update/cancel/error behavior and
+  existing second-root app compatibility. Obtain live acceptance separately.
+
+## Wheel-bundled native Node dependencies
+
+- [x] Record user requirement: bundle node-pty and other required/native Node
+  dependencies (including server MessagePack acceleration where supported) with
+  wheels so ordinary installs do not depend on runtime npm/build behavior.
+- [x] Record Pixel-native build path: upstream Android prebuilds not required.
+  Existing isolated node-pty build loads and runs a real PTY on Node 26.13.0;
+  detailed receipt: docs/apps/wba_bun_aot/TRACKER.md. Not yet a wheel payload or
+  evidence of Node 24 compatibility. Preserve experimental WBA AOT artifacts.
+- [ ] Audit all shipped Node/native consumers, wrappers/support files/licenses,
+  supported platforms, shared libraries and Node-API/module-ABI contracts.
+- [ ] Approve release-time build/packaging/materialization changes. Build Termux
+  addons natively on Pixel and Linux addons in the Linux wheel build environment.
+- [ ] Qualify Node 24 baseline and any additionally supported runtimes; bundle
+  tested artifacts with manifest/fingerprint-based compatibility selection.
+- [ ] Remove runtime npm installation/building for supported wheel paths; clear
+  mismatch errors and explicitly opt-in editable/source build fallback only.
+- [ ] Validate clean installed wheels without network/npm/compiler: native load,
+  real PTY lifecycle and MessagePack interoperability/optional acceleration.
+- [ ] Check wheel publication sizes and obtain joint Linux/Termux acceptance.
 
 ## Fail-closed built-in asset routing
 

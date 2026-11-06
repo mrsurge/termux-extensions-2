@@ -61,3 +61,26 @@ tools/npm-cache, TMPDIR under tmp. Existing Python modules used for interop test
 - Next gate: explicitly select this binary for a disposable or user-approved
   Pixel WBA and test real intelligence/extensions/themes/webviews. Do not
   silently replace the installed worker or the live desktop AOT selection.
+
+## Pixel editable-install terminal bootstrap and local selection
+
+- User reports identical terminal initialization failure under Node 24 and 26.
+  Read-only npm logs identify npm 12.2.1 blocking node-pty@1.1.0 lifecycle
+  scripts for lack of allowScripts, then exiting 0. The subsequent loader
+  reports only its last missing-path attempt. This is not an AOT/Node-ABI cause.
+- User approves scoped package script policy, tests and isolated native load
+  validation before selecting the Pixel AOT binary. Terminal package.json now
+  approves only node-pty@1.1.0, matching the unchanged package lock. No global
+  npm setting or dangerously-allow-all-scripts escape hatch. The package bytes
+  already participate in runtime fingerprinting, so failed installs are retried
+  under the new fingerprint. No terminal frontend/OTA/mypyc change required.
+- Eight terminal bootstrap unit tests and strict mypy on the test module pass.
+  Tests enforce version-specific policy and its preservation in staging.
+  Pixel editable venv successfully installs/verifies isolated runtime
+  wba-aot-poc/terminal-runtime/android-arm64-abi147-11a98be1efe9addd239c
+  under Node 26.13.0. A disposable native PTY runs /system/bin/sh, prints
+  TE2_NATIVE_PTY_OK and exits 0. No installed terminal cache is modified by probe.
+- Pixel checkout shellspec selects the preserved
+  ~/te2-android/wba-aot-poc/artifacts/wba-aot with its exact absolute path.
+  Desktop-local shellspec selection remains unchanged. No framework or worker
+  restart/termination is performed. User live launch/extension acceptance pending.

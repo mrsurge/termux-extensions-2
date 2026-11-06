@@ -604,7 +604,6 @@ export function createExplorerNotificationHandler(
           deps.toast(message || `${type.replace("_", " ")} completed`);
           if (
             (type === "git_pull" ||
-              type === "git_push" ||
               type === "git_clone") &&
             deps.hasExplorerRpc()
           ) {

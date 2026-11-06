@@ -233,6 +233,105 @@ and compiled transport behavior; older benchmark receipts used standard
 Engine.IO in every mode. Preserve the live experimental launcher until the user
 approves replacing it. Pixel Termux compilation remains a separate next test.
 
+## Bundle native Node dependencies with wheels
+
+User requests release-time packaging instead of first-run npm install/native
+compilation. Bundle node-pty and audit all shipped Node consumers for other
+native addons, including the optional msgpackr-extract server-codec accelerator.
+Include their required JS wrappers, support files and license notices, not just
+loose .node files. The Bun engine itself is JS and is already separately bundled.
+
+For Android/Termux, generate the native addons on the Pixel; an upstream Android
+prebuild is not a prerequisite. A working node-pty was already built and exercised
+there under Node 26 while diagnosing npm 12 script blocking. Qualify the intended
+Node 24 baseline too before treating that artifact as release-compatible.
+Build Linux variants in the Linux wheel environment, not on Android.
+
+Inventory platform/architecture, Bionic versus glibc, shared-library dependencies
+and Node-API versus Node-module-ABI compatibility. Declare the tested runtime
+contract and enforce artifact selection accordingly; do not assume cross-version
+compatibility or require separate binaries where stable Node-API is sufficient.
+Use existing package-resource materialization and atomic fingerprinted runtime
+selection. Normal supported wheel installs must not invoke npm or a compiler;
+missing/incompatible packaged artifacts must produce a precise error rather than
+silently downloading/building. Any editable/source-build escape hatch is explicit.
+
+Validate installed Linux and Termux wheels in clean environments with npm/network
+and build tools unavailable: native module load, real PTY spawn/I/O/resize/exit,
+and server MessagePack interoperability/native/fallback behavior. Measure wheel
+size against publication limits. Keep accepted AOT artifacts as experimental
+receipts; this packaging work does not require adopting AOT or rewriting WBA.
+Record the request now; implementation/publication remain separately approved.
+
+## Consolidated terminal, run-profile and app-install UX intake
+
+This is the active home for these items. Only the deferred shell-execution
+section is transferred from release_0_2_356/PLAN.md, not that entire plan.
+Other completed/deferred work and historical notes remain in their owning docs.
+The following is planning intake, not authorization to implement every item.
+
+### Login-shell environment and terminal profile setup
+
+Investigate the user-reported Termux login-shell prompt carrying the launcher's
+venv label even though the new shell is not actually using that venv. Trace
+inherited environment/prompt activation state and login initialization before
+changing behavior. Show the shell's actual environment, not a stale cosmetic
+venv indicator; do not blindly erase an intentionally requested environment.
+Cover standalone, File Explorer and editor-drawer terminal launch paths where
+applicable, using shared ownership patterns rather than cross-app source imports.
+
+Add a terminal profile/settings setup modal for executable/command, arguments,
+shell/login behavior and sizes (terminal dimensions and presentation/font sizing
+as appropriate to the existing surfaces). Audit existing preferences/profile
+machinery before defining scope/defaults, persistence and per-terminal overrides.
+Keep shell creation and durable configuration backend-owned. These are TE2
+terminal profiles, not VS Code extension-contributed terminal profiles.
+
+### Shell-execution run profiles and command-palette commands
+
+Transferred user requirements from the deferred .356 section (2026-10-25):
+
+- Add a shell-execution run-profile type: execute the configured command in the
+  running editor terminal, or create/open one when necessary, reusing the same
+  execution/terminal ownership as built-in Python/Node/GCC runners. This is not
+  a new web-server/preview profile or another shell backend.
+- Preserve current-file substitutions `%` and `%<` (extensionless counterpart),
+  including `gcc % -o %< && ./%<`. Support additional arguments appended to the
+  command tail. Add explicit `.desktop`-style `%f` current-file support; audit
+  and agree any additional field-code subset rather than implying full desktop
+  entry compatibility. Define literal-percent escaping, argument/token handling,
+  shell versus argv semantics and quoting for spaces/Unicode/metacharacters;
+  do not interpret arbitrary file paths or placeholder contents as shell code.
+  Reuse existing runner substitutions, cwd/path and dispatch helpers.
+- Add a root command-palette option accepting a shell command for that same
+  editor-terminal path. Typing/preview must not execute; explicit acceptance
+  executes, cancellation does nothing.
+- Whenever a user action invokes the editor terminal (including these profiles,
+  palette commands and existing terminal-open actions), reveal it and transfer
+  keyboard focus after readiness. Exact-client ownership remains authoritative;
+  background state/restoration must not steal focus.
+- Preserve run/save/draft consent, disconnected/no-replay behavior, existing
+  terminal reuse and creation/readiness. Validate substitutions, trailing args,
+  explicit acceptance/cancel and desktop/mobile focus before live acceptance.
+
+### Third-party second-root app package installation UX
+
+Second-root discovery, manifests, shellspec/lifecycle and registry refresh
+already exist. The missing feature is user-facing install/open handling for an
+app package file/ZIP, not a new app runtime or generic dependency/build system.
+Reuse existing second-root registration and app start/open mechanisms.
+
+Plan a picker/open-with/context-menu entry, app metadata/manifest preview,
+explicit installation/launch consent, progress/error/cancel feedback and clear
+duplicate/update handling. Recognize app packages by validated content, not ZIP
+extension alone. Validate archive paths, manifests, app IDs and destination
+boundaries; do not run arbitrary archive scripts on selection or extraction.
+Extract/install atomically under the existing user app root, refresh the registry
+through its established backend owner, and offer to open the installed app.
+Keep install, build and execution distinct; any required build/install commands
+need their own explicit consent. Scope UI integration after auditing existing
+picker, File Explorer/archive and launcher conventions; no new parallel installer.
+
 ## Release dependency order: wheels before APKs
 
 User requires this order beginning with the next release (2026-10-28): finish

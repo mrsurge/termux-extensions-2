@@ -24,6 +24,7 @@ from ..workbench_runtime_discovery import workbench_runtime_discovery
 from ..intelligence_bootstrap import attach_application, stop_early_intelligence
 from .event_bus import set_worker_event_loop, stop_worker_event_loop
 from .run_profile_fws_bridge import start_run_profile_fws_bridge, stop_run_profile_fws_bridge
+from .git_push_completion import start_git_push_completion_bridge, stop_git_push_completion_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ async def stop_worker_runtime() -> None:
     """Stop producers before draining the fact bus; do not terminate child shells."""
     global _registered_loop, _started
     _started = False
+    stop_git_push_completion_bridge()
     await stop_intelligence_startup()
     try:
         await stop_run_profile_fws_bridge()
@@ -99,6 +101,7 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     set_worker_event_loop(runtime_loop)
     # Compatibility for callers that still post work through the Explorer loop seam.
     set_explorer_event_loop(runtime_loop)
+    start_git_push_completion_bridge(runtime_loop)
     register_adapter_lifecycle_event_bus_handlers()
     register_code_inspector_event_bus_handlers()
     register_file_tabs_projection_handlers()

@@ -1844,6 +1844,20 @@ extension-manifest metadata.
 
 ### Diff mode behavior
 
+Explorer push completion is backend-owned. The worker-lifetime
+`worker_services/git_push_completion.py` listener consumes successful typed
+`GitJobProgress` pipe notifications independently of Explorer socket lifetimes.
+It invalidates the originating repository/workspace Git cache, then uses the
+existing scheduled snapshot -> `GitSnapshotChanged` projection with
+`require_connection=False`. Workspace root and project generation come from the
+completed job, not the currently focused client. Late inactive/stale results
+invalidate their original cache but do not publish into another project.
+Progress/failed/cancelled jobs do not trigger this success refresh. The bridge
+filters before posting onto the worker loop and is removed/fenced on shutdown.
+Frontend push success retains its toast but no longer requests Explorer refresh;
+pull/clone behavior is unchanged. This covers Code TE2's pipe-backed push jobs,
+not an arbitrary external shell's `git push` or worker-process crash recovery.
+
 - `git.diffBase.updated` starts visible By changes enumeration immediately from
   the persisted selection. Each selection fact carries an opaque
   `selectionRevision`, echoed in its completion snapshot. The frontend skips
