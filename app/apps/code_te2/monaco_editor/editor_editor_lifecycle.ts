@@ -53,6 +53,7 @@ interface EditorLifecycleDeps {
   getModel(): MonacoModelLike | null;
   getCurrentPath(): string | null;
   disposeMirrorPublisher(): void;
+  flushMirrorDebounce?(): void;
   setScrollPublisherInstalled(value: boolean): void;
   clearEditorDecorationState(): void;
   clearGitBaselineModels(): void;
@@ -133,6 +134,7 @@ function applySharedPlainEditorSetup(
 }
 
 export function disposeDiffEditorOnly(deps: EditorLifecycleDeps): void {
+  deps.flushMirrorDebounce?.();
   deps.disposeMirrorPublisher();
   try {
     const diffEditor = deps.getDiffEditor();
@@ -150,6 +152,7 @@ export function disposeDiffEditorOnly(deps: EditorLifecycleDeps): void {
 }
 
 export function disposePlainEditorOnly(deps: EditorLifecycleDeps): void {
+  deps.flushMirrorDebounce?.();
   deps.disposeMirrorPublisher();
   try {
     const editor = deps.getEditor();

@@ -1136,6 +1136,8 @@ test('visible editor open completion does not await WBA or agent hydration', asy
       getValue: () => content,
       getLanguageId: () => languageId,
     }),
+    releaseModel: previous => previous.dispose?.(),
+    flushMirrorDebounce: () => switchOrder.push('mirror'),
     installMirrorPublisher: () => {},
     installScrollPublisher: () => {},
     flushScrollState: () => {
@@ -1191,7 +1193,7 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   ]);
   assert.equal(outcome, 'resolved');
   assert.equal(currentPath, '/workspace/fast.py');
-  assert.deepEqual(switchOrder.slice(0, 2), ['flush', 'path:/workspace/fast.py']);
+  assert.deepEqual(switchOrder.slice(0, 3), ['mirror', 'flush', 'path:/workspace/fast.py']);
   assert.equal(wbaOpenCalls, 1);
   assert.equal(agentHydrationCalls, 1);
   assert.deepEqual(baselineRequests, [{ immediate: true, reason: 'open' }]);

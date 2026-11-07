@@ -7,7 +7,7 @@ import {
 } from "./editor_language_utils.ts";
 import { parseJsonc } from "./editor_parse_utils.ts";
 import { refreshSnippetSyntax, setSnippetSyntaxProvider } from './editor_textmate_snippets.ts';
-import { createFileModel as createMonacoFileModel } from "./editor_model_utils.ts";
+import { createFileModel as createMonacoFileModel, releaseFileModel, releaseFileModelOwner } from "./editor_model_utils.ts";
 import {
   runIssuesCommand,
   runFindCommand,
@@ -180,6 +180,7 @@ interface MonacoRuntimeModelLike {
   uri?: MonacoRuntimeUriLike;
   getLanguageId?(): string;
   getValue(): string;
+  onDidChangeContent?(listener: () => void): { dispose(): void };
   getVersionId?(): number;
   getFullModelRange?(): unknown;
   applyEdits?(edits: Array<{ range: unknown; text: string }>): void;
@@ -383,6 +384,7 @@ interface WorkingEditorBootOptions {
 }
 
 export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Promise<void> {
+  const documentLeaseOwner = {};
   let initialBootSnapshot = options.bootSnapshot || null;
   let resolveInlineRuntimeBoot: (() => void) | null = null;
   let rejectInlineRuntimeBoot: ((error: unknown) => void) | null = null;
@@ -939,6 +941,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   ): MonacoRuntimeModelLike {
     return createMonacoFileModel(
       monaco,
+      documentLeaseOwner,
       function (p: string | null | undefined) {
         return monacoFileUri(window.monaco, p) as MonacoRuntimeUriLike | null;
       },
@@ -946,7 +949,11 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       lang,
       absPath,
       function () {},
-    ) as MonacoRuntimeModelLike;
+    );
+  }
+
+  function releaseWorkingModel(previous: object): void {
+    releaseFileModel(monaco, documentLeaseOwner, previous);
   }
 
   function applyBootSnapshot(includeDocument = true): void {
@@ -1221,6 +1228,9 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       keyboardRuntime.dispose();
       uiEditorRuntime.dispose();
       languageBridgeProviders.dispose();
+      mirrorRuntime.flushMirrorDebounce();
+      mirrorRuntime.disposeMirrorPublisher();
+      releaseFileModelOwner(monaco, documentLeaseOwner);
     },
     { once: true },
   );
@@ -1741,6 +1751,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
     disposeMirrorPublisher: function () {
       return mirrorRuntime.disposeMirrorPublisher();
     },
+    flushMirrorDebounce: _flushMirrorDebounce,
     setScrollPublisherInstalled: _setScrollPublisherInstalled,
     clearEditorDecorationState: _clearEditorDecorationStateRuntime,
     clearGitBaselineModels: _clearGitBaselineModelsRuntime,
@@ -2145,7 +2156,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
     } catch (_) {}
     try {
       if (previousModel && typeof previousModel.dispose === "function") {
-        previousModel.dispose();
+        releaseWorkingModel(previousModel);
       }
     } catch (_) {}
     try {
@@ -2237,6 +2248,8 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
     },
     applyLanguageToModel: applyLanguageToModel,
     createFileModel: createFileModel,
+    releaseModel: releaseWorkingModel,
+    flushMirrorDebounce: _flushMirrorDebounce,
     installMirrorPublisher: installMirrorPublisher,
     installScrollPublisher: installScrollPublisher,
     flushScrollState: function () {
@@ -2404,6 +2417,8 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
             model = value;
           },
           createFileModel: createFileModel,
+          releaseModel: releaseWorkingModel,
+          flushMirrorDebounce: _flushMirrorDebounce,
           applyLanguageToModel: applyLanguageToModel,
           installMirrorPublisher: installMirrorPublisher,
           installScrollPublisher: installScrollPublisher,

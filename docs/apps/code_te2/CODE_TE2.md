@@ -309,7 +309,7 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
   - `editor_boot_owner.ts` retains one boot promise per page's working mount;
     repeated requests do not replace live DOM or overwrite boot inputs. A failed
     partial boot remains failed until reload. A second mount in the same realm
-    is deliberately rejected while provider/model and fixed-ID ownership is
+    is deliberately rejected while provider dispatch and fixed-ID ownership are
     still page-scoped. This is a migration guard, not same-DOM multi-editor support.
 - `app/apps/code_te2/monaco_editor/m_editor_app.ts`
   - Monaco editor bootstrap source of truth
@@ -325,8 +325,28 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
     Late catalog/legend replies cannot reinstall disposed providers; in-flight
     retained completion/hint results still run their existing release RPCs.
     This is per-runtime teardown, not a shared language-provider router.
-    Global provider/model ownership, iframe removal, and shared active-area
+    Shared provider dispatch, iframe removal, and shared active-area
     menu/extra-key routing remain subsequent lifecycle work.
+- `monaco_editor/working_document_resources.ts` / `editor_model_utils.ts`
+  - Per-Monaco-namespace canonical-URI model leases retain a working model until
+    its last presentation owner releases it. Repeated acquisition by one owner
+    is idempotent; another owner reuses its text rather than replacing pending
+    edits with a boot snapshot. Creation failures are not hidden by anonymous
+    models. Backend opened-document membership remains authoritative; releasing
+    a local model does not close a document or discard a persisted draft.
+  - Working open/replay replacement and clear/page teardown use release hooks;
+    historical and Git baseline models keep their existing separate ownership.
+- `monaco_editor/shared_model_mirror.ts` / `editor_mirror_runtime.ts`
+  - One model-content listener and debounce timer serve all presentations of
+    that model in one realm. A connected current participant publishes once
+    through the existing mirror/WBA methods; another view can take over without
+    duplicating the content stream. Remote changes from either participant
+    suppress echoes and cancel obsolete pending work. Final detach cancels the
+    timer/listener. File switches and plain/diff transitions flush before changing
+    ownership; pending text cannot be relabeled with another file's path.
+  - No shared transport, backend state protocol or same-DOM editor activation is
+    introduced here. Provider dispatch, DOM identity and active-area routing must
+    be resolved before removing working-editor iframe isolation.
 - `app/apps/code_te2/monaco_editor/editor_rpc_transport.ts`
   - Editor-facing JSON-RPC transport over `/rpc/editor`
 - `app/apps/code_te2/monaco_editor/editor_wba_rpc_transport.ts`

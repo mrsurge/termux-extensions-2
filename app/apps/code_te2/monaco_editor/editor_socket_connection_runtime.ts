@@ -66,6 +66,8 @@ interface EditorSocketConnectionDeps {
   getDiffEditor(): MonacoDiffEditorLike | null;
   getModel(): MonacoModelLike | null;
   setModel(model: MonacoModelLike | null): void;
+  releaseModel(model: MonacoModelLike): void;
+  flushMirrorDebounce?(): void;
   createFileModel(content: string, lang: string, absPath: string): MonacoModelLike;
   applyLanguageToModel(model: MonacoModelLike, languageId: string, filePath: string): void;
   installMirrorPublisher(): void;
@@ -133,13 +135,18 @@ function applyModelLifecycle(deps: EditorSocketConnectionDeps, content: string, 
       if (diffEditor && typeof diffEditor.setModel === 'function') {
         try { diffEditor.setModel(null); } catch (_) {}
       }
-      try { if (typeof model.dispose === 'function') model.dispose(); } catch (_) {}
       const recreated = deps.createFileModel(content || '', lang, currentPath);
-      deps.setModel(recreated);
-      if (editor && typeof editor.setModel === 'function') editor.setModel(recreated);
-      deps.applyLanguageToModel(recreated, lang, currentPath);
-      deps.installMirrorPublisher();
-      deps.installScrollPublisher();
+      let attached = false;
+      try {
+        if (editor && typeof editor.setModel === 'function') editor.setModel(recreated);
+        deps.setModel(recreated);
+        attached = true;
+        deps.applyLanguageToModel(recreated, lang, currentPath);
+        deps.installMirrorPublisher();
+        deps.installScrollPublisher();
+      } finally {
+        deps.releaseModel(attached ? model : recreated);
+      }
       return;
     }
 
@@ -153,7 +160,9 @@ function applyModelLifecycle(deps: EditorSocketConnectionDeps, content: string, 
       deps.setApplyingRemote(false);
     }
     deps.applyLanguageToModel(model, lang, currentPath);
-  } catch (_) {
+  } catch (error) {
+    const want = deps.monacoFileUri(currentPath);
+    if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) throw error;
     deps.setApplyingRemote(true);
     try {
       const range = model && model.getFullModelRange ? model.getFullModelRange() : null;
@@ -229,6 +238,7 @@ export function registerEditorSocketConnectionHandlers(
           // Resolve its language and grammar before the first model is mounted.
           const lang = await deps.prepareTextmateForDocument(activePath, deps.languageFromPath(activePath));
           if (sequence !== snapshotSequence || !isCurrentDocumentProjection(snapshotPath, file.document_revision)) return;
+          if (activePath !== deps.getCurrentPath()) deps.flushMirrorDebounce?.();
           deps.setBaseSha256(asString(file.base_sha256) || deps.getBaseSha256());
           deps.setCurrentPath(activePath);
           const ssotGeneration = deps.wbBumpGeneration(activePath, 'ssot');

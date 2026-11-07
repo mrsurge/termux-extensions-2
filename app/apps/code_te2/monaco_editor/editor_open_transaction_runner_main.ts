@@ -33,7 +33,9 @@ interface RunEditorOpenTransactionDeps {
   monacoFileUri(monacoRef: unknown, path: string): EditorUriLike | null;
   applyLanguageToModel(model: OpenModelLike, lang: string, absPath: string): void;
   createFileModel(content: string, lang: string, absPath: string): OpenModelLike;
+  releaseModel(model: OpenModelLike): void;
   installMirrorPublisher(): void;
+  flushMirrorDebounce?(): void;
   installScrollPublisher(): void;
   flushScrollState(): boolean;
   applyLineNumberSizing(): void;
@@ -138,6 +140,7 @@ export async function runEditorOpenTransaction(
     rememberOpenCursor(deps.openTransactionStore, previousPath, deps.getEditor()?.getPosition?.());
   }
   if (!sameFileNavigationOnly) {
+    deps.flushMirrorDebounce?.();
     try { deps.flushScrollState(); } catch (_) {}
     try { deps.clearDiagnosticsForLeavingModel('file_switch'); } catch (_) {}
   }
@@ -206,14 +209,18 @@ export async function runEditorOpenTransaction(
             deps.installScrollPublisher();
           } finally {
             if (replacementAttached && previousModel !== replacementModel) {
-              try { if (typeof previousModel.dispose === 'function') previousModel.dispose(); } catch (_) {}
+              deps.releaseModel(previousModel);
+            } else if (!replacementAttached && previousModel !== replacementModel) {
+              deps.releaseModel(replacementModel);
             }
           }
         } else {
           deps.applyOpenModelTextSafely(model, editor, payload.content || '', deps.setApplyingRemote);
           deps.applyLanguageToModel(model, lang, currentPath);
         }
-      } catch (_) {
+      } catch (error) {
+        const want = deps.monacoFileUri(deps.getWindow().monaco, currentPath);
+        if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) throw error;
         deps.applyOpenModelTextSafely(model, editor, payload.content || '', deps.setApplyingRemote);
         deps.applyLanguageToModel(model, lang, currentPath);
       }

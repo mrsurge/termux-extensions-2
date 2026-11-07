@@ -193,6 +193,36 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   works after the requested hover/completion/navigation and secondary-startup
   check. No mypyc/Rust build or framework restart; no Android publication. Current
   mobile/browser working iframe and active-area input/menu behavior are unchanged.
+- [x] Shared document-resource/mirror slice approved and implemented 2026-11-06:
+  canonical URI leases reuse models within each Monaco namespace and retain them
+  until the last presentation release; repeated same-owner acquisition is
+  idempotent. Creation errors no longer silently create anonymous duplicates.
+  Working replacement/clear/teardown use release hooks, not direct model disposal;
+  failed replacement attachment releases its unused lease. Backend membership,
+  durable drafts, baseline/history ownership and wire protocols are unchanged.
+- [x] Mirroring now binds one physical content listener and pending timer per
+  model, not per editor. Connected current participants elect one publisher;
+  surviving views can take over. Remote application suppresses echoes/cancels
+  obsolete work; final detach cancels timer/listener. Flush before file switching
+  or plain/diff replacement preserves pending edits. Path checks prevent stale
+  work from publishing old-model text against a new path. Remove the now-unused
+  per-editor mirror publisher instead of maintaining two implementations.
+- [x] Resource/mirror automated gate: 102 focused lifecycle/input/provider/theme/
+  cursor/projection tests pass plus 7 targeted transport/open/replay tests.
+  Frontend/WBA typing reports zero Any/compiler findings; frontend build passes.
+  Tests use two leases/views sharing one model, single publication, remote
+  suppression, handoff, disconnected ownership, flush/cancel, final disposal,
+  path-switch fencing and failed canonical creation. Existing TextMate transport
+  fixtures remain outside this green scoped gate; no whole-suite claim.
+  The full transport file currently reports 40 pass / 4 existing TextMate fixture
+  failures (missing location/retired grammar setup); the updated release-hook
+  fixture and visible-open completion test pass.
+- [x] Live resource/mirror accepted 2026-11-07: user reports everything seems
+  fine and approves a local checkpoint. No exhaustive additional scenario matrix
+  is claimed. No binary rebuild or framework restart; Android publication not
+  performed. Shared provider dispatch and fixed
+  DOM identity remain unresolved, so the same-realm boot guard and working iframe
+  remain in place. Mobile focus/menu fixes and secondary tabs are not yet enabled.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
   pass. Electron strict checks and unit suite pass. Four existing TextMate
