@@ -192,6 +192,11 @@ interface MonacoDisposableLike {
   dispose(): void;
 }
 
+function isMonacoDisposable(value: unknown): value is MonacoDisposableLike {
+  return value !== null && typeof value === 'object' &&
+    'dispose' in value && typeof value.dispose === 'function';
+}
+
 interface SemanticTokensChangeEmitterLike {
   event(listener: () => void): MonacoDisposableLike;
   fire(): void;
@@ -655,6 +660,7 @@ function registerLanguagePositionProvider(
   deps: CreateEditorLanguageBridgeProvidersDeps,
   kind: LanguagePositionProviderKind,
   langId: string,
+  retain: (registration: unknown) => void,
 ): void {
   if (!langId || deps.getLanguageWorkersEnabled()) return;
   const registered = languagePositionProviderSet(deps.languageBridge, kind);
@@ -688,11 +694,12 @@ function registerLanguagePositionProvider(
     );
   };
 
+  let registration: unknown;
   if (
     kind === "documentHighlights" &&
     monacoRef.languages.registerDocumentHighlightProvider
   ) {
-    monacoRef.languages.registerDocumentHighlightProvider(langId, {
+    registration = monacoRef.languages.registerDocumentHighlightProvider(langId, {
       provideDocumentHighlights(model, position, token) {
         return call("document_highlights", model, position, token)
           .then((result) =>
@@ -717,7 +724,7 @@ function registerLanguagePositionProvider(
     kind === "definitions" &&
     monacoRef.languages.registerDefinitionProvider
   ) {
-    monacoRef.languages.registerDefinitionProvider(langId, {
+    registration = monacoRef.languages.registerDefinitionProvider(langId, {
       provideDefinition(model, position, token) {
         return call("definition", model, position, token)
           .then((result) => normalizeMonacoLocations(deps, result))
@@ -728,7 +735,7 @@ function registerLanguagePositionProvider(
     kind === "references" &&
     monacoRef.languages.registerReferenceProvider
   ) {
-    monacoRef.languages.registerReferenceProvider(langId, {
+    registration = monacoRef.languages.registerReferenceProvider(langId, {
       provideReferences(model, position, context, token) {
         return call("references", model, position, token, {
           includeDeclaration: context?.includeDeclaration !== false,
@@ -741,7 +748,7 @@ function registerLanguagePositionProvider(
     kind === "implementations" &&
     monacoRef.languages.registerImplementationProvider
   ) {
-    monacoRef.languages.registerImplementationProvider(langId, {
+    registration = monacoRef.languages.registerImplementationProvider(langId, {
       provideImplementation(model, position, token) {
         return call("implementations", model, position, token)
           .then((result) => normalizeMonacoLocations(deps, result))
@@ -752,6 +759,7 @@ function registerLanguagePositionProvider(
     return;
   }
 
+  retain(registration);
   registered.add(langId);
   console.log(`[providers] registered WBA ${kind} bridge for lang=${langId}`);
 }
@@ -777,8 +785,9 @@ function documentColorProviderSelector(
 }
 
 export function createEditorLanguageBridgeProviders(
-  deps: CreateEditorLanguageBridgeProvidersDeps,
+  input: CreateEditorLanguageBridgeProvidersDeps,
 ): {
+  dispose(): void;
   cacheCompletionProviderRegistration(
     langId: string,
     registration: CompletionProviderRegistrationLike,
@@ -824,6 +833,36 @@ export function createEditorLanguageBridgeProviders(
     semanticTokens: number;
   };
 } {
+  let disposed = false;
+  const staticProviderDisposables = new Set<MonacoDisposableLike>();
+  const emitterCleanups = new Set<() => void>();
+  const deps: CreateEditorLanguageBridgeProvidersDeps = {
+    ...input,
+    getMonaco: () => disposed ? null : input.getMonaco(),
+    getCurrentPath: () => disposed ? null : input.getCurrentPath(),
+    getCurrentLanguageContext: () => disposed ? null : input.getCurrentLanguageContext(),
+    async editorWorkbenchCall(method, params, options) {
+      const cleanup = method === 'completions_release' || method === 'inlay_hints_release' ||
+        method === 'inline_completions_free';
+      if (disposed && !cleanup) return null;
+      const result = await input.editorWorkbenchCall(method, params, options);
+      // Retained-result DTOs must reach their disposer even if the owner stopped
+      // in flight; dropping them here would leak extension-host cache entries.
+      const retained = method === 'completions' || method === 'inlay_hints' ||
+        method === 'inline_completions';
+      return disposed && !retained && !cleanup ? null : result;
+    },
+    async callWorkbenchProviderGuarded(kind, method, params, context, options) {
+      if (disposed) return { ok: false, stale: true };
+      const result = await input.callWorkbenchProviderGuarded(kind, method, params, context, options);
+      return disposed ? { ok: false, stale: true } : result;
+    },
+  };
+
+  function retainStaticProvider(registration: unknown): void {
+    if (isMonacoDisposable(registration)) staticProviderDisposables.add(registration);
+  }
+
   let semanticTokensDisableLogged = false;
   const pendingSemanticTokenInvalidations = new Set<string>();
   let semanticTokenInvalidationScheduled = false;
@@ -838,9 +877,10 @@ export function createEditorLanguageBridgeProviders(
 
   function createSemanticTokensChangeEmitter(): SemanticTokensChangeEmitterLike {
     const listeners = new Set<() => void>();
+    emitterCleanups.add(() => listeners.clear());
     return {
       event(listener: () => void): MonacoDisposableLike {
-        listeners.add(listener);
+        if (!disposed) listeners.add(listener);
         return {
           dispose(): void {
             listeners.delete(listener);
@@ -848,6 +888,7 @@ export function createEditorLanguageBridgeProviders(
         };
       },
       fire(): void {
+        if (disposed) return;
         for (const listener of Array.from(listeners)) {
           try {
             listener();
@@ -871,6 +912,7 @@ export function createEditorLanguageBridgeProviders(
   }
 
   function fireSemanticTokensChanged(langId?: string | null): void {
+    if (disposed) return;
     if (langId) {
       pendingSemanticTokenInvalidations.add(String(langId));
     } else {
@@ -884,6 +926,7 @@ export function createEditorLanguageBridgeProviders(
     semanticTokenInvalidationScheduled = true;
     void Promise.resolve().then(() => {
       semanticTokenInvalidationScheduled = false;
+      if (disposed) return;
       const languages = Array.from(pendingSemanticTokenInvalidations);
       pendingSemanticTokenInvalidations.clear();
       for (const language of languages) {
@@ -1036,14 +1079,14 @@ export function createEditorLanguageBridgeProviders(
         __te2WorkbenchProvider: true,
         triggerCharacters: entry.triggerCharacters,
         async provideCompletionItems(model, pos, context, token) {
-          if (token.isCancellationRequested) return { suggestions: [] };
+          if (disposed || token.isCancellationRequested) return { suggestions: [] };
           deps.flushMirrorDebounce();
           return provideWorkbenchCompletionItemsFromVscodeSuggest({
             providerHandle: Number(entry.handle), languageId: langId, model, position: pos, context,
             monacoTriggerKinds: monacoRef.languages!.CompletionTriggerKind || null,
             propertyKind: completionPropertyKind(deps),
             getCurrentPath: deps.getCurrentPath, absPathFromVscodeUri: deps.absPathFromVscodeUri,
-            isCancelled: () => !!token.isCancellationRequested,
+            isCancelled: () => disposed || !!token.isCancellationRequested,
             releaseCompletionItems: params => deps.editorWorkbenchCall("completions_release", params),
             async callWorkbenchCompletions(params, opts) {
               const request = traceCompletion("completion.sent", { language: langId, handle: entry.handle });
@@ -1064,7 +1107,7 @@ export function createEditorLanguageBridgeProviders(
           resolveCompletionItem: (suggestion: Record<string, unknown>, token: MonacoCancellationTokenLike) =>
             resolveWorkbenchCompletionItem(suggestion, completionPropertyKind(deps),
               (params, options) => deps.editorWorkbenchCall("completions_resolve", params, options),
-              () => !!token.isCancellationRequested),
+              () => disposed || !!token.isCancellationRequested),
         } : {}),
       },
     ));
@@ -1099,6 +1142,7 @@ export function createEditorLanguageBridgeProviders(
     langId: string,
     registration: CompletionProviderRegistrationLike,
   ): void {
+    if (disposed) return;
     if (!langId) return;
     // One registry slot across languages prevents duplicate registrations for
     // providers whose selector contains both a language and a path-only filter.
@@ -1386,6 +1430,7 @@ export function createEditorLanguageBridgeProviders(
     langId: string,
     registration: DocumentColorProviderRegistrationLike,
   ): void {
+    if (disposed) return;
     if (!langId) return;
     const handleKey =
       registration.handle != null ? String(registration.handle).trim() : "";
@@ -1466,6 +1511,7 @@ export function createEditorLanguageBridgeProviders(
       monacoRef.languages.registerInlayHintsProvider(langId, {
         displayName: registration.displayName || undefined,
         provideInlayHints(model, range) {
+          if (disposed) return undefined;
           try {
             deps.flushMirrorDebounce();
             return provideWorkbenchInlayHintsFromVscodeMainThread({
@@ -1487,6 +1533,10 @@ export function createEditorLanguageBridgeProviders(
                   opts,
                 );
               },
+            }).then(result => {
+              if (!disposed) return result;
+              result?.dispose?.();
+              return undefined;
             }).catch(() => undefined);
           } catch (_) {
             return undefined;
@@ -1534,6 +1584,7 @@ export function createEditorLanguageBridgeProviders(
     langId: string,
     registration: InlayHintsProviderRegistrationLike,
   ): void {
+    if (disposed) return;
     if (!langId) return;
     const handleKey =
       registration.handle != null ? String(registration.handle).trim() : "";
@@ -1634,6 +1685,7 @@ export function createEditorLanguageBridgeProviders(
     const registrationDisposable =
       monacoRef.languages.registerInlineCompletionsProvider(langId, {
         provideInlineCompletions(model, position, context) {
+          if (disposed) return undefined;
           try {
             deps.flushMirrorDebounce();
             return provideWorkbenchInlineCompletionsFromVscodeMainThread({
@@ -1653,6 +1705,15 @@ export function createEditorLanguageBridgeProviders(
                   opts,
                 );
               },
+            }).then(result => {
+              if (!disposed) return result;
+              const pid = asRecord(result)?.pid;
+              if (typeof pid === 'number' && Number.isFinite(pid)) {
+                void deps.editorWorkbenchCall('inline_completions_free', {
+                  providerHandle: handleKey, pid, reason: { kind: 'other' },
+                }).catch(() => {});
+              }
+              return undefined;
             }).catch(() => undefined);
           } catch (_) {
             return undefined;
@@ -1743,6 +1804,7 @@ export function createEditorLanguageBridgeProviders(
     langId: string,
     registration: InlineCompletionProviderRegistrationLike,
   ): void {
+    if (disposed) return;
     if (!langId) return;
     const handleKey =
       registration.handle != null ? String(registration.handle).trim() : "";
@@ -1781,7 +1843,8 @@ export function createEditorLanguageBridgeProviders(
     kind: LanguagePositionProviderKind,
     langId: string,
   ): void {
-    registerLanguagePositionProvider(deps, kind, String(langId || ""));
+    if (disposed) return;
+    registerLanguagePositionProvider(deps, kind, String(langId || ""), retainStaticProvider);
   }
 
   function hydrateProviderSnapshot(snapshot: unknown): {
@@ -1795,7 +1858,7 @@ export function createEditorLanguageBridgeProviders(
     inlineCompletions: number;
     semanticTokens: number;
   } {
-    const snapshotRecord = asRecord(snapshot);
+    const snapshotRecord = disposed ? null : asRecord(snapshot);
     const disableSemanticTokens = deps.getDisableSemanticTokens();
     let completionCount = 0;
     let documentColorCount = 0;
@@ -1983,6 +2046,7 @@ export function createEditorLanguageBridgeProviders(
     isRange?: boolean,
     options: SemanticTokensRegistrationOptions = {},
   ): void {
+    if (disposed) return;
     if (deps.getDisableSemanticTokens()) {
       logSemanticTokensDisabledOnce();
       return;
@@ -2181,6 +2245,7 @@ export function createEditorLanguageBridgeProviders(
       if (!monacoRef || !monacoRef.languages) return;
 
       const doRegister = (targets: Set<string>) => {
+        if (disposed) return;
         try {
           targets.forEach((langId) => {
             if (!langId) return;
@@ -2192,7 +2257,7 @@ export function createEditorLanguageBridgeProviders(
               console.log(
                 "[hover:bridge] registering hover provider for lang=" + langId,
               );
-              monacoRef.languages.registerHoverProvider(langId, {
+              const registration = monacoRef.languages.registerHoverProvider(langId, {
                 provideHover(model, pos, token) {
                   try {
                     const ctx = deps.getCurrentLanguageContext();
@@ -2275,6 +2340,7 @@ export function createEditorLanguageBridgeProviders(
                   }
                 },
               });
+              retainStaticProvider(registration);
               deps.languageBridge.registeredHover.add(langId);
             }
 
@@ -2282,7 +2348,7 @@ export function createEditorLanguageBridgeProviders(
               !deps.languageBridge.registeredSymbols.has(langId) &&
               monacoRef.languages.registerDocumentSymbolProvider
             ) {
-              monacoRef.languages.registerDocumentSymbolProvider(
+              const registration = monacoRef.languages.registerDocumentSymbolProvider(
                 documentSymbolProviderSelector(deps, langId),
                 {
                   provideDocumentSymbols(model, token) {
@@ -2322,6 +2388,7 @@ export function createEditorLanguageBridgeProviders(
                   },
                 },
               );
+              retainStaticProvider(registration);
               deps.languageBridge.registeredSymbols.add(langId);
             }
 
@@ -2329,7 +2396,7 @@ export function createEditorLanguageBridgeProviders(
               !deps.languageBridge.registeredFolding.has(langId) &&
               monacoRef.languages.registerFoldingRangeProvider
             ) {
-              monacoRef.languages.registerFoldingRangeProvider(
+              const registration = monacoRef.languages.registerFoldingRangeProvider(
                 foldingRangeProviderSelector(deps, langId),
                 {
                   provideFoldingRanges(model, context, token) {
@@ -2375,6 +2442,7 @@ export function createEditorLanguageBridgeProviders(
                   },
                 },
               );
+              retainStaticProvider(registration);
               deps.languageBridge.registeredFolding.add(langId);
             }
             ensureCompletionProvidersRegistered(langId);
@@ -2486,6 +2554,33 @@ export function createEditorLanguageBridgeProviders(
   }
 
   return {
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      pendingSemanticTokenInvalidations.clear();
+      for (const cleanup of emitterCleanups) cleanup();
+      emitterCleanups.clear();
+      for (const registration of staticProviderDisposables) {
+        try { registration.dispose(); } catch (error) {
+          console.warn('[providers] static provider disposal failed', error);
+        }
+      }
+      staticProviderDisposables.clear();
+      resetDynamicProviderCaches('editor_dispose');
+      disposeProviderRecord(deps.languageBridge.semanticTokensProviderDisposablesByLanguage);
+      deps.languageBridge.semanticTokensProviderDisposablesByLanguage = {};
+      deps.languageBridge.semanticTokensChangeEmittersByLanguage = {};
+      deps.languageBridge.semanticTokensLegendCache = {};
+      deps.languageBridge.semanticTokensRangeFlag = {};
+      deps.languageBridge.semanticTokensProviderModeByLanguage = {};
+      deps.languageBridge.semanticTokensRegistrationSignatureByLanguage = {};
+      for (const registrations of [
+        deps.languageBridge.registeredHover, deps.languageBridge.registeredSymbols,
+        deps.languageBridge.registeredFolding, deps.languageBridge.registeredDocumentHighlights,
+        deps.languageBridge.registeredDefinitions, deps.languageBridge.registeredReferences,
+        deps.languageBridge.registeredImplementations, deps.languageBridge.registeredSemanticTokens,
+      ]) registrations.clear();
+    },
     cacheCompletionProviderRegistration,
     cacheDocumentColorProviderRegistration,
     cacheInlayHintsProviderRegistration,

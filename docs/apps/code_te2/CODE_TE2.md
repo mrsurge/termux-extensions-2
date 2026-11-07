@@ -320,6 +320,11 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
   - Page teardown releases host-action RPC subscriptions/input bindings,
     keyboard listeners, and the UI layout observer/resize handler. Those owners
     have idempotent disposal and reject rebinding/late callbacks after disposal.
+    The WBA language-provider owner also releases hover, symbols, folding,
+    navigation, completion, color, hint and semantic registrations/listeners.
+    Late catalog/legend replies cannot reinstall disposed providers; in-flight
+    retained completion/hint results still run their existing release RPCs.
+    This is per-runtime teardown, not a shared language-provider router.
     Global provider/model ownership, iframe removal, and shared active-area
     menu/extra-key routing remain subsequent lifecycle work.
 - `app/apps/code_te2/monaco_editor/editor_rpc_transport.ts`

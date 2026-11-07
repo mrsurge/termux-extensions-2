@@ -1220,6 +1220,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       editorHostActionRuntime.dispose();
       keyboardRuntime.dispose();
       uiEditorRuntime.dispose();
+      languageBridgeProviders.dispose();
     },
     { once: true },
   );

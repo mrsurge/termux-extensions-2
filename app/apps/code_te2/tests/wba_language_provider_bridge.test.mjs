@@ -152,6 +152,7 @@ function createHarness(
     languageId: "example-language",
     version: 1,
   };
+  Object.assign(languages, options.languages);
   const providers = createEditorLanguageBridgeProviders({
     getMonaco: () => ({
       Range: class Range {
@@ -235,7 +236,7 @@ function createHarness(
       if (options.tokenizationGate) await options.tokenizationGate;
       return true;
     },
-    ensureWorkbenchLanguageCatalogInstalled: async () => {},
+    ensureWorkbenchLanguageCatalogInstalled: async () => { await options.catalogGate; },
     getWorkbenchLanguageIds: () => [context.languageId],
     monacoRangeFromProtoRange: (range) => range,
     flushMirrorDebounce() {},
@@ -247,7 +248,127 @@ function createHarness(
     calls,
     context,
     tokenizationCalls,
+    languageBridge,
   };
+}
+
+test('provider owner releases every registration family once and cannot revive after teardown', async () => {
+  const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+  const records = [];
+  const languages = Object.fromEntries([
+    'Hover', 'DocumentSymbol', 'FoldingRange', 'DocumentHighlight', 'Definition',
+    'Reference', 'Implementation', 'CompletionItem', 'Color', 'InlayHints',
+    'InlineCompletions', 'DocumentSemanticTokens', 'DocumentRangeSemanticTokens',
+  ].map(kind => [`register${kind}Provider`, (_selector, provider) => {
+    const record = { kind, provider, disposals: 0 }; records.push(record);
+    return { dispose() { record.disposals++; } };
+  }]));
+  const h = createHarness(createEditorLanguageBridgeProviders, false, { languages });
+  h.providers.installWorkbenchLanguageBridgeProviders();
+  for (const kind of ['documentHighlights', 'definitions', 'references', 'implementations']) {
+    h.providers.cacheLanguageProviderRegistration(kind, 'example-language');
+  }
+  h.providers.cacheCompletionProviderRegistration('example-language', { handle: '1', triggerCharacters: [] });
+  h.providers.cacheDocumentColorProviderRegistration('example-language', { handle: '2' });
+  h.providers.cacheInlayHintsProviderRegistration('example-language', { handle: '3' });
+  h.providers.cacheInlineCompletionProviderRegistration('example-language', { handle: '4' });
+  h.providers.registerSemanticTokensWithLegend('example-language', { tokenTypes: ['variable'], tokenModifiers: [] });
+  h.providers.registerSemanticTokensWithLegend('other-language', { tokenTypes: ['variable'], tokenModifiers: [] }, true);
+  const semantic = records.find(r => r.kind === 'DocumentSemanticTokens');
+  let invalidations = 0;
+  semantic.provider.onDidChange(() => invalidations++);
+  h.providers.fireSemanticTokensChanged('example-language');
+  const count = records.length;
+  assert.deepEqual(new Set(records.map(r => r.kind)), new Set([
+    'Hover', 'DocumentSymbol', 'FoldingRange', 'DocumentHighlight', 'Definition',
+    'Reference', 'Implementation', 'CompletionItem', 'Color', 'InlayHints',
+    'InlineCompletions', 'DocumentSemanticTokens', 'DocumentRangeSemanticTokens',
+  ]));
+  h.providers.dispose(); h.providers.dispose();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(invalidations, 0);
+  assert.ok(records.every(r => r.disposals === 1));
+  h.providers.installWorkbenchLanguageBridgeProviders();
+  h.providers.cacheCompletionProviderRegistration('example-language', { handle: 'new', triggerCharacters: [] });
+  h.providers.cacheLanguageProviderRegistration('references', 'other-language');
+  h.providers.registerSemanticTokensWithLegend('new', { tokenTypes: ['variable'], tokenModifiers: [] });
+  h.providers.fireSemanticTokensChanged();
+  assert.equal(records.length, count);
+  assert.equal(h.languageBridge.registeredHover.size, 0);
+  assert.deepEqual(h.languageBridge.completionProvidersByLanguage, {});
+});
+
+test('catalog and legend replies cannot register providers after owner disposal', async () => {
+  const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+  let finishCatalog, finishLegend;
+  const catalogGate = new Promise(resolve => { finishCatalog = resolve; });
+  const legendGate = new Promise(resolve => { finishLegend = resolve; });
+  let semanticRegistrations = 0;
+  const h = createHarness(createEditorLanguageBridgeProviders, false, {
+    catalogGate,
+    workbenchCall: () => legendGate,
+    languages: { registerDocumentSemanticTokensProvider() { semanticRegistrations++; return { dispose() {} }; } },
+  });
+  h.providers.installWorkbenchLanguageBridgeProviders();
+  h.providers.dispose();
+  finishCatalog(); finishLegend({ ok: true, result: { legend: { tokenTypes: ['variable'], tokenModifiers: [] } } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(semanticRegistrations, 0);
+  assert.equal(h.languageBridge.registeredHover.size, 0);
+  assert.equal(h.languageBridge.registeredSemanticTokens.size, 0);
+});
+
+test('in-flight completion results are cancelled and released after owner disposal', async () => {
+  const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const h = createHarness(createEditorLanguageBridgeProviders, false, {
+    workbenchCall(method) { return method === 'completions' ? pending : { ok: true }; },
+  });
+  h.providers.cacheCompletionProviderRegistration('example-language', { handle: '23', triggerCharacters: [] });
+  const provider = h.registrations.completions[0].provider;
+  const model = { uri: { toString: () => h.context.uri }, getLanguageId: () => h.context.languageId };
+  const result = provider.provideCompletionItems(model, { lineNumber: 1, column: 1 }, {}, {});
+  h.providers.dispose();
+  finish({ ok: true, result: { sessionId: 'late-session', providers: [{ handle: 23, dto: { x: 23, b: [{ a: 'late', x: [23, 0] }] } }] } });
+  assert.deepEqual((await result).suggestions, []);
+  await Promise.resolve();
+  assert.equal(h.calls.filter(c => c.method === 'completions_release').length, 1);
+  const before = h.calls.length;
+  assert.deepEqual((await provider.provideCompletionItems(model, { lineNumber: 1, column: 1 }, {}, {})).suggestions, []);
+  assert.equal(h.calls.length, before);
+});
+
+for (const kind of ['inlayHints', 'inlineCompletions']) {
+  test(`late ${kind} results release retained extension-host resources`, async () => {
+    const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+    let finish, provider;
+    const pending = new Promise(resolve => { finish = resolve; });
+    const requestMethod = kind === 'inlayHints' ? 'inlay_hints' : 'inline_completions';
+    const releaseMethod = kind === 'inlayHints' ? 'inlay_hints_release' : 'inline_completions_free';
+    const register = (_selector, value) => { provider = value; return { dispose() {} }; };
+    const h = createHarness(createEditorLanguageBridgeProviders, false, {
+      workbenchCall(method) { return method === requestMethod ? pending : { ok: true }; },
+      languages: kind === 'inlayHints' ? { registerInlayHintsProvider: register } : { registerInlineCompletionsProvider: register },
+    });
+    const model = { uri: { toString: () => h.context.uri }, getLanguageId: () => h.context.languageId };
+    let result;
+    if (kind === 'inlayHints') {
+      h.providers.cacheInlayHintsProviderRegistration('example-language', { handle: '7' });
+      result = provider.provideInlayHints(model, { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 2 });
+    } else {
+      h.providers.cacheInlineCompletionProviderRegistration('example-language', { handle: '7' });
+      result = provider.provideInlineCompletions(model, { lineNumber: 1, column: 1 }, {});
+    }
+    assert.equal(h.calls.filter(c => c.method === requestMethod).length, 1);
+    h.providers.dispose();
+    finish({ ok: true, result: kind === 'inlayHints' ? { hints: [], cacheId: 19 } : { pid: 19, items: [] } });
+    assert.equal(await result, undefined);
+    await Promise.resolve();
+    const releases = h.calls.filter(c => c.method === releaseMethod);
+    assert.equal(releases.length, 1);
+    assert.equal(releases[0].params.providerHandle, '7');
+  });
 }
 
 test("WBA position providers register identically for any advertised language", async () => {

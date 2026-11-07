@@ -175,6 +175,24 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   No Python/mypyc/Rust rebuild or shared runtime restart needed; Android
   bundled-asset publication not performed. Continue with shared
   provider/model and DOM ownership before iframe removal, focus fix and tabs.
+- [x] Next lifecycle prerequisite (2026-11-06): WBA language bridge now owns
+  teardown of all 13 registration families, including formerly dropped hover,
+  symbol/folding and navigation handles. Disposal is idempotent; catalog/legend
+  continuations cannot re-register after teardown. Semantic listener/invalidation
+  state is released. Late completion/inlay/inline DTOs reach existing release
+  RPCs rather than leaking extension-host caches or publishing stale results.
+  Pagehide invokes this teardown. This is not yet shared provider dispatch,
+  shared model ownership, complete runtime disposal or iframe removal.
+- [x] Provider prerequisite gate: 83 combined focused tests pass, including all
+  registration families, queued invalidations, late catalogs/legends and retained
+  result cleanup; frontend/WBA typing reports zero Any/compiler findings. Build
+  passes with the existing module-type warning. Generated host.js retains the
+  same 14 upstream/template trailing-whitespace lines as HEAD; source diff-check
+  is clean. No copied vendor code or protocol/backend changes.
+- [x] Live provider prerequisite accepted 2026-11-06: user confirms everything
+  works after the requested hover/completion/navigation and secondary-startup
+  check. No mypyc/Rust build or framework restart; no Android publication. Current
+  mobile/browser working iframe and active-area input/menu behavior are unchanged.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
   pass. Electron strict checks and unit suite pass. Four existing TextMate
