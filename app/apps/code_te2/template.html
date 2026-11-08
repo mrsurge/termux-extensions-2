@@ -971,7 +971,7 @@
   body:has(> .fe-card-menu.show) .fe-editor-container {
     z-index: 0;
   }
-  #editor-frame .fh-root {
+  [data-te2-working-editor-host] .fh-root {
     height: 100%;
     width: 100%;
     margin: 0;
@@ -979,7 +979,7 @@
     display: flex;
     flex-direction: column;
   }
-  #editor-frame #te2-breadcrumbs {
+  [data-te2-working-editor-host] .te2-editor-breadcrumbs {
     display: flex;
     align-items: center;
     padding: 2px 8px;
@@ -996,10 +996,10 @@
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
-  #editor-frame #te2-breadcrumbs::-webkit-scrollbar { display: none; }
-  #editor-frame #te2-breadcrumbs:empty { display: none; }
-  #editor-frame #te2-breadcrumbs .monaco-breadcrumbs { flex: 1; min-width: 0; }
-  #editor-frame .te2-bc-item {
+  [data-te2-working-editor-host] .te2-editor-breadcrumbs::-webkit-scrollbar { display: none; }
+  [data-te2-working-editor-host] .te2-editor-breadcrumbs:empty { display: none; }
+  [data-te2-working-editor-host] .te2-editor-breadcrumbs .monaco-breadcrumbs { flex: 1; min-width: 0; }
+  [data-te2-working-editor-host] .te2-bc-item {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -1008,16 +1008,16 @@
     cursor: pointer;
     white-space: nowrap;
   }
-  #editor-frame .te2-bc-item:hover { opacity: 1; color: #e5e7eb; }
-  #editor-frame .te2-bc-icon {
+  [data-te2-working-editor-host] .te2-bc-item:hover { opacity: 1; color: #e5e7eb; }
+  [data-te2-working-editor-host] .te2-bc-icon {
     display: inline-flex;
     align-items: center;
     width: 16px;
     height: 16px;
     flex-shrink: 0;
   }
-  #editor-frame .te2-bc-icon svg { width: 16px; height: 16px; fill: currentColor; }
-  #editor-frame .te2-bc-sym-icon {
+  [data-te2-working-editor-host] .te2-bc-icon svg { width: 16px; height: 16px; fill: currentColor; }
+  [data-te2-working-editor-host] .te2-bc-sym-icon {
     display: inline-flex;
     align-items: center;
     width: 14px;
@@ -1025,9 +1025,9 @@
     flex-shrink: 0;
     margin-right: 2px;
   }
-  #editor-frame .te2-bc-sym-icon svg { width: 14px; height: 14px; }
-  #editor-frame .te2-bc-sep { opacity: 0.4; padding: 0 2px; }
-  #editor-frame #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; }
+  [data-te2-working-editor-host] .te2-bc-sym-icon svg { width: 14px; height: 14px; }
+  [data-te2-working-editor-host] .te2-bc-sep { opacity: 0.4; padding: 0 2px; }
+  [data-te2-working-editor-host] .te2-editor-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; }
   #editor-frame .fh-root,
   #editor-frame .monaco-editor {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

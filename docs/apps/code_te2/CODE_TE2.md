@@ -302,15 +302,21 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
 ### Monaco editor runtime (worker)
 - `app/apps/code_te2/monaco_editor/inline_host.ts`
   - Mounts the inline editor into `#editor-frame`
-  - Injects the inline host markup (`#te2-breadcrumbs`, `#fh-monaco`)
+  - Injects `.te2-editor-breadcrumbs` / `.te2-editor-monaco` with
+    `data-te2-editor-part`, not fixed inner IDs. `editor_mount.ts` resolves typed
+    root/editor/breadcrumb/optional-debug references per marked host. A nested
+    host cannot supply missing parent parts. Layout, breadcrumbs and debug helpers
+    receive their own references, never document-wide ID lookups. Breadcrumb
+    creation uses the mount's ownerDocument; these styles use the host marker.
   - Loads required CSS/vendor assets, imports `m_editor_app.ts`, and explicitly
     calls `startWorkingEditorRuntime` with the snapshot and mention callback.
     Importing that module alone no longer boots an editor.
   - `editor_boot_owner.ts` retains one boot promise per page's working mount;
     repeated requests do not replace live DOM or overwrite boot inputs. A failed
     partial boot remains failed until reload. A second mount in the same realm
-    is deliberately rejected while provider dispatch and fixed-ID ownership are
-    still page-scoped. This is a migration guard, not same-DOM multi-editor support.
+    is deliberately rejected while provider dispatch, outer host identity and
+    window-level action ownership remain page-scoped. Inner mount references
+    alone do not enable same-DOM multi-editor support.
 - `app/apps/code_te2/monaco_editor/m_editor_app.ts`
   - Monaco editor bootstrap source of truth
   - Model management (plain editor vs diff editor)
@@ -345,7 +351,7 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
     timer/listener. File switches and plain/diff transitions flush before changing
     ownership; pending text cannot be relabeled with another file's path.
   - No shared transport, backend state protocol or same-DOM editor activation is
-    introduced here. Provider dispatch, DOM identity and active-area routing must
+    introduced here. Provider dispatch, outer identity and active-area routing must
     be resolved before removing working-editor iframe isolation.
 - `app/apps/code_te2/monaco_editor/editor_rpc_transport.ts`
   - Editor-facing JSON-RPC transport over `/rpc/editor`

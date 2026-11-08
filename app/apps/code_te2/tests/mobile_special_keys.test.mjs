@@ -305,10 +305,12 @@ function createEditorFixture(userAgent, role = "primary") {
     : "fe-editor-container";
   const host = win.document.createElement("div");
   host.id = "editor-frame";
+  host.setAttribute('data-te2-working-editor-host', '');
   const editorRoot = win.document.createElement("div");
   editorRoot.className = "fh-root";
   const monacoHost = win.document.createElement("div");
-  monacoHost.id = "fh-monaco";
+  monacoHost.className = 'te2-editor-monaco';
+  monacoHost.setAttribute('data-te2-editor-part', 'editor');
   const editorDom = win.document.createElement("div");
   const input = win.document.createElement("textarea");
   input.className = "inputarea";

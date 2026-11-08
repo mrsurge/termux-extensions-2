@@ -3,7 +3,7 @@ import { setDebugPart, syncTraceDebug as syncTraceDebugState, syncMirrorDebug as
 import { buildDebugMessage } from './editor_debug_message_utils.ts';
 
 interface EditorDebugRuntimeDeps {
-  getDocument(): Document;
+  getDebugElement(): HTMLElement | null;
   getEditor(): unknown;
 }
 
@@ -31,7 +31,7 @@ export function createEditorDebugRuntime(deps: EditorDebugRuntimeDeps) {
 
   function updateDebug(extra?: string | null) {
     try {
-      if (!debugElement) debugElement = deps.getDocument().getElementById('fh-debug');
+      if (!debugElement) debugElement = deps.getDebugElement();
       if (!debugElement) return;
       debugElement.textContent = buildDebugMessage(debugElement, deps.getEditor(), debugParts, extra || '');
     } catch (_) {}

@@ -107,7 +107,7 @@ test('UI runtime disconnects its observer and removes resize handling permanentl
     removeEventListener: (_name, listener) => listeners.delete(listener),
   };
   const runtime = createEditorUiEditorRuntime({
-    getWindow: () => win, getDocument: () => ({ getElementById: () => ({}) }),
+    getWindow: () => win, getEditorContainer: () => ({}),
     getEditor: () => ({ layout: () => layouts++ }), getDiffEditor: () => null,
   });
   runtime.ensureLayoutObserver(); runtime.ensureLayoutObserver();

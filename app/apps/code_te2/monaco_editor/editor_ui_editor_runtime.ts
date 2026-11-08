@@ -10,6 +10,7 @@ interface EditorUiEditorRuntimeDeps {
   updatePreference(payload: Record<string, unknown>): Promise<unknown>;
   getWindow(): Window;
   getDocument(): Document;
+  getEditorContainer(): HTMLElement | null;
   getMonaco(): unknown;
   getEditor(): unknown;
   getDiffEditor(): unknown;
@@ -41,7 +42,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
 
   function getEditorContainer(): HTMLElement | null {
     try {
-      return deps.getDocument().getElementById('fh-monaco');
+      return deps.getEditorContainer();
     } catch (_) {
       return null;
     }

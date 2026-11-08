@@ -223,6 +223,26 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   performed. Shared provider dispatch and fixed
   DOM identity remain unresolved, so the same-realm boot guard and working iframe
   remain in place. Mobile focus/menu fixes and secondary tabs are not yet enabled.
+- [x] Inner DOM ownership slice approved/implemented 2026-11-08: explicit typed
+  root/editor/breadcrumb/optional-debug references are resolved per marked host
+  and passed into working boot. Layout, breadcrumb rendering/intents and debug
+  helpers no longer use document-wide ID lookups. Inner editor/breadcrumb IDs
+  become classes/data parts; corresponding layout/breadcrumb styles follow the
+  host marker. Nested host parts cannot satisfy missing parent parts. No backend,
+  shared provider dispatch, outer/window identity or same-realm boot admission
+  changes; current iframe/native overlay isolation remains intact.
+- [x] Inner DOM automated gate: 120 focused resource/provider/boot/input/theme/
+  autosave/mention/projection tests pass; frontend and WBA typing have zero Any
+  findings/compiler diagnostics; frontend asset build and source diff-check pass.
+  Two-mount regressions verify exact layout targets, isolated debug/breadcrumb
+  updates, originating breadcrumb intents and missing/nested part rejection.
+  Existing unrelated TextMate/terminal-menu fixture failures are not addressed;
+  no whole-suite claim. Local AOT shellspec override remains untouched.
+- [x] Live inner DOM accepted 2026-11-08: user reports everything seems to be
+  working after the requested layout/breadcrumb/editing/touch/diff check. No
+  exhaustive additional scenario matrix is claimed. No Python/mypyc/Rust rebuild
+  or framework restart; Android asset publication not performed. Continue with shared provider
+  dispatch and window/active-area ownership before removing the working iframe.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
   pass. Electron strict checks and unit suite pass. Four existing TextMate

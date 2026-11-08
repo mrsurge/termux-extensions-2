@@ -4,6 +4,7 @@ import { renderIcon } from '/static/js/file_icons.js';
 
 interface EditorBreadcrumbRuntimeDeps {
   getDocument(): Document | null;
+  getBreadcrumbElement(): HTMLElement | null;
   getEditor(): BreadcrumbEditorLike | null;
   getCurrentPath(): string | null;
   getModel(): unknown;
@@ -203,10 +204,6 @@ function modelIsDisposed(value: unknown): boolean {
   } catch (_) {
     return true;
   }
-}
-
-function initBreadcrumbElement(doc: Document): HTMLElement | null {
-  return doc.getElementById("te2-breadcrumbs");
 }
 
 function loadBreadcrumbIcons(
@@ -640,7 +637,7 @@ export function createEditorBreadcrumbRuntime(
   function init(): void {
     const doc = deps.getDocument();
     if (!doc) return;
-    element = initBreadcrumbElement(doc);
+    element = deps.getBreadcrumbElement();
     bindEditor();
     loadBreadcrumbIcons(
       (path: string): Promise<unknown> => import(path),

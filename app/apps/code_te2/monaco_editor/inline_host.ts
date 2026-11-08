@@ -1,4 +1,5 @@
 import { EditorBootOwner } from './editor_boot_owner.ts';
+import { resolveWorkingEditorMount } from './editor_mount.ts';
 
 const workingEditorBoot = new EditorBootOwner();
 const INLINE_EDITOR_API_BASE = '/api/app/code_te2';
@@ -33,8 +34,8 @@ const INLINE_EDITOR_SCRIPT_ASSETS = [
 ] as const;
 const INLINE_EDITOR_MARKUP = `
   <div class="fh-root">
-    <div id="te2-breadcrumbs"></div>
-    <div id="fh-monaco"></div>
+    <div class="te2-editor-breadcrumbs" data-te2-editor-part="breadcrumbs"></div>
+    <div class="te2-editor-monaco" data-te2-editor-part="editor"></div>
   </div>
 `;
 const INLINE_EDITOR_HOST_STYLE = `
@@ -354,10 +355,12 @@ export async function mountInlineEditorHost(
   await workingEditorBoot.mount(editorFrame, async () => {
     window.__te2InlineMonacoApiBase = INLINE_EDITOR_API_BASE;
     markNativeRenderer(editorFrame);
+    editorFrame.setAttribute('data-te2-working-editor-host', '');
     editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
     await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
     const { startWorkingEditorRuntime } = await import('./m_editor_app.ts');
     await startWorkingEditorRuntime({
+      mount: resolveWorkingEditorMount(editorFrame),
       bootSnapshot: options.bootSnapshot,
       buildSidebarMentionPayload: options.buildSidebarMentionPayload,
     });

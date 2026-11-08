@@ -1,4 +1,5 @@
 import { isUnknownArray } from '../src/rpc/value-types.ts';
+import type { WorkingEditorMount } from './editor_mount.ts';
 import { buildUiUrl, fetchJsonWithBase } from "./editor_common_utils.ts";
 import {
   normalizeLanguageId,
@@ -377,6 +378,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
 }
 
 interface WorkingEditorBootOptions {
+  mount: WorkingEditorMount;
   bootSnapshot?: unknown;
   buildSidebarMentionPayload?: (
     payload: Record<string, unknown>,
@@ -461,20 +463,19 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
     typeof createEditorExtensionStateRuntime
   > | null = null;
   var debugRuntime = createEditorDebugRuntime({
-    getDocument: function () {
-      return document;
-    },
+    getDebugElement: () => options.mount.debug,
     getEditor: function () {
       return editor;
     },
   });
   var uiEditorRuntime = createEditorUiEditorRuntime({
+    getEditorContainer: () => options.mount.editor,
     updatePreference: (payload) => editorRpcCall("editor.preference.update", payload),
     getWindow: function () {
       return window;
     },
     getDocument: function () {
-      return document;
+      return options.mount.root.ownerDocument;
     },
     getMonaco: function () {
       return monaco || window.monaco || null;
@@ -605,8 +606,9 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   });
 
   var breadcrumbRuntime = createEditorBreadcrumbRuntime({
+    getBreadcrumbElement: () => options.mount.breadcrumbs,
     getDocument: function () {
-      return document;
+      return options.mount.root.ownerDocument;
     },
     getEditor: function () {
       return editor;
