@@ -119,7 +119,7 @@ function createHarness(
   const calls = [];
   const tokenizationCalls = [];
   const languageBridge = languageBridgeState();
-  const languages = {
+  const languages = options.sharedLanguages || {
     registerCompletionItemProvider(selector, provider) {
       const registration = { selector, provider, disposed: false };
       (registrations.completions ??= []).push(registration);
@@ -177,6 +177,7 @@ function createHarness(
     absPathFromVscodeUri: () => context.path,
     getHasModel: () => true,
     getCurrentLanguageContext: () => context,
+    isEditorFocused: () => options.focused?.() ?? false,
     editorWorkbenchCall: async (method, params) => {
       calls.push({ method, params });
       if (options.workbenchCall) return options.workbenchCall(method, params);
@@ -316,6 +317,46 @@ test('catalog and legend replies cannot register providers after owner disposal'
   assert.equal(semanticRegistrations, 0);
   assert.equal(h.languageBridge.registeredHover.size, 0);
   assert.equal(h.languageBridge.registeredSemanticTokens.size, 0);
+});
+
+test('two real WBA bridge owners share static registrations and route RPCs to the focused matching runtime', async t => {
+  t.mock.method(console, 'log', () => {}); t.mock.method(console, 'warn', () => {});
+  const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+  const records = [];
+  const sharedLanguages = Object.fromEntries([
+    'Hover', 'DocumentSymbol', 'FoldingRange', 'DocumentHighlight', 'Definition', 'Reference', 'Implementation',
+  ].map(kind => [`register${kind}Provider`, (selector, provider) => {
+    const record = { kind, selector, provider, disposals: 0 }; records.push(record);
+    return { dispose() { record.disposals++; } };
+  }]));
+  let focused = 'primary';
+  const a = createHarness(createEditorLanguageBridgeProviders, false, { sharedLanguages, focused: () => focused === 'primary' });
+  const b = createHarness(createEditorLanguageBridgeProviders, false, { sharedLanguages, focused: () => focused === 'secondary' });
+  a.context.uri = 'file:///workspace/a.py'; a.context.path = '/workspace/a.py';
+  b.context.uri = 'file:///workspace/b.py'; b.context.path = '/workspace/b.py';
+  for (const owner of [a, b]) {
+    owner.providers.installWorkbenchLanguageBridgeProviders();
+    for (const kind of ['documentHighlights', 'definitions', 'references', 'implementations']) {
+      owner.providers.cacheLanguageProviderRegistration(kind, owner.context.languageId);
+    }
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(records.length, 7);
+  const provider = records.find(record => record.kind === 'Definition').provider;
+  const request = uri => provider.provideDefinition({ uri: { toString: () => uri }, getVersionId: () => 1 }, { lineNumber: 7, column: 3 }, {});
+  const result = await request(b.context.uri);
+  assert.equal(result.length, 1);
+  assert.equal(a.calls.filter(call => call.method === 'definition').length, 0);
+  assert.equal(b.calls.filter(call => call.method === 'definition').length, 1);
+  assert.equal(b.calls.find(call => call.method === 'definition').params.path, '/workspace/b.py');
+  b.context.uri = a.context.uri; b.context.path = a.context.path; focused = 'secondary';
+  await request(a.context.uri);
+  assert.equal(b.calls.filter(call => call.method === 'definition').length, 2);
+  a.providers.dispose(); assert.ok(records.every(record => record.disposals === 0));
+  await request(a.context.uri);
+  assert.equal(b.calls.filter(call => call.method === 'definition').length, 3);
+  b.providers.dispose(); assert.ok(records.every(record => record.disposals === 1));
+  assert.equal(provider.provideDefinition({ uri: { toString: () => a.context.uri } }, {}, {}), undefined);
 });
 
 test('in-flight completion results are cancelled and released after owner disposal', async () => {

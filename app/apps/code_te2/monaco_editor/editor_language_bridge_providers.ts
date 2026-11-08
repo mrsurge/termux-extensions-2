@@ -1,4 +1,5 @@
 import { isUnknownArray } from '../src/rpc/value-types.ts';
+import { sharedModelProviders } from './shared_model_providers.ts';
 import { provideWorkbenchCompletionItemsFromVscodeSuggest, resolveWorkbenchCompletionItem } from "./vscode_completion_vendor/suggest.js";
 import { traceCompletion } from "./editor_completion_trace.ts";
 import {
@@ -15,7 +16,7 @@ import {
   provideWorkbenchDocumentSemanticTokensFromVscodeMainThread,
 } from "./vscode_document_intelligence_vendor/semanticTokens.js";
 
-interface LanguageContext {
+export interface LanguageContext {
   uri: string;
   path: string;
   languageId: string;
@@ -137,8 +138,9 @@ interface MonacoUriLike {
   toString(): string;
 }
 
-interface MonacoModelLike {
+export interface MonacoModelLike {
   uri?: MonacoUriLike;
+  isDisposed?(): boolean;
   getLanguageId?(): string;
   getValue?(): string;
   getVersionId?(): number;
@@ -202,7 +204,7 @@ interface SemanticTokensChangeEmitterLike {
   fire(): void;
 }
 
-interface MonacoLanguagesLike {
+export interface MonacoLanguagesLike {
   SymbolKind?: { Function?: number };
   FoldingRangeKind?: {
     fromValue?: (value: string) => unknown;
@@ -407,6 +409,7 @@ interface CreateEditorLanguageBridgeProvidersDeps {
   getCurrentPath(): string | null;
   getHasModel(): boolean;
   getCurrentLanguageContext(): LanguageContext | null;
+  isEditorFocused?(): boolean;
   callWorkbenchProviderGuarded(
     kind: "hover" | "symbols" | "folding_ranges",
     method: string,
@@ -836,9 +839,23 @@ export function createEditorLanguageBridgeProviders(
   let disposed = false;
   const staticProviderDisposables = new Set<MonacoDisposableLike>();
   const emitterCleanups = new Set<() => void>();
+  const providerFacades = new WeakMap<MonacoLanguagesLike, MonacoLanguagesLike>();
   const deps: CreateEditorLanguageBridgeProvidersDeps = {
     ...input,
-    getMonaco: () => disposed ? null : input.getMonaco(),
+    getMonaco() {
+      if (disposed) return null;
+      const monaco = input.getMonaco();
+      if (!monaco) return null;
+      let languages = providerFacades.get(monaco.languages);
+      if (!languages) {
+        languages = sharedModelProviders(monaco.languages, {
+          context: () => disposed ? null : input.getCurrentLanguageContext(),
+          focused: () => !disposed && (input.isEditorFocused?.() ?? false),
+        });
+        providerFacades.set(monaco.languages, languages);
+      }
+      return { ...monaco, languages };
+    },
     getCurrentPath: () => disposed ? null : input.getCurrentPath(),
     getCurrentLanguageContext: () => disposed ? null : input.getCurrentLanguageContext(),
     async editorWorkbenchCall(method, params, options) {

@@ -192,6 +192,7 @@ interface MonacoRuntimeModelLike {
 }
 
 interface MonacoRuntimeEditorLike {
+  hasTextFocus?(): boolean;
   layout?(): void;
   addCommand?(keybinding: number, handler: () => void): void;
   setModel?(model: MonacoRuntimeModelLike | null): void;
@@ -1254,6 +1255,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       return !!model;
     },
     getCurrentLanguageContext: _currentLanguageContext,
+    isEditorFocused: () => (diffEditor?.getModifiedEditor?.() ?? editor)?.hasTextFocus?.() === true,
     callWorkbenchProviderGuarded: _callWorkbenchProviderGuarded,
     editorWorkbenchCall: editorWorkbenchCall,
     absPathFromVscodeUri: _absPathFromVscodeUri,

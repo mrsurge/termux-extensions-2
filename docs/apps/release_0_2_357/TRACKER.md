@@ -243,6 +243,28 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   exhaustive additional scenario matrix is claimed. No Python/mypyc/Rust rebuild
   or framework restart; Android asset publication not performed. Continue with shared provider
   dispatch and window/active-area ownership before removing the working iframe.
+- [x] Seven model-addressed provider routing families approved/implemented
+  2026-11-08: hover, symbols, folding, highlights, definitions, references and
+  implementations share one SDK registration per exact selector/Monaco namespace.
+  Typed producer contracts are reused; callbacks preserve arguments/tokens and
+  choose a matching live URI/version context, preferring its focused working/
+  modified editor. Reference-counted disposal leaves surviving owners registered.
+  Async replies stay producer-bound across focus changes and are fenced by lease,
+  context/path/language/version and model lifetime. Current errors propagate;
+  obsolete request errors do not leak into the new presentation.
+- [x] Router automated gate: 133 focused resource/provider/boot/input/theme/
+  autosave/mention/projection tests pass, including all seven adapters, selector/
+  namespace isolation, two actual WBA bridge owners, focus changes, disposal and
+  pending reply fencing. Frontend/WBA typing reports zero Any/compiler findings;
+  asset build passes. Existing unrelated fixture failures are not addressed;
+  whole-suite success is not claimed.
+- [x] Live router regression accepted 2026-11-08: user reports everything
+  appears to work after the requested hover/symbol/folding/navigation/startup check.
+  Current views still use separate realms; live two-runtime shared routing is
+  not claimed until same-realm mounting is enabled. No backend/mypyc/Rust change,
+  framework restart or Android publication. Completion/hint/color/semantic
+  retained-result ownership, hover command gateway identity and window-level
+  focus/menu routing remain next. Keep the working iframe/same-realm guard.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
   pass. Electron strict checks and unit suite pass. Four existing TextMate

@@ -314,7 +314,7 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
   - `editor_boot_owner.ts` retains one boot promise per page's working mount;
     repeated requests do not replace live DOM or overwrite boot inputs. A failed
     partial boot remains failed until reload. A second mount in the same realm
-    is deliberately rejected while provider dispatch, outer host identity and
+    is deliberately rejected while retained-result/command ownership, outer host identity and
     window-level action ownership remain page-scoped. Inner mount references
     alone do not enable same-DOM multi-editor support.
 - `app/apps/code_te2/monaco_editor/m_editor_app.ts`
@@ -330,9 +330,25 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
     navigation, completion, color, hint and semantic registrations/listeners.
     Late catalog/legend replies cannot reinstall disposed providers; in-flight
     retained completion/hint results still run their existing release RPCs.
-    This is per-runtime teardown, not a shared language-provider router.
-    Shared provider dispatch, iframe removal, and shared active-area
+    Teardown releases that runtime's leases on shared model-addressed providers,
+    not another live runtime's SDK registration. Retained-result/command ownership,
+    iframe removal, and shared active-area
     menu/extra-key routing remain subsequent lifecycle work.
+- `monaco_editor/shared_model_providers.ts`
+  - Hover, document symbols/folding/highlights, definitions, references and
+    implementations share one reference-counted SDK registration per exact
+    selector and Monaco language namespace. Original selectors, callback arguments
+    and cancellation tokens are preserved. Requests select a live matching URI/
+    version context, preferring its focused working/modified editor; unmatched or
+    disposed models have no route. Releasing one owner leaves other owners live.
+  - Async replies retain producer affinity across focus changes, but are dropped
+    on lease disposal, context/path/language/version changes or model disposal.
+    Current failures propagate; obsolete failures are discarded. No RPC lane or
+    backend protocol changes. Completion/hint/color/semantic registration and
+    resolve/release behavior stay on their existing owners in this slice.
+    Hover command gateway ownership remains separate from hover request routing.
+    Same-realm multi-editor boot is not enabled yet; two-owner behavior is covered
+    by focused routing and real WBA-bridge-factory tests, not live iframe removal.
 - `monaco_editor/working_document_resources.ts` / `editor_model_utils.ts`
   - Per-Monaco-namespace canonical-URI model leases retain a working model until
     its last presentation owner releases it. Repeated acquisition by one owner
@@ -351,7 +367,7 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
     timer/listener. File switches and plain/diff transitions flush before changing
     ownership; pending text cannot be relabeled with another file's path.
   - No shared transport, backend state protocol or same-DOM editor activation is
-    introduced here. Provider dispatch, outer identity and active-area routing must
+    introduced here. Remaining provider/command ownership, outer identity and active-area routing must
     be resolved before removing working-editor iframe isolation.
 - `app/apps/code_te2/monaco_editor/editor_rpc_transport.ts`
   - Editor-facing JSON-RPC transport over `/rpc/editor`
