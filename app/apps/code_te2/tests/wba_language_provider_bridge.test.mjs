@@ -101,6 +101,7 @@ test('completion providers retain individual selectors, triggers, incomplete fla
   assert.equal(typeof active[0].provider.resolveCompletionItem, 'function');
   assert.equal(active[1].provider.resolveCompletionItem, undefined);
   const model = { uri: { toString: () => 'file:///workspace/main.py' }, getLanguageId: () => 'python' };
+  Object.assign(harness.context, { uri: 'file:///workspace/main.py', path: '/workspace/main.py', languageId: 'python' });
   const lists = await Promise.all(active.map(r => r.provider.provideCompletionItems(model, { lineNumber: 1, column: 1 }, {}, {})));
   assert.deepEqual(lists.map(l => l.incomplete), [true, false]);
   assert.deepEqual(harness.calls.filter(c => c.method === 'completions').map(c => c.params.providerHandle), [23, 24]);
@@ -372,15 +373,48 @@ test('in-flight completion results are cancelled and released after owner dispos
   const result = provider.provideCompletionItems(model, { lineNumber: 1, column: 1 }, {}, {});
   h.providers.dispose();
   finish({ ok: true, result: { sessionId: 'late-session', providers: [{ handle: 23, dto: { x: 23, b: [{ a: 'late', x: [23, 0] }] } }] } });
-  assert.deepEqual((await result).suggestions, []);
+  assert.equal(await result, undefined);
   await Promise.resolve();
   assert.equal(h.calls.filter(c => c.method === 'completions_release').length, 1);
   const before = h.calls.length;
-  assert.deepEqual((await provider.provideCompletionItems(model, { lineNumber: 1, column: 1 }, {}, {})).suggestions, []);
+  assert.equal(await provider.provideCompletionItems(model, { lineNumber: 1, column: 1 }, {}, {}), undefined);
   assert.equal(h.calls.length, before);
 });
 
 for (const kind of ['inlayHints', 'inlineCompletions']) {
+  test(`two WBA owners share ${kind} registration without rerouting release`, async () => {
+    const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+    let provider, registrations = 0, disposals = 0, focused = 'a';
+    const register = (_selector, value) => { provider = value; registrations++; return { dispose() { disposals++; } }; };
+    const sharedLanguages = kind === 'inlayHints' ? { registerInlayHintsProvider: register } : { registerInlineCompletionsProvider: register };
+    const requestMethod = kind === 'inlayHints' ? 'inlay_hints' : 'inline_completions';
+    const releaseMethod = kind === 'inlayHints' ? 'inlay_hints_release' : 'inline_completions_free';
+    const create = name => createHarness(createEditorLanguageBridgeProviders, false, {
+      sharedLanguages, focused: () => focused === name,
+      workbenchCall(method) { return method === requestMethod
+        ? { ok: true, result: kind === 'inlayHints' ? { hints: [], cacheId: 19 } : { pid: 19, items: [] } }
+        : { ok: true }; },
+    });
+    const a = create('a'), b = create('b');
+    for (const h of [a, b]) {
+      if (kind === 'inlayHints') h.providers.cacheInlayHintsProviderRegistration('example-language', { handle: '7' });
+      else h.providers.cacheInlineCompletionProviderRegistration('example-language', { handle: '7' });
+    }
+    assert.equal(registrations, 1);
+    const model = { uri: { toString: () => a.context.uri }, getVersionId: () => 1, getLanguageId: () => a.context.languageId };
+    const list = kind === 'inlayHints'
+      ? await provider.provideInlayHints(model, { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 2 }, {})
+      : await provider.provideInlineCompletions(model, { lineNumber: 1, column: 1 }, {}, {});
+    assert.equal(a.calls.filter(c => c.method === requestMethod).length, 1);
+    assert.equal(b.calls.length, 0);
+    focused = 'b'; a.providers.dispose(); assert.equal(disposals, 0);
+    if (kind === 'inlayHints') list.dispose(); else provider.disposeInlineCompletions(list, { kind: 'other' });
+    await Promise.resolve();
+    assert.equal(a.calls.filter(c => c.method === releaseMethod).length, 1);
+    assert.equal(b.calls.length, 0);
+    b.providers.dispose(); assert.equal(disposals, 1);
+  });
+
   test(`late ${kind} results release retained extension-host resources`, async () => {
     const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
     let finish, provider;

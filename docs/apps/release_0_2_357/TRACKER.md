@@ -265,6 +265,24 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   framework restart or Android publication. Completion/hint/color/semantic
   retained-result ownership, hover command gateway identity and window-level
   focus/menu routing remain next. Keep the working iframe/same-realm guard.
+- [x] Completion/hover ownership slice: shared completion registration uses explicit
+  producer signatures (not selector-only deduplication); resolve/release preserves
+  producer affinity across focus changes. Obsolete pending lists release retained
+  resources. Hover command gateways are runtime-unique and disposal is idempotent.
+  Focused lifecycle tests and frontend/WBA checks cover the source changes.
+- [x] Live completion/hover/inlay/inline regression accepted 2026-11-08: user
+  reports everything live tested and working. No mypyc/Rust rebuild required;
+  matching frontend assets only. Other retained providers and window/focus ownership
+  remain prerequisites; iframe removal is not enabled.
+- [x] Inlay/inline ownership slice: explicit provider signatures share registrations;
+  hint resolve and inline show/free stay with the original producer across focus
+  changes. List cleanup is idempotent and stale pending replies release resources.
+  Metadata and original WBA release callbacks are preserved. Two real bridge-owner
+  tests and focused synthetic lifecycle tests cover producer/disposal/version edges.
+  All 158 selected editor/provider/lifecycle regression tests pass; frontend/WBA
+  strict no-Any typechecks and asset build pass. User live acceptance recorded above;
+  no runtime restart, native rebuild or Android publication performed by the agent.
+  Color/semantic ownership remains next.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
   pass. Electron strict checks and unit suite pass. Four existing TextMate

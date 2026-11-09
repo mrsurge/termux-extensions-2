@@ -293,6 +293,7 @@ export interface MonacoLanguagesLike {
     selector: unknown,
     provider: {
       __te2WorkbenchProvider?: true;
+      __te2ProviderKey?: string;
       triggerCharacters?: string[];
       resolveCompletionItem?(suggestion: Record<string, unknown>, token: MonacoCancellationTokenLike): unknown;
       provideCompletionItems(
@@ -306,6 +307,7 @@ export interface MonacoLanguagesLike {
   registerInlayHintsProvider?: (
     selector: unknown,
     provider: {
+      __te2ProviderKey?: string;
       displayName?: string;
       provideInlayHints(
         model: MonacoModelLike,
@@ -337,6 +339,7 @@ export interface MonacoLanguagesLike {
   registerInlineCompletionsProvider?: (
     selector: unknown,
     provider: {
+      __te2ProviderKey?: string;
       provideInlineCompletions(
         model: MonacoModelLike,
         position: MonacoPositionLike,
@@ -1094,6 +1097,7 @@ export function createEditorLanguageBridgeProviders(
     const registrations = entries.map(entry => monacoRef.languages!.registerCompletionItemProvider!(
       completionSelector(entry.selector, langId), {
         __te2WorkbenchProvider: true,
+        __te2ProviderKey: JSON.stringify([langId, getCompletionRegistrationSignature(entry)]),
         triggerCharacters: entry.triggerCharacters,
         async provideCompletionItems(model, pos, context, token) {
           if (disposed || token.isCancellationRequested) return { suggestions: [] };
@@ -1526,6 +1530,7 @@ export function createEditorLanguageBridgeProviders(
 
     const registrationDisposable =
       monacoRef.languages.registerInlayHintsProvider(langId, {
+        __te2ProviderKey: JSON.stringify([langId, nextSignature]),
         displayName: registration.displayName || undefined,
         provideInlayHints(model, range) {
           if (disposed) return undefined;
@@ -1701,6 +1706,7 @@ export function createEditorLanguageBridgeProviders(
 
     const registrationDisposable =
       monacoRef.languages.registerInlineCompletionsProvider(langId, {
+        __te2ProviderKey: JSON.stringify([langId, nextSignature]),
         provideInlineCompletions(model, position, context) {
           if (disposed) return undefined;
           try {

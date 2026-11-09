@@ -13,7 +13,7 @@ interface HoverCommandDeps {
   execute(params: Record<string, unknown>): Promise<unknown>;
 }
 
-const GATEWAY = 'te2.extensionHoverCommand';
+let runtimeSequence = 0;
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !isUnknownArray(value);
@@ -21,12 +21,14 @@ function record(value: unknown): value is Record<string, unknown> {
 
 /** Use one private command, not global registrations that shadow Monaco commands. */
 export function createEditorHoverCommandRuntime(deps: HoverCommandDeps) {
+  const GATEWAY = `te2.extensionHoverCommand.${++runtimeSequence}`;
+  let disposed = false;
   let sequence = 0;
   const targets = new Map<string, { command: string; arguments: unknown[]; context: HoverContext; generation: number }>();
   const registration = deps.registerCommand(GATEWAY, async (_accessor, token) => {
     const target = typeof token === 'string' ? targets.get(token) : null;
     const current = deps.getContext();
-    if (!target || !current || target.generation !== deps.getGeneration() ||
+    if (disposed || !target || !current || target.generation !== deps.getGeneration() ||
         current.uri !== target.context.uri || current.version !== target.context.version) {
       throw new Error('This hover command is stale; open the hover again.');
     }
@@ -34,6 +36,7 @@ export function createEditorHoverCommandRuntime(deps: HoverCommandDeps) {
   });
 
   function prepare(contents: unknown[], context: HoverContext): unknown[] {
+    if (disposed) return [];
     targets.clear();
     return contents.map(content => {
       if (!record(content) || typeof content.value !== 'string') return content;
@@ -58,5 +61,9 @@ export function createEditorHoverCommandRuntime(deps: HoverCommandDeps) {
     });
   }
 
-  return { prepare, reset: () => targets.clear(), dispose() { targets.clear(); registration.dispose(); } };
+  return { prepare, reset: () => targets.clear(), dispose() {
+    if (disposed) return;
+    disposed = true;
+    targets.clear(); registration.dispose();
+  } };
 }

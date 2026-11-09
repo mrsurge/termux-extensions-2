@@ -1,4 +1,5 @@
 import type { LanguageContext, MonacoLanguagesLike, MonacoModelLike } from './editor_language_bridge_providers.ts';
+import { isUnknownArray } from '../src/rpc/value-types.ts';
 
 interface Disposable { dispose(): void }
 interface ProviderContext {
@@ -25,12 +26,17 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 }
 
 function fenceResult(result: unknown, current: () => boolean): unknown {
+  const accept = (value: unknown): unknown => {
+    if (current()) return value;
+    if (isDisposable(value)) value.dispose();
+    return undefined;
+  };
   return isThenable(result)
-    ? Promise.resolve(result).then(value => current() ? value : undefined, (error: unknown) => {
+    ? Promise.resolve(result).then(accept, (error: unknown) => {
       if (current()) throw error;
       return undefined;
     })
-    : current() ? result : undefined;
+    : accept(result);
 }
 
 function selectorKey(selector: unknown): string {
@@ -53,8 +59,9 @@ class ModelProviderRouter<Provider> {
   acquire(
     selector: unknown, provider: Provider, context: ProviderContext,
     install: (invoke: (model: MonacoModelLike, call: (provider: Provider) => unknown) => unknown) => unknown,
+    identity?: string,
   ): Disposable {
-    const key = selectorKey(selector);
+    const key = identity ?? selectorKey(selector);
     let entry = this.entries.get(key);
     const participant = { provider, context };
     if (!entry) {
@@ -120,6 +127,141 @@ type Highlights = Parameters<NonNullable<MonacoLanguagesLike['registerDocumentHi
 type Definition = Parameters<NonNullable<MonacoLanguagesLike['registerDefinitionProvider']>>[1];
 type References = Parameters<NonNullable<MonacoLanguagesLike['registerReferenceProvider']>>[1];
 type Implementation = Parameters<NonNullable<MonacoLanguagesLike['registerImplementationProvider']>>[1];
+type Completion = Parameters<NonNullable<MonacoLanguagesLike['registerCompletionItemProvider']>>[1];
+type Inlay = Parameters<NonNullable<MonacoLanguagesLike['registerInlayHintsProvider']>>[1];
+type Inline = Parameters<NonNullable<MonacoLanguagesLike['registerInlineCompletionsProvider']>>[1];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+class CompletionRouter {
+  private readonly router = new ModelProviderRouter<Completion>();
+  private readonly owners = new WeakMap<Record<string, unknown>, Completion>();
+  private readonly active = new Set<Completion>();
+
+  acquire(languages: MonacoLanguagesLike, selector: unknown, provider: Completion, context: ProviderContext): Disposable {
+    const register = languages.registerCompletionItemProvider;
+    if (!register) throw new Error('Completion registration is unavailable.');
+    const key = provider.__te2ProviderKey;
+    if (!key) throw new Error('Shared completion provider has no producer identity.');
+    const lease = this.router.acquire(selector, provider, context, invoke => register.call(languages, selector, {
+      __te2WorkbenchProvider: true,
+      triggerCharacters: provider.triggerCharacters,
+      provideCompletionItems: (model, position, completionContext, token) => invoke(model, source => {
+        const retain = (result: unknown): unknown => {
+          if (!isRecord(result) || !isUnknownArray(result.suggestions)) return result;
+          const suggestions = result.suggestions.filter(isRecord);
+          for (const suggestion of suggestions) this.owners.set(suggestion, source);
+          let disposed = false;
+          return { ...result, dispose: () => {
+            if (disposed) return;
+            disposed = true;
+            for (const suggestion of suggestions) this.owners.delete(suggestion);
+            if (isDisposable(result)) result.dispose();
+          } };
+        };
+        const result = source.provideCompletionItems(model, position, completionContext, token);
+        return isThenable(result) ? Promise.resolve(result).then(retain) : retain(result);
+      }),
+      ...(provider.resolveCompletionItem ? {
+        resolveCompletionItem: (suggestion, token) => {
+          const owner = this.owners.get(suggestion);
+          return owner && this.active.has(owner)
+            ? owner.resolveCompletionItem?.(suggestion, token) ?? suggestion : suggestion;
+        },
+      } : {}),
+    }), key);
+    this.active.add(provider);
+    return { dispose: () => { this.active.delete(provider); lease.dispose(); } };
+  }
+}
+
+function mapResult(result: unknown, map: (value: unknown) => unknown): unknown {
+  return isThenable(result) ? Promise.resolve(result).then(map) : map(result);
+}
+
+class InlayRouter {
+  private readonly router = new ModelProviderRouter<Inlay>();
+  private readonly owners = new WeakMap<Record<string, unknown>, Inlay>();
+  private readonly active = new Set<Inlay>();
+
+  acquire(languages: MonacoLanguagesLike, selector: unknown, provider: Inlay, context: ProviderContext): Disposable {
+    const register = languages.registerInlayHintsProvider;
+    if (!register || !provider.__te2ProviderKey) throw new Error('Shared inlay provider has no registration/identity.');
+    const lease = this.router.acquire(selector, provider, context, invoke => register.call(languages, selector, {
+      displayName: provider.displayName,
+      provideInlayHints: (model, range, token) => invoke(model, source => mapResult(
+        source.provideInlayHints(model, range, token), result => {
+          if (!isRecord(result) || !isUnknownArray(result.hints)) return result;
+          const hints = result.hints.filter(isRecord);
+          for (const hint of hints) this.owners.set(hint, source);
+          let disposed = false;
+          return { ...result, dispose: () => {
+            if (disposed) return;
+            disposed = true;
+            for (const hint of hints) this.owners.delete(hint);
+            if (isDisposable(result)) result.dispose();
+          } };
+        },
+      )),
+      resolveInlayHint: (hint, token) => {
+        const owner = this.owners.get(hint);
+        return owner && this.active.has(owner) ? owner.resolveInlayHint?.(hint, token) ?? hint : hint;
+      },
+    }), provider.__te2ProviderKey);
+    this.active.add(provider);
+    return { dispose: () => { this.active.delete(provider); lease.dispose(); } };
+  }
+}
+
+interface InlineOwner {
+  source: Inline;
+  original: Record<string, unknown>;
+  free(reason: Record<string, unknown>): void;
+  freed(): boolean;
+}
+
+class InlineRouter {
+  private readonly router = new ModelProviderRouter<Inline>();
+  private readonly owners = new WeakMap<Record<string, unknown>, InlineOwner>();
+  private readonly active = new Set<Inline>();
+
+  acquire(languages: MonacoLanguagesLike, selector: unknown, provider: Inline, context: ProviderContext): Disposable {
+    const register = languages.registerInlineCompletionsProvider;
+    if (!register || !provider.__te2ProviderKey) throw new Error('Shared inline provider has no registration/identity.');
+    const lease = this.router.acquire(selector, provider, context, invoke => register.call(languages, selector, {
+      groupId: provider.groupId, yieldsToGroupIds: provider.yieldsToGroupIds,
+      excludesGroupIds: provider.excludesGroupIds, displayName: provider.displayName,
+      debounceDelayMs: provider.debounceDelayMs,
+      toString: () => provider.toString?.() ?? 'InlineCompletionsProvider',
+      provideInlineCompletions: (model, position, completionContext, token) => invoke(model, source => mapResult(
+        source.provideInlineCompletions(model, position, completionContext, token), result => {
+          if (!isRecord(result)) return result;
+          let freed = false;
+          const free = (reason: Record<string, unknown>): void => {
+            if (freed) return;
+            freed = true;
+            source.disposeInlineCompletions(result, reason);
+          };
+          const retained = { ...result, dispose: () => free({ kind: 'other' }) };
+          this.owners.set(retained, { source, original: result, free, freed: () => freed });
+          return retained;
+        },
+      )),
+      handleItemDidShow: (list, item, text, delta) => {
+        const owner = this.owners.get(list);
+        if (owner && !owner.freed() && this.active.has(owner.source)) {
+          return owner.source.handleItemDidShow?.(owner.original, item, text, delta);
+        }
+        return undefined;
+      },
+      disposeInlineCompletions: (list, reason) => this.owners.get(list)?.free(reason),
+    }), provider.__te2ProviderKey);
+    this.active.add(provider);
+    return { dispose: () => { this.active.delete(provider); lease.dispose(); } };
+  }
+}
 
 interface NamespaceRouters {
   hover: ModelProviderRouter<Hover>;
@@ -129,10 +271,13 @@ interface NamespaceRouters {
   definition: ModelProviderRouter<Definition>;
   references: ModelProviderRouter<References>;
   implementation: ModelProviderRouter<Implementation>;
+  completion: CompletionRouter;
+  inlay: InlayRouter;
+  inline: InlineRouter;
 }
 const namespaces = new WeakMap<MonacoLanguagesLike, NamespaceRouters>();
 
-/** Leave retained-result providers untouched until producer affinity is wired. */
+/** Shared model routing; retained completions preserve their producing provider. */
 export function sharedModelProviders(languages: MonacoLanguagesLike, context: ProviderContext): MonacoLanguagesLike {
   let shared = namespaces.get(languages);
   if (!shared) {
@@ -141,12 +286,24 @@ export function sharedModelProviders(languages: MonacoLanguagesLike, context: Pr
       folding: new ModelProviderRouter(), highlights: new ModelProviderRouter(),
       definition: new ModelProviderRouter(), references: new ModelProviderRouter(),
       implementation: new ModelProviderRouter(),
+      completion: new CompletionRouter(),
+      inlay: new InlayRouter(), inline: new InlineRouter(),
     };
     namespaces.set(languages, shared);
   }
   const routers = shared;
   return {
     ...languages,
+    registerInlayHintsProvider: languages.registerInlayHintsProvider ? (selector, provider) =>
+      provider.__te2ProviderKey ? routers.inlay.acquire(languages, selector, provider, context)
+        : languages.registerInlayHintsProvider?.(selector, provider) : undefined,
+    registerInlineCompletionsProvider: languages.registerInlineCompletionsProvider ? (selector, provider) =>
+      provider.__te2ProviderKey ? routers.inline.acquire(languages, selector, provider, context)
+        : languages.registerInlineCompletionsProvider?.(selector, provider) : undefined,
+    registerCompletionItemProvider: languages.registerCompletionItemProvider ? (selector, provider) =>
+      provider.__te2ProviderKey
+        ? routers.completion.acquire(languages, selector, provider, context)
+        : languages.registerCompletionItemProvider?.(selector, provider) : undefined,
     registerHoverProvider: languages.registerHoverProvider ? (selector, provider) =>
       routers.hover.acquire(selector, provider, context, invoke => languages.registerHoverProvider?.(selector, {
         provideHover: (model, position, token) => invoke(model, source => source.provideHover(model, position, token)),

@@ -2,6 +2,33 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
 
+test('simultaneous hover runtimes keep private command IDs and disposal ownership', async () => {
+  const result = await build({ entryPoints: ['monaco_editor/editor_hover_command_runtime.ts'],
+    bundle: true, write: false, format: 'esm', platform: 'node' });
+  const { createEditorHoverCommandRuntime } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+  const commands = new Map(), calls = [];
+  const context = { uri: 'file:///a', path: '/a', languageId: 'rust', version: 1 };
+  const create = name => createEditorHoverCommandRuntime({
+    registerCommand(id, handler) {
+      assert.equal(commands.has(id), false); commands.set(id, handler);
+      return { dispose() { commands.delete(id); } };
+    },
+    getContext: () => context, getGeneration: () => 1,
+    execute: async () => { calls.push(name); },
+  });
+  const a = create('a'), b = create('b');
+  const prepare = runtime => runtime.prepare([{ value: '[go](command:run?0)', isTrusted: true }], context)[0];
+  const ac = prepare(a), bc = prepare(b);
+  assert.notEqual(ac.isTrusted.enabledCommands[0], bc.isTrusted.enabledCommands[0]);
+  await commands.get(ac.isTrusted.enabledCommands[0])(null, '1');
+  a.dispose(); a.dispose();
+  assert.deepEqual(a.prepare([], context), []);
+  await commands.get(bc.isTrusted.enabledCommands[0])(null, '1');
+  assert.deepEqual(calls, ['a', 'b']);
+  assert.equal(commands.size, 1);
+  b.dispose(); assert.equal(commands.size, 0);
+});
+
 async function fixture() {
   const result = await build({ entryPoints: ['monaco_editor/editor_hover_command_runtime.ts'],
     bundle: true, write: false, format: 'esm', platform: 'node' });
@@ -10,21 +37,21 @@ async function fixture() {
   let context = { uri: 'file:///work/main.rs', path: '/work/main.rs', languageId: 'rust', version: 3 };
   const calls = [];
   const runtime = createEditorHoverCommandRuntime({
-    registerCommand(id, fn) { assert.equal(id, 'te2.extensionHoverCommand'); handler = fn; return { dispose() { disposed = true; } }; },
+    registerCommand(id, fn) { assert.match(id, /^te2\.extensionHoverCommand\.\d+$/); handler = fn; return { dispose() { disposed = true; } }; },
     getContext: () => context, getGeneration: () => generation,
     execute: async params => { calls.push(params); return { ok: true }; },
   });
   const prepare = (trust = true, command = 'rust-analyzer.hoverRefCommandProxy?0') => runtime.prepare([
     { value: `[6 implementations](command:${command})`, isTrusted: trust },
   ], context)[0];
-  const token = content => JSON.parse(decodeURIComponent(content.value.match(/command:te2.extensionHoverCommand\?([^)]*)/)[1]))[0];
+  const token = content => JSON.parse(decodeURIComponent(content.value.match(/command:te2.extensionHoverCommand\.\d+\?([^)]*)/)[1]))[0];
   return { runtime, calls, prepare, token, invoke: value => handler(null, value),
     changeVersion() { context = { ...context, version: 4 }; }, reconnect() { generation++; }, isDisposed: () => disposed };
 }
 
 test('trusted Rust hover proxy uses a private gateway and preserves scalar arguments', async () => {
   const f = await fixture(), content = f.prepare();
-  assert.deepEqual(content.isTrusted, { enabledCommands: ['te2.extensionHoverCommand'] });
+  assert.match(content.isTrusted.enabledCommands[0], /^te2\.extensionHoverCommand\.\d+$/);
   await f.invoke(f.token(content));
   assert.equal(f.calls[0].command, 'rust-analyzer.hoverRefCommandProxy');
   assert.deepEqual(f.calls[0].arguments, [0]);

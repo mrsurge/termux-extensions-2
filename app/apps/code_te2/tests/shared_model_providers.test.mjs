@@ -24,6 +24,50 @@ function context(uri, focused = false) {
 }
 const model = uri => ({ uri: { toString: () => uri }, getVersionId: () => 1 });
 
+test('completion lists resolve and release with their producer across focus changes', async () => {
+  const registrations = [], calls = [];
+  const namespace = { registerCompletionItemProvider(selector, provider) {
+    const record = { selector, provider, disposed: 0 }; registrations.push(record);
+    return { dispose() { record.disposed++; } };
+  } };
+  const a = context('file:///a.py', true), b = context('file:///a.py');
+  const source = name => ({ __te2ProviderKey: 'handle:23:selector', triggerCharacters: ['.'],
+    provideCompletionItems() { return { suggestions: [{ label: name }], incomplete: true,
+      dispose() { calls.push(`release:${name}`); } }; },
+    resolveCompletionItem(item) { calls.push(`resolve:${name}`); return item; },
+  });
+  const ad = sharedModelProviders(namespace, a).registerCompletionItemProvider([{ pattern: '**/*.py' }], source('a'));
+  const bd = sharedModelProviders(namespace, b).registerCompletionItemProvider([{ pattern: '**/*.py' }], source('b'));
+  assert.equal(registrations.length, 1);
+  const provider = registrations[0].provider;
+  const list = await provider.provideCompletionItems(model(a.state.uri), {}, {}, {});
+  a.state.focused = false; b.state.focused = true;
+  provider.resolveCompletionItem(list.suggestions[0], {});
+  assert.deepEqual(calls, ['resolve:a']);
+  ad.dispose();
+  provider.resolveCompletionItem(list.suggestions[0], {});
+  list.dispose(); list.dispose();
+  assert.deepEqual(calls, ['resolve:a', 'release:a']);
+  const other = sharedModelProviders(namespace, b).registerCompletionItemProvider('python', { ...source('other'), __te2ProviderKey: 'handle:24' });
+  assert.equal(registrations.length, 2);
+  bd.dispose(); other.dispose();
+  assert.ok(registrations.every(r => r.disposed === 1));
+});
+
+test('obsolete pending completion lists release exactly once', async () => {
+  let finish, provider, releases = 0;
+  const namespace = { registerCompletionItemProvider(_selector, value) { provider = value; return { dispose() {} }; } };
+  const ctx = context('file:///a.py');
+  const lease = sharedModelProviders(namespace, ctx).registerCompletionItemProvider('python', {
+    __te2ProviderKey: '23', provideCompletionItems: () => new Promise(resolve => { finish = resolve; }),
+  });
+  const pending = provider.provideCompletionItems(model(ctx.state.uri), {}, {}, {});
+  lease.dispose();
+  finish({ suggestions: [{}], dispose() { releases++; } });
+  assert.equal(await pending, undefined);
+  assert.equal(releases, 1);
+});
+
 for (const [register, method] of families) {
   test(`${method} shares one SDK registration and routes by model/focus, not registration order`, () => {
     const records = [];
@@ -88,12 +132,100 @@ test('distinct selectors and Monaco namespaces never share a registration accide
   for (const lease of leases) lease.dispose();
 });
 
-test('retained-result provider registrations pass through unchanged', () => {
-  const functions = { registerCompletionItemProvider() {}, registerInlayHintsProvider() {},
-    registerInlineCompletionsProvider() {}, registerColorProvider() {}, registerDocumentSemanticTokensProvider() {} };
+test('remaining retained-result provider registrations pass through unchanged', () => {
+  const functions = { registerColorProvider() {}, registerDocumentSemanticTokensProvider() {} };
   const facade = sharedModelProviders(functions, context('file:///a.py'));
   for (const [key, value] of Object.entries(functions)) assert.equal(facade[key], value);
 });
+
+test('inlay hints resolve and release through their producer after focus changes', async () => {
+  const records = [], calls = [];
+  const namespace = { registerInlayHintsProvider(selector, provider) {
+    const entry = { selector, provider, disposed: 0 }; records.push(entry);
+    return { dispose() { entry.disposed++; } };
+  } };
+  const a = context('file:///a.py', true), b = context('file:///a.py');
+  const source = name => ({ __te2ProviderKey: 'hint:7', displayName: 'Hints',
+    provideInlayHints(...args) { calls.push([name, 'provide', args]); return { hints: [{ label: name }], dispose() { calls.push([name, 'release']); } }; },
+    resolveInlayHint(hint, token) { calls.push([name, 'resolve', token]); return hint; },
+  });
+  const ad = sharedModelProviders(namespace, a).registerInlayHintsProvider('python', source('a'));
+  const bd = sharedModelProviders(namespace, b).registerInlayHintsProvider('python', source('b'));
+  assert.equal(records.length, 1); assert.equal(records[0].provider.displayName, 'Hints');
+  const provider = records[0].provider, target = model(a.state.uri), range = {}, token = {};
+  const list = await provider.provideInlayHints(target, range, token);
+  assert.deepEqual(calls[0], ['a', 'provide', [target, range, token]]);
+  a.state.focused = false; b.state.focused = true;
+  provider.resolveInlayHint(list.hints[0], token);
+  assert.deepEqual(calls[1], ['a', 'resolve', token]);
+  ad.dispose(); provider.resolveInlayHint(list.hints[0], token);
+  list.dispose(); list.dispose();
+  assert.deepEqual(calls.slice(2), [['a', 'release']]);
+  const next = await provider.provideInlayHints(target, range, token);
+  assert.equal(next.hints[0].label, 'b'); next.dispose();
+  bd.dispose(); assert.equal(records[0].disposed, 1);
+});
+
+test('inline lists retain show/free producer, metadata and exactly-once cleanup', async () => {
+  const records = [], calls = [];
+  const namespace = { registerInlineCompletionsProvider(selector, provider) {
+    const entry = { selector, provider, disposed: 0 }; records.push(entry);
+    return { dispose() { entry.disposed++; } };
+  } };
+  const a = context('file:///a.py', true), b = context('file:///a.py');
+  const originals = new Map();
+  const source = name => ({ __te2ProviderKey: 'inline:8', groupId: 'group', yieldsToGroupIds: ['other'],
+    excludesGroupIds: ['excluded'], displayName: 'Inline', debounceDelayMs: 42,
+    provideInlineCompletions(...args) { calls.push([name, 'provide', args]);
+      const result = { pid: 8, items: [{ insertText: name }] }; originals.set(name, result); return result; },
+    handleItemDidShow(...args) { calls.push([name, 'show', args]); },
+    disposeInlineCompletions(...args) { calls.push([name, 'free', args]); },
+  });
+  const ad = sharedModelProviders(namespace, a).registerInlineCompletionsProvider('python', source('a'));
+  const bd = sharedModelProviders(namespace, b).registerInlineCompletionsProvider('python', source('b'));
+  assert.equal(records.length, 1);
+  const provider = records[0].provider;
+  assert.equal(provider.groupId, 'group'); assert.deepEqual(provider.yieldsToGroupIds, ['other']);
+  assert.deepEqual(provider.excludesGroupIds, ['excluded']); assert.equal(provider.debounceDelayMs, 42);
+  assert.equal(provider.displayName, 'Inline');
+  const target = model(a.state.uri), position = {}, requestContext = {}, token = {};
+  const list = await provider.provideInlineCompletions(target, position, requestContext, token);
+  assert.deepEqual(calls[0], ['a', 'provide', [target, position, requestContext, token]]);
+  a.state.focused = false; b.state.focused = true;
+  const item = list.items[0], delta = {};
+  provider.handleItemDidShow(list, item, 'text', delta);
+  assert.deepEqual(calls[1], ['a', 'show', [originals.get('a'), item, 'text', delta]]);
+  ad.dispose(); provider.handleItemDidShow(list, item, 'text', delta);
+  const reason = { kind: 'accepted' };
+  provider.disposeInlineCompletions(list, reason); provider.disposeInlineCompletions(list, reason); list.dispose();
+  assert.deepEqual(calls.slice(2), [['a', 'free', [originals.get('a'), reason]]]);
+  const next = await provider.provideInlineCompletions(target, position, requestContext, token);
+  assert.equal(next.items[0].insertText, 'b'); provider.disposeInlineCompletions(next, reason);
+  bd.dispose(); assert.equal(records[0].disposed, 1);
+});
+
+for (const kind of ['inlay', 'inline']) {
+  for (const stale of ['dispose', 'version']) {
+    test(`${kind} obsolete pending ${stale} result frees the original resource once`, async () => {
+      let installed, finish, releases = 0;
+      const pending = new Promise(resolve => { finish = resolve; });
+      const register = (_selector, provider) => { installed = provider; return { dispose() {} }; };
+      const namespace = kind === 'inlay' ? { registerInlayHintsProvider: register } : { registerInlineCompletionsProvider: register };
+      const ctx = context('file:///a.py');
+      const facade = sharedModelProviders(namespace, ctx);
+      const lease = kind === 'inlay'
+        ? facade.registerInlayHintsProvider('python', { __te2ProviderKey: '7', provideInlayHints: () => pending })
+        : facade.registerInlineCompletionsProvider('python', { __te2ProviderKey: '7', provideInlineCompletions: () => pending,
+          disposeInlineCompletions() { releases++; } });
+      const result = kind === 'inlay' ? installed.provideInlayHints(model(ctx.state.uri), {}, {})
+        : installed.provideInlineCompletions(model(ctx.state.uri), {}, {}, {});
+      if (stale === 'dispose') lease.dispose(); else ctx.state.version++;
+      finish(kind === 'inlay' ? { hints: [{}], dispose() { releases++; } } : { pid: 7, items: [{}] });
+      assert.equal(await result, undefined); assert.equal(releases, 1);
+      lease.dispose(); assert.equal(releases, 1);
+    });
+  }
+}
 
 test('failed registration is not cached and does not poison another owner', () => {
   let attempts = 0;

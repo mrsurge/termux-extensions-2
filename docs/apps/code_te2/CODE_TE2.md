@@ -349,6 +349,21 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
     Hover command gateway ownership remains separate from hover request routing.
     Same-realm multi-editor boot is not enabled yet; two-owner behavior is covered
     by focused routing and real WBA-bridge-factory tests, not live iframe removal.
+- `monaco_editor/shared_model_providers.ts` / `editor_hover_command_runtime.ts`
+  - Completion registrations additionally share by explicit extension-provider
+    signature, preserving selectors, triggers and resolve capability. Suggestions
+    retain the exact producer for resolution across focus changes; list disposal
+    releases through its original callback, including obsolete pending replies.
+    `editor_hover_command_runtime.ts` registers a unique private gateway per
+    runtime and fences commands after disposal. These changes do not enable
+    same-realm mounting or change the WBA protocol.
+  - Inlay-hint and inline-completion registrations share by their explicit
+    language/provider signature. Hint resolution stays with the hint's producer;
+    inline show/free callbacks receive the producing runtime's original list.
+    Disposal fences further resolve/show calls but keeps release available.
+    Stale pending results release exactly once. Provider display/group/debounce
+    metadata is preserved. Unkeyed external providers retain their original path;
+    color and semantic-token ownership remain separate work.
 - `monaco_editor/working_document_resources.ts` / `editor_model_utils.ts`
   - Per-Monaco-namespace canonical-URI model leases retain a working model until
     its last presentation owner releases it. Repeated acquisition by one owner
