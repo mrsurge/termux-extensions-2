@@ -8,7 +8,7 @@ import {
   recordDiagnosticsLatency,
   rpcWireByteLength,
 } from '../diagnostics/latency-probe.ts';
-import { APP_WORKER_SOCKET_IO_TRANSPORTS } from './socketio-topology.ts';
+import { APP_WORKER_SOCKET_IO_TRANSPORTS, RENDERER_SOCKET_IO_OPTIONS } from './socketio-topology.ts';
 
 export const RPC_REQUEST_EVENT = 'rpc' as const;
 export const RPC_NOTIFICATION_EVENT = 'rpc.notify' as const;
@@ -62,6 +62,7 @@ export type IoFactory = (
 ) => SocketLike;
 
 export interface CreateSocketIoJsonRpcClientOptions {
+  isolateConnection?: boolean;
   namespace: string;
   path: string;
   query?: JsonObject;
@@ -145,6 +146,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
   let connectPromise: Promise<void> | null = null;
   let requestCounter = 0;
   let hasConnected = false;
+  let disposed = false;
   const initialNotifications: JsonRpcNotificationEnvelope[] = [];
   const initialRequests: PendingRequest[] = [];
   const activeRequests = new Set<PendingRequest>();
@@ -244,37 +246,44 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
   }
 
   async function connect(): Promise<void> {
+    if (disposed) throw new Error('RPC client disposed');
     if (socket) return;
     if (connectPromise) return connectPromise;
 
     connectPromise = Promise.resolve(options.ensureSocketIoLoaded())
       .then((ioFactory) => {
+        if (disposed) throw new Error('RPC client disposed');
         if (typeof ioFactory !== 'function') {
           throw new Error('Socket.IO client unavailable');
         }
         socket = ioFactory(options.namespace, {
+          ...(options.isolateConnection ? RENDERER_SOCKET_IO_OPTIONS : {}),
           path: options.path,
           transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
           query: options.query || {},
           auth: options.auth || {},
         });
         socket.on('connect', () => {
+          if (disposed) return;
           const isInitialConnection = !hasConnected;
           hasConnected = true;
           if (isInitialConnection) flushInitialQueues();
           options.onConnect?.();
         });
         socket.on('disconnect', (reason?: unknown) => {
+          if (disposed) return;
           clearSocketReplayBuffer(socket);
           failActiveRequests(new Error('RPC socket disconnected'));
           options.onDisconnect?.(typeof reason === 'string' ? reason : undefined);
         });
         socket.on('connect_error', (error: unknown) => {
+          if (disposed) return;
           clearSocketReplayBuffer(socket);
           failActiveRequests(normalizeError(error));
           options.onConnectError?.(error);
         });
         socket.on(RPC_NOTIFICATION_EVENT, (wirePayload: unknown) => {
+          if (disposed) return;
           try {
             const decodeStartedAt = diagnosticsLatencyProbeEnabled()
               ? performance.now()
@@ -301,7 +310,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
         const normalized = normalizeError(error);
         failInitialRequests(normalized);
         failActiveRequests(normalized);
-        options.onConnectError?.(normalized);
+        if (!disposed) options.onConnectError?.(normalized);
         throw normalized;
       })
       .finally(() => {
@@ -312,14 +321,16 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
   }
 
   function reconnect(): void {
+    if (disposed) return;
     if (socket && !socket.connected && typeof socket.connect === 'function') {
       socket.connect();
       return;
     }
-    void connect();
+    void connect().catch(() => {}); // connect reports failures through the owned callbacks.
   }
 
   function notify(method: string, params: JsonObject = {}): void {
+    if (disposed) return;
     const envelope: JsonRpcNotificationEnvelope = {
       jsonrpc: '2.0',
       method,
@@ -335,7 +346,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
     }
     if (!hasConnected) {
       initialNotifications.push(envelope);
-      void connect();
+      void connect().catch(() => {});
       return;
     }
     reconnect();
@@ -346,6 +357,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
     params: JsonObject = {},
     timeoutMs = 8000,
   ): Promise<TResult> {
+    if (disposed) return Promise.reject(new Error('RPC client disposed'));
     const envelope: JsonRpcRequestEnvelope = {
       jsonrpc: '2.0',
       id: nextRequestId(),
@@ -369,7 +381,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
       }
       if (!hasConnected) {
         initialRequests.push(request);
-        void connect();
+        void connect().catch(() => {});
         return;
       }
       reconnect();
@@ -379,6 +391,15 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
 
   return {
     connect,
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      const error = new Error('RPC client disposed');
+      failInitialRequests(error);
+      failActiveRequests(error);
+      clearSocketReplayBuffer(socket);
+      socket?.disconnect?.();
+    },
     disconnect(): void {
       const error = new Error('RPC socket disconnected');
       failInitialRequests(error);
@@ -390,7 +411,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
     },
     reconnect,
     isConnected(): boolean {
-      return Boolean(socket?.connected);
+      return !disposed && Boolean(socket?.connected);
     },
     notify,
     request,

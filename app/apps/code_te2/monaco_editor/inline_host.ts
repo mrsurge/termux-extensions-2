@@ -1,7 +1,8 @@
-import { EditorBootOwner } from './editor_boot_owner.ts';
+import { EditorBootOwner, EditorBootAdmissionError } from './editor_boot_owner.ts';
 import { resolveWorkingEditorMount } from './editor_mount.ts';
 import type { MobileEditorRole } from '../src/mobile-input/editor-special-key-bridge.ts';
 import type { SocketClientIdentity } from '../src/rpc/socketio-topology.ts';
+import { getCodeTe2SocketIdentity, normalizeCodeTe2SocketIdentity } from '../src/rpc/socketio-topology.ts';
 
 const workingEditorBoot = new EditorBootOwner();
 const INLINE_EDITOR_API_BASE = '/api/app/code_te2';
@@ -41,15 +42,15 @@ const INLINE_EDITOR_MARKUP = `
   </div>
 `;
 const INLINE_EDITOR_HOST_STYLE = `
-#editor-frame .monaco-editor .find-widget {
+[data-te2-working-editor-host] .monaco-editor .find-widget {
   z-index: 300;
 }
-#editor-frame .monaco-editor .monaco-resizable-hover,
-#editor-frame .monaco-editor .overflowingOverlayWidgets > .monaco-hover {
+[data-te2-working-editor-host] .monaco-editor .monaco-resizable-hover,
+[data-te2-working-editor-host] .monaco-editor .overflowingOverlayWidgets > .monaco-hover {
   z-index: 300 !important;
 }
-#editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor .find-widget textarea.input,
-#editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor textarea.inputarea.android-ime-input {
+[data-te2-working-editor-host][data-te2-native-renderer='cefrium'] .monaco-editor .find-widget textarea.input,
+[data-te2-working-editor-host][data-te2-native-renderer='cefrium'] .monaco-editor textarea.inputarea.android-ime-input {
   font-size: 16px !important;
 }
 .fe-editor-container > .te2-mobile-editor-overlay,
@@ -176,20 +177,20 @@ const INLINE_EDITOR_HOST_STYLE = `
 .fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key:focus {
   outline: none;
 }
-#editor-frame .monaco-editor .te2-draft-add-line,
-#editor-frame .monaco-editor .te2-draft-add-line.line-insert,
-#editor-frame .monaco-editor .line-insert.te2-draft-add-line,
-#editor-frame .monaco-editor .te2-draft-add-line .view-line {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-add-line,
+[data-te2-working-editor-host] .monaco-editor .te2-draft-add-line.line-insert,
+[data-te2-working-editor-host] .monaco-editor .line-insert.te2-draft-add-line,
+[data-te2-working-editor-host] .monaco-editor .te2-draft-add-line .view-line {
   background: rgba(56, 139, 253, 0.12) !important;
 }
-#editor-frame .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.09) !important; }
-#editor-frame .monaco-editor .te2-draft-delete-glyph {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.09) !important; }
+[data-te2-working-editor-host] .monaco-editor .te2-draft-delete-glyph {
   margin-left: 5px;
   opacity: 0.65;
   pointer-events: none;
   z-index: 5;
 }
-#editor-frame .monaco-editor .te2-draft-delete-glyph::after {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-delete-glyph::after {
   content: '';
   position: absolute;
   bottom: -4px;
@@ -200,11 +201,11 @@ const INLINE_EDITOR_HOST_STYLE = `
   border-left: 4px solid var(--vscode-editorGutter-deletedBackground, #f14c4c);
   pointer-events: none;
 }
-#editor-frame .monaco-editor .te2-draft-delete-glyph-top::after {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-delete-glyph-top::after {
   top: -4px;
   bottom: auto;
 }
-#editor-frame .monaco-editor .te2-draft-del-zone {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-del-zone {
   background: rgba(210, 153, 34, 0.06);
   color: #e6b450;
   font-family: inherit;
@@ -212,21 +213,21 @@ const INLINE_EDITOR_HOST_STYLE = `
   line-height: inherit;
   white-space: pre;
 }
-#editor-frame .monaco-editor .te2-draft-stock-del-zone,
-#editor-frame .monaco-editor .te2-draft-stock-del-zone .view-line {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-stock-del-zone,
+[data-te2-working-editor-host] .monaco-editor .te2-draft-stock-del-zone .view-line {
   background: rgba(210, 153, 34, 0.08) !important;
 }
-#editor-frame .monaco-editor .te2-draft-stock-del-zone .inline-deleted-text {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-stock-del-zone .inline-deleted-text {
   background: rgba(210, 153, 34, 0.15) !important;
 }
-#editor-frame .monaco-editor .te2-draft-stock-del-margin {
+[data-te2-working-editor-host] .monaco-editor .te2-draft-stock-del-margin {
   background: rgba(210, 153, 34, 0.08) !important;
 }
-#editor-frame .monaco-editor .margin-view-overlays .codicon-folding-expanded,
-#editor-frame .monaco-editor .margin-view-overlays .codicon-folding-collapsed,
-#editor-frame .monaco-editor .margin-view-overlays .codicon-folding-manual-expanded,
-#editor-frame .monaco-editor .margin-view-overlays .codicon-folding-manual-collapsed,
-#editor-frame .monaco-editor .arrow-revert-change {
+[data-te2-working-editor-host] .monaco-editor .margin-view-overlays .codicon-folding-expanded,
+[data-te2-working-editor-host] .monaco-editor .margin-view-overlays .codicon-folding-collapsed,
+[data-te2-working-editor-host] .monaco-editor .margin-view-overlays .codicon-folding-manual-expanded,
+[data-te2-working-editor-host] .monaco-editor .margin-view-overlays .codicon-folding-manual-collapsed,
+[data-te2-working-editor-host] .monaco-editor .arrow-revert-change {
   opacity: 1 !important;
   visibility: visible !important;
 }
@@ -356,6 +357,10 @@ export async function mountInlineEditorHost(
   if (!(editorFrame instanceof HTMLElement)) {
     throw new Error('Inline Monaco host requires an HTMLElement mount point.');
   }
+  const identity = normalizeCodeTe2SocketIdentity(options.rendererIdentity ?? getCodeTe2SocketIdentity());
+  if (options.editorRole && options.editorRole !== identity.clientRole) {
+    throw new Error('Working editor role does not match its renderer identity');
+  }
   await workingEditorBoot.mount(editorFrame, async signal => {
     window.__te2InlineMonacoApiBase = INLINE_EDITOR_API_BASE;
     markNativeRenderer(editorFrame);
@@ -366,15 +371,16 @@ export async function mountInlineEditorHost(
     const { startWorkingEditorRuntime } = await import('./m_editor_app.ts');
     signal.throwIfAborted();
     const runtime = startWorkingEditorRuntime({
-      rendererIdentity: options.rendererIdentity,
+      rendererIdentity: identity,
       signal,
-      editorRole: options.editorRole ?? 'primary',
+      editorRole: identity.clientRole,
       mount: resolveWorkingEditorMount(editorFrame),
       bootSnapshot: options.bootSnapshot,
       buildSidebarMentionPayload: options.buildSidebarMentionPayload,
     });
-    await runtime.ready;
-  });
+    try { await runtime.ready; }
+    catch (error) { runtime.dispose(); throw error; }
+  }, identity.clientInstanceId);
 }
 
 /** Presentation teardown only; backend membership and shared assets survive. */
@@ -389,11 +395,14 @@ export function bootInlineEditorHost(
   options: InlineEditorBootOptions = {},
 ): Promise<void> {
   const bootPromise = mountInlineEditorHost(editorFrame, options).catch((error: unknown) => {
-    if (workingEditorBoot.isDisposed(editorFrame)) throw error;
+    if (error instanceof EditorBootAdmissionError || workingEditorBoot.isDisposed(editorFrame)) throw error;
     console.error('[inline_monaco] boot failed', error);
     renderInlineEditorError(editorFrame, error);
     throw error;
   });
-  window.__te2InlineMonacoBoot = bootPromise;
+  // Legacy diagnostics alias: a secondary must not replace the primary's boot.
+  if (!window.__te2InlineMonacoBoot || (options.rendererIdentity?.clientRole ?? options.editorRole ?? 'primary') === 'primary') {
+    window.__te2InlineMonacoBoot = bootPromise;
+  }
   return bootPromise;
 }

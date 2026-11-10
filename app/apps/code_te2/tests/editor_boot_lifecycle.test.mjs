@@ -27,10 +27,14 @@ test('concurrent/repeated mount shares boot without resetting the DOM or snapsho
   assert.equal(boots, 1);
 });
 
-test('unsafe second same-realm working editor fails before boot; separate realms remain independent', async () => {
+test('distinct same-realm roots boot independently but duplicate renderer identities cannot start', async () => {
   const owner = new EditorBootOwner();
-  await owner.mount({}, async () => {});
-  await assert.rejects(owner.mount({}, async () => { assert.fail('second boot'); }), /separate realms/);
+  const a = {}, b = {}; let primary = 0, secondary = 0;
+  await Promise.all([owner.mount(a, async () => { primary++; }, 'primary'),
+    owner.mount(b, async () => { secondary++; }, 'secondary')]);
+  assert.equal(primary, 1); assert.equal(secondary, 1);
+  await assert.rejects(owner.mount({}, async () => { assert.fail('duplicate boot'); }, 'primary'), /already mounted/);
+  await assert.rejects(owner.mount(a, async () => { assert.fail('changed identity'); }, 'secondary'), /identity cannot change/);
   await new EditorBootOwner().mount({}, async () => {});
 });
 
@@ -58,17 +62,28 @@ test('explicit disposal cancels pending boot immediately and fences late continu
   resume(); await waiting; await Promise.resolve();
   assert.equal(lateMounts, 0);
   assert.equal(owner.isDisposed(root), true);
-  await assert.rejects(owner.mount(root, async () => {}), /reload before remounting/);
-  await assert.rejects(owner.mount({}, async () => {}), /separate realms/);
+  await assert.rejects(owner.mount(root, async () => {}), /fresh mount root/);
+  await owner.mount({}, async () => {});
 });
 
-test('explicit disposal after ready releases instance once without affecting another realm', async () => {
-  const owner = new EditorBootOwner(), other = new EditorBootOwner(), root = {};
+test('explicit disposal after ready releases instance once without affecting another root', async () => {
+  const owner = new EditorBootOwner(), root = {};
   let disposals = 0, otherDisposals = 0;
   await owner.mount(root, async signal => { signal.addEventListener('abort', () => disposals++, { once: true }); });
-  await other.mount({}, async signal => { signal.addEventListener('abort', () => otherDisposals++); });
+  await owner.mount({}, async signal => { signal.addEventListener('abort', () => otherDisposals++); });
   owner.dispose(root); owner.dispose(root);
   assert.equal(disposals, 1); assert.equal(otherDisposals, 0);
+});
+
+test('disposing a pending root releases only its renderer admission and fences its old continuation', async () => {
+  const owner = new EditorBootOwner(), old = {}, fresh = {}; let finish, late = 0;
+  const wait = new Promise(resolve => { finish = resolve; });
+  const pending = owner.mount(old, async signal => { await wait; signal.throwIfAborted(); late++; }, 'same-renderer');
+  await Promise.resolve(); owner.dispose(old); await assert.rejects(pending, /disposed/);
+  await owner.mount(fresh, async () => {}, 'same-renderer');
+  owner.dispose(old); // A stale disposal cannot free the replacement root.
+  await assert.rejects(owner.mount({}, async () => {}, 'same-renderer'), /already mounted/);
+  finish(); await wait; await Promise.resolve(); assert.equal(late, 0);
 });
 
 test('disposal before boot microtask prevents initialization entirely', async () => {

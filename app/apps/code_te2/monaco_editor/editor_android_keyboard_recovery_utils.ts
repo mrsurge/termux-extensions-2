@@ -9,7 +9,8 @@ export function isAndroidGeckoRuntime(userAgent: string): boolean {
 export function resolveAndroidKeyboardRecoveryHost(
   editorDom: HTMLElement,
 ): HTMLElement | null {
-  return editorDom.closest<HTMLElement>('#editor-frame');
+  return editorDom.closest<HTMLElement>('[data-te2-working-editor-host]')
+    ?? editorDom.closest<HTMLElement>('#editor-frame');
 }
 
 export function recoverAndroidKeyboard(

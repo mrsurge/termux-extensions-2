@@ -7,7 +7,7 @@ import {
   monacoFileUri,
 } from "./editor_language_utils.ts";
 import { parseJsonc } from "./editor_parse_utils.ts";
-import { refreshSnippetSyntax, setSnippetSyntaxProvider } from './editor_textmate_snippets.ts';
+import { refreshSnippetSyntax, acquireSnippetSyntaxProvider } from './editor_textmate_snippets.ts';
 import { createFileModel as createMonacoFileModel, releaseFileModel, releaseFileModelOwner } from "./editor_model_utils.ts";
 import {
   runIssuesCommand,
@@ -91,7 +91,7 @@ import {
   installDraftZoneOrderingHook as installDraftZoneOrderingHookRuntime,
   reapplyDraftZones as reapplyDraftZonesRuntime,
 } from "./editor_draft_diff_runtime.ts";
-import { createEditorTextmateRuntime } from "./editor_textmate_runtime.ts";
+import { acquireEditorTextmateRuntime } from "./editor_textmate_runtime.ts";
 import { createEditorTextmateThemeOwnerRuntime } from "./editor_textmate_theme_owner_runtime.ts";
 import {
   disposeDiffEditorOnly as disposeDiffEditorRuntime,
@@ -128,6 +128,7 @@ import {
 import { RPC_CODEC_MSGPACK_V1 } from "../src/rpc/codec.ts";
 import {
   APP_WORKER_SOCKET_IO_TRANSPORTS,
+  RENDERER_SOCKET_IO_OPTIONS,
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
 } from "../src/rpc/socketio-topology.ts";
@@ -138,7 +139,7 @@ import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
 import { createEditorMentionSender } from "./editor_mention_request_runtime.ts";
 import { installEditorKeyboardRuntime } from './editor_keyboard_runtime.ts';
 import { createEditorRuntimeLifetime } from './editor_runtime_lifetime.ts';
-import { createEditorSocketListenerOwner } from './editor_socket_listener_owner.ts';
+import { createEditorSocketListenerOwner, createEditorSocketConnectionOwner } from './editor_socket_listener_owner.ts';
 import type { MobileEditorRole } from '../src/mobile-input/editor-special-key-bridge.ts';
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
 import { createEditorExtensionStateRuntime, buildExtensionEditorSelection } from "./editor_extension_state_runtime.ts";
@@ -253,6 +254,7 @@ interface MonacoRuntimeDiffEditorLike {
 
 interface EditorSocketLike {
   connect(): unknown;
+  disconnect?(): unknown;
   connected?: boolean;
   id?: string | null;
   sendBuffer?: unknown[];
@@ -406,6 +408,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     throw new Error('Working editor role does not match its renderer identity');
   }
   const runtimeSocketListeners = createEditorSocketListenerOwner();
+  const runtimeSocketConnections = createEditorSocketConnectionOwner();
   const lifetime = createEditorRuntimeLifetime({
     setTimeoutFn: (callback, delay) => window.setTimeout(callback, delay),
     clearTimeoutFn: timer => window.clearTimeout(timer),
@@ -807,7 +810,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     clearTimeoutFn: _clearTimeoutBound,
   });
 
-  var textmateRuntime = createEditorTextmateRuntime({
+  var textmateRuntime = acquireEditorTextmateRuntime({
     onSnippetSyntaxChanged: function () {
       refreshSnippetSyntax();
     },
@@ -821,7 +824,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     },
     normalizeLanguage: normalizeLanguage,
     editorRpcCall: editorRpcCall,
-  } as Parameters<typeof createEditorTextmateRuntime>[0]);
+  } as Parameters<typeof acquireEditorTextmateRuntime>[0]);
   var ensureTextmateTokenization = textmateRuntime.ensureTextmateTokenization;
   const contributionRefresher = createContributionRefresher(
     () => editorRpcTransport.isConnected(),
@@ -1259,6 +1262,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   lifetime.addCleanup(() => keyboardRuntime.dispose());
   lifetime.addCleanup(() => uiEditorRuntime.dispose());
   lifetime.addCleanup(() => languageBridgeProviders?.dispose());
+  lifetime.addCleanup(() => textmateRuntime.dispose());
   lifetime.addCleanup(() => mirrorRuntime.flushMirrorDebounce());
   lifetime.addCleanup(() => mirrorRuntime.disposeMirrorPublisher());
   lifetime.addCleanup(() => _setScrollPublisherInstalled(false));
@@ -1270,6 +1274,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   lifetime.addCleanup(() => releaseFileModelOwner(monaco, documentLeaseOwner));
   lifetime.addCleanup(() => editorRpcTransport.dispose());
   lifetime.addCleanup(() => editorWbaRpcTransport.dispose());
+  lifetime.addCleanup(() => runtimeSocketConnections.dispose());
   const onPageHide = (): void => lifetime.dispose();
   window.addEventListener('pagehide', onPageHide, { once: true });
   lifetime.addCleanup(() => window.removeEventListener('pagehide', onPageHide));
@@ -2384,14 +2389,16 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
         return;
       }
       if (!window.io) throw new Error("Socket.IO runtime is unavailable");
-      editorRpcSocket = window.io(SOCKET_IO_NAMESPACES.editorRpc, {
+      editorRpcSocket = runtimeSocketConnections.own(window.io(SOCKET_IO_NAMESPACES.editorRpc, {
+        ...RENDERER_SOCKET_IO_OPTIONS,
         path: SOCKET_IO_PATHS.editor,
         transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
         query: rendererContext.socketQuery(),
         auth: { rpcCodec: RPC_CODEC_MSGPACK_GZIP_V1 },
-      }) as EditorSocketLike;
+      }) as EditorSocketLike);
       if (!_languageWorkersEnabled()) {
-        wbaRpcSocket = window.io(SOCKET_IO_NAMESPACES.wba, {
+        wbaRpcSocket = runtimeSocketConnections.own(window.io(SOCKET_IO_NAMESPACES.wba, {
+          ...RENDERER_SOCKET_IO_OPTIONS,
           // Opening before the backend baton can strand the first handshake
           // until Socket.IO's timeout. Keep document rendering independent.
           autoConnect: false,
@@ -2399,7 +2406,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
           transports: ["websocket"],
           query: rendererContext.socketQuery(),
           auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
-        }) as EditorSocketLike;
+        }) as EditorSocketLike);
       }
       editorRpcTransport.attachSocket(editorRpcSocket);
       if (wbaRpcSocket) editorWbaRpcTransport.attachSocket(wbaRpcSocket);
@@ -2938,7 +2945,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
         emitToHost: emitToHost,
         updateDebug: updateDebug,
         onReady: function () {
-          setSnippetSyntaxProvider(textmateRuntime.tokenizeSnippet);
+          lifetime.addCleanup(acquireSnippetSyntaxProvider(textmateRuntime.tokenizeSnippet));
           inlineRuntimeReady = true;
           resolveUsableInlineBoot();
         },

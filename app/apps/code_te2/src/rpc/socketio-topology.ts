@@ -9,6 +9,10 @@ export const WBA_SOCKET_IO_PATH = `/api/app/${CODE_TE2_APP_ID}/services/wba/sock
 // without replacing the connected namespace session.
 export const APP_WORKER_SOCKET_IO_TRANSPORTS = ['polling', 'websocket'] as const;
 
+// Manager cache keys omit the identity query. A renderer-owned connection must
+// never inherit another namespace's Engine.IO handshake or reconnect lifetime.
+export const RENDERER_SOCKET_IO_OPTIONS = Object.freeze({ forceNew: true });
+
 export const SOCKET_IO_PATHS = {
   editor: APP_WORKER_SOCKET_IO_PATH,
   explorer: APP_WORKER_SOCKET_IO_PATH,

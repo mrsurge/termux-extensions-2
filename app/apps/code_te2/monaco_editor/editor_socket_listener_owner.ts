@@ -24,3 +24,26 @@ export function createEditorSocketListenerOwner() {
     },
   };
 }
+
+interface OwnedEditorSocket { disconnect?(): unknown }
+
+/** Runtime-created namespace sockets, not a shared manager or external socket. */
+export function createEditorSocketConnectionOwner() {
+  const sockets = new Set<OwnedEditorSocket>();
+  let disposed = false;
+  const disconnect = (socket: OwnedEditorSocket): void => {
+    try { socket.disconnect?.(); } catch (_) { /* Release all owned namespaces. */ }
+  };
+  return {
+    own<T extends OwnedEditorSocket>(socket: T): T {
+      if (disposed) disconnect(socket); else sockets.add(socket);
+      return socket;
+    },
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      for (const socket of sockets) disconnect(socket);
+      sockets.clear();
+    },
+  };
+}

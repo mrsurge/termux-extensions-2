@@ -4197,17 +4197,37 @@ primary-host reset behavior pending an explicit secondary untitled contract.
 `startWorkingEditorRuntime` returns an instance handle (`ready`, `dispose`).
 `disposeInlineEditorHost` aborts pending asset/import boot and disposes an active
 instance before clearing its DOM, without closing backend documents or removing
-shared assets. A disposed/failed boot retains the realm reservation; remount and
-multiple working mounts remain blocked pending outer-window ownership cutover.
+shared assets. Boot admission is per root, with a distinct validated renderer
+identity for each concurrent working mount. Repeated calls for one root share
+its result; contradictory/duplicate identities fail before host DOM changes.
+Failed roots do not retry silently. Disposal releases that renderer admission
+for a fresh root; a stale root cannot release a replacement's admission. The
+disposed root itself remains terminal. Shared styles target host markers rather
+than a unique `editor-frame` ID. Visible secondary presentation remains isolated
+until its container/focus cutover.
 `editor_renderer_context.ts` snapshots a validated renderer/main-page/role
 identity per runtime. Inline boot accepts an explicit identity; existing isolated
 pages default to their configured identity. Editor/WBA socket queries, mirror
 source matching, quick fixes and mobile role use that snapshot. Readiness and
 project-switch gates are per instance: host notifications and WBA acknowledgments
 update the same object consumed by workbench barriers, not page-global fields.
-The secondary tab-bar and same-DOM container/focus
-cutover remain separate work; the current reduced renderer still uses its
-existing lifecycle below.
+Renderer-owned UI, Editor and WBA connections explicitly bypass Socket.IO's
+manager cache (`RENDERER_SOCKET_IO_OPTIONS.forceNew`). That cache is keyed by
+origin/path, not the renderer query. Passing a new identity query to another
+namespace on a cached manager does not replace its Engine.IO handshake identity;
+without isolation, cold-boot order can bind both editors to primary and converge
+their foregrounds. Tests exercise the shipped Socket.IO client and both boot
+orders, not only option-recording mocks. Other generic RPC callers retain their
+existing multiplexing default unless they request an isolated connection.
+Working editors acquire a shared TextMate lease per window/Monaco realm.
+Its catalog, grammar factory and language-wide token providers outlive any one
+editor; new grammar requests use a remaining owner's editor RPC transport.
+Final release disposes providers and invalidates pending publication. Snippet
+syntax-provider leases similarly restore a live survivor or clear on last
+release, preventing retained snippets from calling a disposed editor.
+The secondary tab-bar and ordinary desktop-browser enablement remain separate
+work. Mobile working content uses the direct shell below; its focus cutover
+still requires live acceptance. Electron retains its native presentation.
 
 Electron main owns one retained framework-partition `WebContentsView`. Dock,
 Collapse, Detach, and Attach reparent that exact renderer between the main
@@ -4279,10 +4299,10 @@ not wait for WBA acknowledgement.
 ### Mobile second editor surface
 
 Eligible mobile browser profiles, GeckoView, and Cefrium expose the same
-**Open in a Second Window** document semantics through a retained same-origin
-iframe in the bottom drawer. Capability comes from the mobile/native client
-identity, never from a narrow desktop viewport. The iframe boots the portable
-reduced editor under an independently persisted secondary `clientInstanceId`
+**Open in a Second Window** document semantics through a retained direct element
+in the bottom drawer for working documents. Capability comes from the mobile/native
+client identity, never from a narrow desktop viewport. The host reuses the portable
+reduced editor with an injected presentation bridge and independently persisted secondary `clientInstanceId`
 and its own authenticated UI IPC, Editor, and WBA lanes. Its canonical file is
 the existing `ProjectSidecar.client_foregrounds` entry for that client; shared
 membership, drafts, writes, diagnostics, and WBA documents remain unchanged.
@@ -4294,30 +4314,45 @@ their existing native identity bridges. Reset rotates both ids in one native
 transaction. The random process-local framework relay origin is never identity
 authority.
 
-The mobile host owns drawer visibility and the iframe presentation lifetime.
-Collapse and mobile breakpoint exit retain the iframe and its backend
+The mobile host owns drawer visibility and the direct presentation lifetime.
+Collapse and mobile breakpoint exit retain the mount and its backend
 foreground. Close is different: the authenticated secondary UI IPC client asks
-Python to clear its own foreground, exact-client SSOT disposes the Monaco model,
-and the host destroys the iframe and removes the **Second Window** tab. An
+backend to close its area membership with project/revision fences, and the host
+disposes the mount and removes the **Second Window** tab only after success. An
 explicit `clientForeground.path: null` is authoritative empty state and never
 falls back to the primary/shared `currentPath`; a newly observed secondary
 identity also starts empty instead of seeding from shared MRU. The retained
-iframe reports its exact foreground to the host, so the tab is visible only
+shell reports its exact foreground to the host, so the tab is visible only
 while that foreground is populated. Explorer file cards send a validated
 file-only request through `/rpc/explorer`; Python checks project containment and
 document admission, then notifies only the invoking client's UI IPC room. The
 secondary renderer performs the canonical open, so the host reveals the tab
 only after that open succeeds, the primary foreground does not move, and no
-document content crosses the presentation `postMessage` channel.
+document content is copied through a presentation bridge. Working commands use
+direct typed callbacks; historical comparisons alone use a same-origin isolated
+frame (`te2_secondary_isolated=1`). Returning working/empty content replaces that
+frame with a fresh direct mount. Historical Monaco never mounts in the main
+document, and presentation replacement never reloads the whole main page.
 
 Mobile input presentation follows the same boundary. The parent retains the
 single two-row special-key dock and remembers the last positively focused
 Monaco role; Terminal focus remains a temporary independent override. Each
 editor renderer creates its own translucent action rail, but the host projects
 the active role so only the primary or secondary rail is visible. Secondary
-key requests, dock visibility, and Ctrl/Gboard state travel through validated
-same-origin messages addressed to the exact retained iframe. Hiding,
-collapsing, closing, or destroying that iframe restores primary ownership.
+working keys use the same-window role-addressed event bridge, with no iframe
+forwarder. Focus returning to primary changes the shared active role, while the
+single panel and sticky/consumed modifiers keep their existing owner. Isolated
+historical keys retain their validated frame bridge and read-only allowlist.
+Hiding, collapsing, closing or destroying the secondary restores primary input
+ownership. Native keyboard recovery and Cefrium dismissal resolve host markers,
+not a duplicate `editor-frame` ID.
+
+Secondary shell disposal aborts pending boot, removes its document/window hooks
+and disposes its UI RPC client. Working-runtime cleanup disconnects only its
+created Editor/WBA namespace socket instances after transport/provider/model
+cleanup, never a shared manager or another editor's sockets. Late client-library
+loads, notifications and callbacks cannot resurrect the disposed presentation.
+Electron retains its native WebContentsView/detach path and presentation bridge.
 
 The portable reduced header consumes the auxiliary client's exact diagnostics
 count projection and renders the same error/warning pills as the primary

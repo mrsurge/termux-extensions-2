@@ -20,6 +20,7 @@ interface Paint {
   bytes: number;
 }
 let provider: SnippetSyntaxProvider | null = null;
+const providerLeases = new Map<object, SnippetSyntaxProvider>();
 let epoch = 0;
 let running = 0;
 const paints = new Set<Paint>();
@@ -129,6 +130,17 @@ export function refreshSnippetSyntax(): void {
 export function setSnippetSyntaxProvider(value: SnippetSyntaxProvider | null): void {
   provider = value;
   refreshSnippetSyntax();
+}
+
+export function acquireSnippetSyntaxProvider(value: SnippetSyntaxProvider): () => void {
+  const owner = {};
+  providerLeases.set(owner, value);
+  setSnippetSyntaxProvider(value);
+  return () => {
+    if (!providerLeases.delete(owner) || provider !== value) return;
+    const surviving = Array.from(providerLeases.values()).at(-1) ?? null;
+    setSnippetSyntaxProvider(surviving);
+  };
 }
 
 export function highlightTextmateElement(target: HTMLElement, options: Omit<SnippetSyntaxRequest, 'text'>): void {

@@ -20,6 +20,7 @@ export interface CreateUiIpcRpcConnectionOptions {
 
 export function createUiIpcRpcConnection(options: CreateUiIpcRpcConnectionOptions) {
   const client = createSocketIoJsonRpcClient({
+    isolateConnection: true,
     namespace: UI_IPC_RPC_NAMESPACE,
     path: SOCKET_IO_PATHS.uiIpc,
     query: options.query ?? fileEditorSocketQuery(),
@@ -39,6 +40,7 @@ export function createUiIpcRpcConnection(options: CreateUiIpcRpcConnectionOption
   });
 
   return {
+    dispose(): void { client.dispose(); },
     connect(): Promise<void> {
       return client.connect();
     },

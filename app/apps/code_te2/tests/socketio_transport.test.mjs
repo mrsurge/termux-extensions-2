@@ -2,11 +2,35 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 
 import { build } from 'esbuild';
 
 const appRoot = path.resolve(import.meta.dirname, '..');
 let moduleSequence = 0;
+
+// Native-page fixtures exercise the current bounded metadata/chunk protocol.
+function textmateChunkRpc(catalog, body, onLoad = () => {}) {
+  return async (method, params) => {
+    const current = catalog();
+    if (method === 'editor.textmate.catalog.get') return current;
+    const hash = raw => createHash('sha256').update(raw).digest('hex');
+    if (method === 'editor.textmate.closure.get') {
+      assert.equal(params.metadataOnly, true);
+      const root = current.grammars.find(grammar => grammar.scopeName === params.scope);
+      assert.ok(root);
+      return { revision: current.revision, rootScope: params.scope, ids: [root.id], bodies: {},
+        fingerprints: { [root.id]: hash(body(root.id)) }, complete: false };
+    }
+    assert.equal(method, 'editor.textmate.chunk.get');
+    assert.equal(params.revision, current.revision);
+    assert.equal(params.offset, 0);
+    onLoad(params.id);
+    const raw = body(params.id);
+    return { id: params.id, revision: current.revision, sha256: hash(raw), offset: 0,
+      raw, nextOffset: Array.from(raw).length, done: true };
+  };
+}
 
 test('editor readiness gates WBA startup without waiting to mount an editor', async () => {
   const { createEditorRpcHostActionRuntime } = await importTypeScript(
@@ -45,7 +69,7 @@ test('WBA socket is explicitly gated while the editor socket stays immediate', (
   assert.match(source, /window\.io\(SOCKET_IO_NAMESPACES\.wba, \{[\s\S]*?autoConnect: false/);
   const editorOptions = source.slice(source.indexOf('window.io(SOCKET_IO_NAMESPACES.editorRpc,'), source.indexOf('if (!_languageWorkersEnabled())', source.indexOf('window.io(SOCKET_IO_NAMESPACES.editorRpc,')));
   assert.doesNotMatch(editorOptions, /autoConnect: false/);
-  assert.match(source, /if \(\(window as Window & \{ __te2AdapterReady\?: boolean \}\)\.__te2AdapterReady\) \{\s*wbaRpcSocket\?\.connect\(\)/);
+  assert.match(source, /if \(rendererContext\.readiness\.__te2AdapterReady\) \{\s*wbaRpcSocket\?\.connect\(\)/);
 });
 
 test('TextMate grammar projection has no WBA transport fallback', () => {
@@ -127,6 +151,35 @@ async function settlePromises() {
   await Promise.resolve();
   await Promise.resolve();
 }
+
+test('UI RPC disposal fences a pending library load and cannot reconnect or publish late', async () => {
+  const { createSocketIoJsonRpcClient } = await importTypeScript('src/rpc/transport.ts');
+  const loading = deferred(); let factories = 0, callbacks = 0;
+  const client = createSocketIoJsonRpcClient({ namespace:'/ui_ipc', path:'/socket.io',
+    ensureSocketIoLoaded:()=>loading.promise, onConnectError:()=>callbacks++ });
+  const connecting = client.connect();
+  const rejected = assert.rejects(connecting,/disposed/);
+  const pending = client.request('ui.pending',{}); const pendingRejected = assert.rejects(pending,/disposed/);
+  client.dispose();client.dispose();
+  loading.resolve(()=>{factories++;return new FakeSocket();});
+  await rejected;await pendingRejected;await settlePromises();
+  client.reconnect();client.notify('ui.late',{});
+  await assert.rejects(client.request('ui.late',{}),/disposed/);
+  assert.equal(factories,0);assert.equal(callbacks,0);assert.equal(client.isConnected(),false);
+});
+
+test('UI RPC disposal silences captured socket callbacks and rejects active requests', async () => {
+  const { createSocketIoJsonRpcClient } = await importTypeScript('src/rpc/transport.ts');
+  const socket = new FakeSocket();let notices=0,disconnects=0,connects=0;
+  const client = createSocketIoJsonRpcClient({namespace:'/ui_ipc',path:'/socket.io',ensureSocketIoLoaded:async()=>()=>socket,
+    onNotification:()=>notices++,onDisconnect:()=>disconnects++,onConnect:()=>connects++});
+  await client.connect();socket.trigger('connect');
+  const pending=client.request('ui.wait',{}),rejected=assert.rejects(pending,/disposed/);
+  client.dispose();await rejected;
+  socket.trigger('connect');socket.trigger('rpc.notify',{jsonrpc:'2.0',method:'ui.notice',params:{}});
+  socket.trigger('disconnect');client.reconnect();
+  assert.equal(notices,0);assert.equal(disconnects,0);assert.equal(connects,1);assert.equal(socket.connectCalls,0);
+});
 
 test('boot snapshot uses a sixty-second budget on the unchanged MessagePack RPC', async (t) => {
   const { createUiIpcConnections } = await importTypeScript('main_page/frontend/connections/ui-ipc.ts');
@@ -1289,6 +1342,7 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   const grammarLoads = [];
   let wasmFetches = 0;
   const windowLike = {
+    location: { search: '?gv_native=1' },
     monaco: {
       editor: { getModels: () => [] },
       languages: {
@@ -1304,6 +1358,7 @@ test('TextMate catalog and factory initialization are shared across concurrent c
     getWindow: () => windowLike,
     getApiBase: () => '',
     fetchFn: async (url) => {
+      if (url.endsWith('markdown-cache.json')) return Response.json({ schema: 1, bodies: {} });
       assert.equal(url, 'monaco_editor/textmate/onig.wasm');
       wasmFetches += 1;
       return new Response(wasm);
@@ -1311,26 +1366,18 @@ test('TextMate catalog and factory initialization are shared across concurrent c
     fetchJsonWithBase: async () => ({}),
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorRpcCall: async (method, params) => {
-      if (method === 'editor.textmate.grammars.get') {
-        grammarLoads.push(...params.ids);
-        assert.equal(params.revision, 'grammar-revision-1');
-        return { revision: 'grammar-revision-1', bodies: Object.fromEntries(params.ids.map((id) => [id, {
-          ok: true,
-          raw: JSON.stringify({ scopeName: 'source.test', patterns: [
-            { match: 'hello', name: 'keyword.test' },
-          ] }),
-        }])) };
-      }
-      assert.equal(method, 'editor.textmate.catalog.get');
-      grammarListCalls += 1;
-      await settlePromises();
-      return {
+    editorRpcCall: (() => {
+      const rpc = textmateChunkRpc(() => ({
         revision: 'grammar-revision-1',
         languages: [{ id: 'test', extensions: ['.test'], filenames: ['Testfile'] }],
         grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }],
+      }), () => JSON.stringify({ scopeName: 'source.test', patterns: [{ match: 'hello', name: 'keyword.test' }] }),
+      id => grammarLoads.push(id));
+      return async (method, params) => {
+        if (method === 'editor.textmate.catalog.get') { grammarListCalls++; await settlePromises(); }
+        return rpc(method, params);
       };
-    },
+    })(),
   });
 
   const [first, second] = await Promise.all([
@@ -1340,12 +1387,69 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   assert.equal(first, second);
   assert.equal(grammarListCalls, 1);
   assert.equal(wasmFetches, 1);
-  // Grammar content remains backend-owned; only the WASM runtime is fetched as HTTP.
+  // Native grammar content uses bounded backend chunks; WASM/cache are assets.
   const { grammar } = await first.createGrammar('test', 1);
   const tokens = grammar.tokenizeLine('hello', null).tokens;
   assert.ok(tokens[0].scopes.includes('keyword.test'));
   assert.deepEqual(grammarLoads, ['test.ext/syntaxes/test.json']);
   assert.equal(wasmFetches, 1);
+});
+
+test('TextMate leases share providers, hand off transport, and release only on last owner', async () => {
+  const { acquireEditorTextmateRuntime } = await importTypeScript('monaco_editor/editor_textmate_runtime.ts');
+  const wasm = fs.readFileSync(path.join(appRoot, 'monaco_editor/textmate/onig.wasm'));
+  const installed = [], disposed = [], catalogs = [], changes = [];
+  let revision = 1;
+  const win = { location: { search: '?gv_native=1' }, monaco: {
+    editor: { getModels: () => [] }, languages: {
+      getLanguages: () => [{ id: 'test' }], getEncodedLanguageId: () => 1, setColorMap() {},
+      setTokensProvider(language) { installed.push(language); return { dispose: () => disposed.push(language) }; },
+    },
+  } };
+  const deps = label => ({ getWindow: () => win,
+    buildUiUrl: value => value, normalizeLanguage: value => String(value || ''),
+    fetchFn: async url => url.endsWith('markdown-cache.json') ? Response.json({ schema: 1, bodies: {} }) : new Response(wasm),
+    onSnippetSyntaxChanged: () => changes.push(label),
+    editorRpcCall: (() => {
+      const rpc = textmateChunkRpc(() => ({ revision: `rev-${revision}`,
+        grammars: [{ id: `test/${revision}.json`, scopeName: 'source.test', language: 'test' }] }),
+      () => JSON.stringify({ scopeName: 'source.test', patterns: [] }));
+      return (method, params) => { if (method === 'editor.textmate.catalog.get') catalogs.push(label); return rpc(method, params); };
+    })(),
+  });
+  const firstDeps = deps('first');
+  const a = acquireEditorTextmateRuntime(firstDeps), b = acquireEditorTextmateRuntime(deps('second'));
+  await Promise.all([a.ensureTextmateTokenization('test', '/file.test'), b.ensureTextmateTokenization('test', '/file.test')]);
+  assert.deepEqual(installed, ['test']); assert.deepEqual(catalogs, ['first']);
+  a.dispose(); a.dispose(); assert.deepEqual(disposed, []);
+  assert.equal(await a.ensureTextmateTokenization('test', '/file.test'), false);
+  revision++;
+  assert.equal(await b.refreshTextmateProjection('rev-2'), true);
+  assert.deepEqual(catalogs, ['first', 'second']); assert.deepEqual(changes, ['second']);
+  assert.deepEqual(disposed, ['test']);
+  await b.ensureTextmateTokenization('test', '/file.test');
+  assert.deepEqual(installed, ['test', 'test']);
+  b.dispose(); assert.deepEqual(disposed, ['test', 'test']);
+  // Even two acquisitions of the identical dependency object are distinct leases.
+  const c = acquireEditorTextmateRuntime(firstDeps), d = acquireEditorTextmateRuntime(firstDeps);
+  await c.ensureTextmateTokenization('test', '/file.test'); c.dispose();
+  assert.equal(await d.ensureTextmateTokenization('test', '/file.test'), true);
+  assert.equal(installed.length, 3); d.dispose(); assert.equal(disposed.length, 3);
+});
+
+test('TextMate final release fences a delayed catalog before provider installation', async () => {
+  const { acquireEditorTextmateRuntime } = await importTypeScript('monaco_editor/editor_textmate_runtime.ts');
+  const pending = deferred(); let installed = 0;
+  const win = { location: { search: '?gv_native=1' }, monaco: { languages: {
+    getLanguages: () => [{ id: 'test' }], setTokensProvider: () => installed++, getEncodedLanguageId: () => 1,
+  } } };
+  const lease = acquireEditorTextmateRuntime({ getWindow: () => win, buildUiUrl: value => value,
+    normalizeLanguage: value => String(value || ''), editorRpcCall: () => pending.promise,
+    fetchFn: async () => { throw Error('disposed catalog must not start assets'); },
+  });
+  const boot = lease.ensureTextmateReady(); lease.dispose();
+  pending.resolve({ revision: 'old', grammars: [] });
+  await assert.rejects(boot); assert.equal(installed, 0);
 });
 
 test('TextMate body loader bounds fan-out, reuses successful bodies, and rotates revisions', async () => {
@@ -1413,6 +1517,7 @@ test('TextMate retries a failed dependency without refetching a successful root 
   let wasmFetches = 0;
   const runtime = createEditorTextmateRuntime({
     getWindow: () => ({
+      location: { search: '?gv_native=1' },
       monaco: {
         editor: { getModels: () => [] },
         languages: {
@@ -1423,33 +1528,24 @@ test('TextMate retries a failed dependency without refetching a successful root 
         },
       },
     }),
-    fetchFn: async () => { wasmFetches += 1; return new Response(wasm); },
+    fetchFn: async url => {
+      if (url.endsWith('markdown-cache.json')) return Response.json({ schema: 1, bodies: {} });
+      wasmFetches += 1; return new Response(wasm);
+    },
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorRpcCall: async (method, params) => {
-      if (method === 'editor.textmate.catalog.get') {
-        return {
+    editorRpcCall: textmateChunkRpc(() => ({
           revision: 'revision-1',
           grammars: [
             { id: 'test.ext/root.json', scopeName: 'source.test', language: 'test' },
             { id: 'test.ext/dependency.json', scopeName: 'source.dependency', language: null },
           ],
-        };
-      }
-      assert.equal(method, 'editor.textmate.grammars.get');
-      loads.push(...params.ids);
-      return {
-        revision: 'revision-1',
-        bodies: Object.fromEntries(params.ids.map((id) => [id,
-          id.endsWith('dependency.json') && failDependency
-            ? { ok: false, error: 'transient dependency failure' }
-            : { ok: true, raw: id.endsWith('root.json')
-              ? JSON.stringify({ scopeName: 'source.test', patterns: [{ include: 'source.dependency' }] })
-              : JSON.stringify({ scopeName: 'source.dependency', patterns: [{ match: 'hello', name: 'keyword.test' }] }),
-            },
-        ])),
-      };
-    },
+        }), id => {
+          if (id.endsWith('dependency.json') && failDependency) throw new Error('transient dependency failure');
+          return id.endsWith('root.json')
+            ? JSON.stringify({ scopeName: 'source.test', patterns: [{ include: 'source.dependency' }] })
+            : JSON.stringify({ scopeName: 'source.dependency', patterns: [{ match: 'hello', name: 'keyword.test' }] });
+        }, id => loads.push(id)),
   });
 
   const originalWarn = console.warn;
@@ -1476,6 +1572,7 @@ test('TextMate resolves and installs document syntax before WBA language enrichm
   const installed = [];
   const runtime = createEditorTextmateRuntime({
     getWindow: () => ({
+      location: { search: '?gv_native=1' },
       monaco: {
         editor: { getModels: () => [] },
         languages: {
@@ -1487,22 +1584,14 @@ test('TextMate resolves and installs document syntax before WBA language enrichm
         },
       },
     }),
-    fetchFn: async () => new Response(wasm),
+    fetchFn: async url => url.endsWith('markdown-cache.json') ? Response.json({ schema: 1, bodies: {} }) : new Response(wasm),
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorRpcCall: async (method, params) => {
-      if (method === 'editor.textmate.catalog.get') {
-        return {
+    editorRpcCall: textmateChunkRpc(() => ({
           revision: 'grammar-revision-1',
           languages: [{ id: 'test', extensions: ['.test'], filenames: ['Testfile'] }],
           grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }],
-        };
-      }
-      assert.equal(method, 'editor.textmate.grammars.get');
-      return { revision: 'grammar-revision-1', bodies: Object.fromEntries(
-        params.ids.map((id) => [id, { ok: true, raw: JSON.stringify({ scopeName: 'source.test', patterns: [] }) }]),
-      ) };
-    },
+        }), () => JSON.stringify({ scopeName: 'source.test', patterns: [] })),
   });
 
   assert.equal(await runtime.prepareTextmateForDocument('/workspace/value.test', 'plaintext'), 'test');
@@ -1555,6 +1644,7 @@ test('TextMate projection revisions dispose stale providers and reinstall from t
   const models = [{ resetTokenizationCalls: 0, resetTokenization() { this.resetTokenizationCalls += 1; } }];
   const runtime = createEditorTextmateRuntime({
     getWindow: () => ({
+      location: { search: '?gv_native=1' },
       monaco: {
         editor: { getModels: () => models },
         languages: {
@@ -1570,32 +1660,20 @@ test('TextMate projection revisions dispose stale providers and reinstall from t
         },
       },
     }),
-    fetchFn: async () => new Response(wasm),
+    fetchFn: async url => url.endsWith('markdown-cache.json') ? Response.json({ schema: 1, bodies: {} }) : new Response(wasm),
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorRpcCall: async (method, params) => {
-      const currentRevision = `grammar-revision-${revision}`;
-      if (method === 'editor.textmate.catalog.get') {
-        return {
-          revision: currentRevision,
+    editorRpcCall: textmateChunkRpc(() => ({
+          revision: `grammar-revision-${revision}`,
           grammars: [{
             id: `test.ext/syntaxes/test-${revision}.json`,
             scopeName: 'source.test',
             language: 'test',
           }],
-        };
-      }
-      assert.equal(method, 'editor.textmate.grammars.get');
-      assert.equal(params.revision, currentRevision);
-      grammarLoads.push(...params.ids);
-      return { revision: currentRevision, bodies: Object.fromEntries(params.ids.map((id) => [id, {
-        ok: true,
-        raw: JSON.stringify({
+        }), () => JSON.stringify({
           scopeName: 'source.test',
           patterns: [{ match: `revision-${revision}`, name: `keyword.revision-${revision}` }],
-        }),
-      }])) };
-    },
+        }), id => grammarLoads.push(id)),
   });
 
   assert.equal(await runtime.ensureTextmateTokenization('test', '/workspace/test.ext'), true);

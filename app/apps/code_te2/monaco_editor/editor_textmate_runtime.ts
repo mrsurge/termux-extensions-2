@@ -175,6 +175,7 @@ function grammarIdFromLocation(resource: URI): string {
 }
 
 export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
+  dispose(): void;
   ensureTextmateReady(): Promise<unknown>;
   ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean>;
   prepareTextmateForDocument(filePath: unknown, fallbackLanguage?: unknown): Promise<string>;
@@ -198,6 +199,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   let tmReadyInflight: Promise<unknown> | null = null;
   let tmOnigReady: Promise<void> | null = null;
   let tmProjectionEpoch = 0;
+  let disposed = false;
   const tmProviderDisposables: Record<string, { dispose?(): void } | undefined> = Object.create(null);
   const bundledGrammarCache = createBundledGrammarCache(() => deps.fetchFn(
     deps.buildUiUrl('monaco_editor/textmate/markdown-cache.json'), { cache: 'force-cache' }));
@@ -244,6 +246,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   }
 
   function applyThemeToRegistry(vscodeThemeJson: unknown, syncEditorPalette = tmSyncEditorPalette): void {
+    if (disposed) return;
     const theme = asRecord(vscodeThemeJson);
     if (!theme) return;
     const changed = tmActiveThemeJson !== theme;
@@ -365,6 +368,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   }
 
   async function refreshVscodeGrammarIndex(): Promise<VscodeGrammarIndexLike> {
+    if (disposed) throw new Error('TextMate runtime disposed');
     if (tmVscodeIndexInflight) return tmVscodeIndexInflight;
     const inflight = loadVscodeGrammarIndex();
     tmVscodeIndexInflight = inflight;
@@ -378,6 +382,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   let tmProjectionRefreshInflight: Promise<boolean> | null = null;
   let tmProjectionRefreshQueued = false;
   function refreshTextmateProjection(expectedRevision?: string | null): Promise<boolean> {
+    if (disposed) return Promise.resolve(false);
     const normalizedExpected = asString(expectedRevision);
     if (!tmProjectionRefreshInflight && normalizedExpected && normalizedExpected === tmVscodeIndex?.revision) return Promise.resolve(false);
     tmProjectionRefreshQueued = true;
@@ -388,6 +393,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         while (tmProjectionRefreshQueued) {
           tmProjectionRefreshQueued = false;
           const next = await loadVscodeGrammarIndex(tmProjectionEpoch, false);
+          if (disposed) return changed;
           if (next.revision && next.revision === tmVscodeIndex?.revision) continue;
           changed = true;
           invalidateTextmateProjection(next);
@@ -520,6 +526,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     if (!tmVscodeIndex) {
       await refreshVscodeGrammarIndex();
     }
+    if (disposed || epoch !== tmProjectionEpoch) throw new Error('TextMate projection superseded');
     if (!tmVscodeIndex) {
       throw new Error('TextMate grammar index unavailable');
     }
@@ -535,6 +542,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       });
     }
     await tmOnigReady;
+    if (disposed || epoch !== tmProjectionEpoch) throw new Error('TextMate projection superseded');
 
     const onigLib = Promise.resolve({
       createOnigScanner(sources: string[]) {
@@ -581,6 +589,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   }
 
   async function ensureTextmateReady(): Promise<unknown> {
+    if (disposed) throw new Error('TextMate runtime disposed');
     if (tmGrammarFactory) return tmGrammarFactory;
     if (tmReadyInflight) return tmReadyInflight;
     const inflight = loadTextmateReady();
@@ -593,6 +602,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   }
 
   async function ensureTextmateTokenization(languageId: unknown, filePath: unknown, registerProvider = true): Promise<boolean> {
+    if (disposed) return false;
     try {
       const win = deps.getWindow();
       const monacoLanguages = win.monaco?.languages;
@@ -797,6 +807,12 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   }
 
   return {
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      tmProjectionRefreshQueued = false;
+      invalidateTextmateProjection({ revision: '', byScope: {}, byLanguage: {}, byLocation: {}, byFilename: {}, byExtension: {} });
+    },
     ensureTextmateReady,
     ensureTextmateTokenization,
     prepareTextmateForDocument,
@@ -808,5 +824,64 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     getGrammarByLang,
     getGrammarForLanguage,
     tokenizeSnippet,
+  };
+}
+
+type TextmateRuntime = ReturnType<typeof createEditorTextmateRuntime>;
+interface SharedTextmateService {
+  owners: Map<object, TextmateRuntimeDeps>;
+  runtime: TextmateRuntime;
+}
+const sharedTextmateServices = new WeakMap<WindowTextmateLike, SharedTextmateService>();
+
+/** One language-wide tokenizer/catalog per realm, leased by live editors. */
+export function acquireEditorTextmateRuntime(deps: TextmateRuntimeDeps): TextmateRuntime {
+  const win = deps.getWindow();
+  const lease = {};
+  let service = sharedTextmateServices.get(win);
+  if (!service) {
+    const owners = new Map([[lease, deps]]);
+    const current = (): TextmateRuntimeDeps => {
+      const owner = owners.values().next().value;
+      if (!owner) throw new Error('TextMate service has no live owner');
+      return owner;
+    };
+    service = { owners, runtime: createEditorTextmateRuntime({
+      getWindow: () => win,
+      fetchFn: (input, init) => current().fetchFn(input, init),
+      buildUiUrl: path => current().buildUiUrl(path),
+      grammarResourceUrl: deps.grammarResourceUrl,
+      normalizeLanguage: language => current().normalizeLanguage(language),
+      editorRpcCall: (method, params, options) => current().editorRpcCall(method, params, options),
+      onSnippetSyntaxChanged: () => { for (const owner of owners.values()) owner.onSnippetSyntaxChanged?.(); },
+    }) };
+    sharedTextmateServices.set(win, service);
+  } else {
+    service.owners.set(lease, deps);
+  }
+  const shared = service, runtime = service.runtime;
+  let released = false;
+  const assertLive = (): void => { if (released) throw new Error('TextMate lease disposed'); };
+  return {
+    dispose() {
+      if (released) return;
+      released = true;
+      shared.owners.delete(lease);
+      if (!shared.owners.size) {
+        sharedTextmateServices.delete(win);
+        runtime.dispose();
+      }
+    },
+    ensureTextmateReady: () => { assertLive(); return runtime.ensureTextmateReady(); },
+    ensureTextmateTokenization: (language, path) => released ? Promise.resolve(false) : runtime.ensureTextmateTokenization(language, path),
+    prepareTextmateForDocument: (path, language) => { assertLive(); return runtime.prepareTextmateForDocument(path, language); },
+    resolveLanguageForPath: (path, language) => { assertLive(); return runtime.resolveLanguageForPath(path, language); },
+    refreshVscodeGrammarIndex: () => { assertLive(); return runtime.refreshVscodeGrammarIndex(); },
+    refreshTextmateProjection: revision => released ? Promise.resolve(false) : runtime.refreshTextmateProjection(revision),
+    scopeNameForLanguage: (language, path) => { assertLive(); return runtime.scopeNameForLanguage(language, path); },
+    applyThemeToRegistry: (theme, sync) => { if (!released) runtime.applyThemeToRegistry(theme, sync); },
+    getGrammarByLang: () => released ? {} : runtime.getGrammarByLang(),
+    getGrammarForLanguage: language => released ? undefined : runtime.getGrammarForLanguage(language),
+    tokenizeSnippet: request => released ? Promise.resolve(null) : runtime.tokenizeSnippet(request),
   };
 }

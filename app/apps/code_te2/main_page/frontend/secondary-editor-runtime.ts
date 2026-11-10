@@ -1,5 +1,7 @@
 import { isUnknownArray } from '../../src/rpc/value-types.ts';
-import { bootInlineEditorHost } from '../../monaco_editor/inline_host.ts';
+import { bootInlineEditorHost, disposeInlineEditorHost } from '../../monaco_editor/inline_host.ts';
+import { codeTe2SocketQuery, type SocketClientIdentity } from '../../src/rpc/socketio-topology.ts';
+import { parseSecondaryHistoryContent } from './secondary-history-content.ts';
 import { bootHistoricalDiff, type HistoricalEditorView } from '../../monaco_editor/historical_monaco_boot.ts';
 import { SecondaryContentLifecycle } from './secondary-content-lifecycle.ts';
 import { closeSecondaryArea } from './secondary-area-close.ts';
@@ -48,7 +50,7 @@ interface SecondaryPresentation {
   maximized: boolean;
 }
 
-type SecondaryCommand =
+export type SecondaryCommand =
   | { type: 'close' }
   | { type: 'history'; projectPath: string; ticket: string; requestId?: string }
   | { type: 'open'; projectPath: string; path: string; requestId?: string }
@@ -75,7 +77,7 @@ interface SecondaryElectronBridge {
   ): () => void;
 }
 
-interface SecondaryPresentationBridge {
+export interface SecondaryPresentationBridge {
   kind: 'electron' | 'mobile';
   ready(): Promise<void>;
   setMode(mode: SecondaryMode): Promise<SecondaryPresentation>;
@@ -95,6 +97,16 @@ interface SecondaryRuntimeWindow extends Window {
 interface SecondaryHost {
   toast(message: string, kind?: unknown): void;
 }
+
+export interface SecondaryEditorRuntimeOptions {
+  presentationBridge?: SecondaryPresentationBridge;
+  rendererIdentity?: SocketClientIdentity;
+  signal?: AbortSignal;
+  /** Direct working hosts hand historical content back to an isolated frame. */
+  reloadPresentation?(): void;
+}
+
+export interface SecondaryEditorRuntimeHandle { dispose(): void }
 
 type HostState = SecondaryEditorHostState & { preferences?: unknown };
 
@@ -222,7 +234,7 @@ const STYLE = `
   min-height: 0;
   overflow: hidden;
 }
-.te2-secondary-editor #editor-frame {
+.te2-secondary-editor .te2-secondary-working-mount {
   position: absolute;
   inset: 0;
   min-width: 0;
@@ -396,6 +408,7 @@ function hostStateFromReply(reply: unknown): HostState {
 }
 
 function installStyle(): void {
+  if (document.getElementById('te2-secondary-editor-style')) return;
   const style = document.createElement('style');
   style.id = 'te2-secondary-editor-style';
   style.textContent = STYLE;
@@ -417,10 +430,14 @@ function clearPrimaryTemplateSurfaces(rootEl: HTMLElement): void {
 export async function bootSecondaryEditorRuntime(
   rootEl: HTMLElement,
   host: SecondaryHost,
-): Promise<void> {
-  const presentationBridge = createPresentationBridge();
+  options: SecondaryEditorRuntimeOptions = {},
+): Promise<SecondaryEditorRuntimeHandle> {
+  options.signal?.throwIfAborted();
+  let disposed = false;
+  const inline = options.presentationBridge !== undefined;
+  const presentationBridge = options.presentationBridge ?? createPresentationBridge();
   const inputBridgeCleanups: Array<() => void> = [];
-  if (presentationBridge.kind === 'mobile') {
+  if (presentationBridge.kind === 'mobile' && !inline) {
     const onInputFocus = (event: Event): void => {
       const detail = (
         event as CustomEvent<{ role?: MobileEditorRole }>
@@ -485,13 +502,13 @@ export async function bootSecondaryEditorRuntime(
       </div>
     </header>
     <div class="te2-secondary-editor-body">
-      <div id="editor-frame"></div>
+      <div class="te2-secondary-working-mount"></div>
       <div class="te2-secondary-editor-status" aria-live="polite"></div>
     </div>
   `;
   rootEl.appendChild(root);
 
-  const editorFrame = root.querySelector<HTMLElement>('#editor-frame');
+  const editorFrame = root.querySelector<HTMLElement>('.te2-secondary-working-mount');
   const title = root.querySelector<HTMLElement>('.te2-secondary-editor-title');
   const status = root.querySelector<HTMLElement>('.te2-secondary-editor-status');
   const menu = root.querySelector<HTMLElement>('.te2-secondary-editor-menu');
@@ -500,6 +517,7 @@ export async function bootSecondaryEditorRuntime(
   if (!editorFrame || !title || !status || !menu || !menuButton || !issuesButton) {
     throw new Error('Second editor shell did not initialize');
   }
+  if (inline) menuButton.hidden = true;
   if (presentationBridge.kind === 'mobile') {
     inputBridgeCleanups.push(
       bindMobileEditorFocusCapture(editorFrame, window, 'secondary'),
@@ -526,10 +544,15 @@ export async function bootSecondaryEditorRuntime(
   let preferenceEpoch = 0;
   let commandsInFlight = 0;
   let reloadPending = false;
+  let replacementPending = false;
   const reloadWhenSettled = (): void => {
     if (reloadPending && commandsInFlight === 0) {
       reloadPending = false;
-      window.setTimeout(() => window.location.reload(), 0);
+      window.setTimeout(() => {
+        if (disposed) return;
+        if (options.reloadPresentation) options.reloadPresentation();
+        else window.location.reload();
+      }, 0);
     }
   };
   const contentLifecycle = new SecondaryContentLifecycle({
@@ -582,16 +605,28 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function applyHostState(state: HostState): Promise<void> {
+    if (disposed) return;
     if (state.preferences !== undefined) {
       historicalPreferences = state.preferences;
       historicalView?.updatePreferences(historicalPreferences);
     }
     projectPath = stringValue(state.activeProject);
+    if (inline && state.secondaryContent != null) {
+      const historical = parseSecondaryHistoryContent(state.secondaryContent);
+      if (!historical) throw new Error('Invalid historical secondary content');
+      presentationBridge.publishContent({ kind: 'historicalDiff',
+        label: basename(historical.modified.path || historical.original.path || ''), commitId: historical.commitId });
+      replacementPending = true;
+      reloadPending = true;
+      reloadWhenSettled();
+      return;
+    }
     const result = await contentLifecycle.apply(state.secondaryContent);
     if (result === 'working') setCurrentPath(secondaryEditorActivePath(state));
   }
 
   async function requestHostState(): Promise<HostState> {
+    if (disposed) throw new Error('Second editor presentation disposed');
     const epoch = ++stateReadEpoch;
     const prefsEpoch = preferenceEpoch;
     const reply = await connection.request(
@@ -602,7 +637,7 @@ export async function bootSecondaryEditorRuntime(
     const state = hostStateFromReply(reply);
     if (prefsEpoch !== preferenceEpoch) delete state.preferences;
     // A newer fact or snapshot request supersedes this asynchronous read.
-    if (epoch === stateReadEpoch) await applyHostState(state);
+    if (!disposed && epoch === stateReadEpoch) await applyHostState(state);
     return state;
   }
 
@@ -714,6 +749,7 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function handleNativeCommand(command: SecondaryCommand): Promise<void> {
+    if (disposed) throw new Error('Second editor presentation disposed');
     if (command.type === 'close') {
       await closeSecondaryEditor();
       return;
@@ -776,6 +812,7 @@ export async function bootSecondaryEditorRuntime(
     method: UiIpcRpcNotificationMethod,
     params: JsonObject,
   ): void {
+    if (disposed) return;
     if (method === UI_IPC_RPC_NOTIFICATIONS.extensionContributionsChanged) {
       historicalView?.updatePreferences(historicalPreferences, true);
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
@@ -827,8 +864,10 @@ export async function bootSecondaryEditorRuntime(
   }
 
   const connection = createUiIpcRpcConnection({
+    ...(options.rendererIdentity ? { query: codeTe2SocketQuery(options.rendererIdentity) } : {}),
     ensureSocketIoLoaded,
     onConnect: () => {
+      if (disposed) return;
       if (bootComplete) historicalView?.updatePreferences(historicalPreferences, true);
       if (bootComplete) void requestHostState().catch((error: unknown) => {
         setStatus(`State unavailable: ${errorMessage(error)}`);
@@ -845,10 +884,12 @@ export async function bootSecondaryEditorRuntime(
   const unsubscribePresentation = presentationBridge.onCommand((command) => {
     ++commandsInFlight;
     void handleNativeCommand(command).then(() => {
+      if (disposed) return;
       if (command.type === 'open' && command.requestId) {
         presentationBridge.publishOpenResult(command.requestId, true, command.path);
       }
     }).catch((error: unknown) => {
+      if (disposed) return;
       const message = errorMessage(error);
       if ((command.type === 'open' || command.type === 'history') && command.requestId) {
         presentationBridge.publishOpenResult(command.requestId, false, currentPath, message);
@@ -859,12 +900,23 @@ export async function bootSecondaryEditorRuntime(
       reloadWhenSettled();
     });
   });
-  window.addEventListener('pagehide', () => {
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    ++stateReadEpoch;
     contentLifecycle.dispose();
     historicalView = null;
     unsubscribePresentation();
     inputBridgeCleanups.forEach((cleanup) => cleanup());
-  }, { once: true });
+    disposeInlineEditorHost(editorFrame);
+    connection.dispose();
+    document.removeEventListener('click', onDocumentClick);
+    window.removeEventListener('pagehide', dispose);
+    options.signal?.removeEventListener('abort', dispose);
+    root.remove();
+  };
+  window.addEventListener('pagehide', dispose, { once: true });
+  options.signal?.addEventListener('abort', dispose, { once: true });
 
   menuButton.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -880,11 +932,12 @@ export async function bootSecondaryEditorRuntime(
       console.warn('[second_editor] issue navigation failed', error);
     });
   });
-  document.addEventListener('click', (event) => {
+  const onDocumentClick = (event: MouseEvent): void => {
     if (!menu.hidden && event.target instanceof Node && !menu.contains(event.target)) {
       menu.hidden = true;
     }
-  });
+  };
+  document.addEventListener('click', onDocumentClick);
   menu.addEventListener('click', (event) => {
     const action = event.target instanceof HTMLElement
       ? event.target.closest<HTMLElement>('[data-action]')?.dataset.action
@@ -910,31 +963,43 @@ export async function bootSecondaryEditorRuntime(
     void setMode(currentMode === 'detached' ? 'docked' : 'detached');
   });
 
-  await connection.connect();
-  const bootPreferenceEpoch = preferenceEpoch;
-  const fullSnapshotReply = await connection.request(
-    UI_IPC_RPC_METHODS.hostBootSnapshotGet,
-    {},
-    20_000,
-  );
-  const fullSnapshot = nestedRecord(fullSnapshotReply, 'snapshot');
-  const initialHostState = asRecord(fullSnapshot.host_state) as HostState;
-  if (bootPreferenceEpoch !== preferenceEpoch) delete initialHostState.preferences;
-  await applyHostState(initialHostState);
-  if (!contentLifecycle.historical) {
-    await bootInlineEditorHost(editorFrame, {
-      editorRole: 'secondary',
-      ensureSocketIoLoaded,
-      bootSnapshot: fullSnapshot,
-    });
-    // Presentation readiness is local renderer readiness. Waiting for the
-    // backend editor-ready echo creates a cycle: the native/mobile host keeps
-    // the requested file queued until this realm is ready, while this realm
-    // cannot establish its model until that file command is delivered.
-    editorReady = true;
-    await publishPresentationReady();
-  }
-  bootComplete = true;
-  // Facts during asynchronous cold boot are reconciled from a fresh snapshot.
-  if (pendingStateRefresh) await requestHostState();
+  try {
+    await connection.connect();
+    options.signal?.throwIfAborted();
+    if (disposed) throw new Error('Second editor presentation disposed');
+    const bootPreferenceEpoch = preferenceEpoch;
+    const fullSnapshotReply = await connection.request(
+      UI_IPC_RPC_METHODS.hostBootSnapshotGet,
+      {},
+      20_000,
+    );
+    const fullSnapshot = nestedRecord(fullSnapshotReply, 'snapshot');
+    options.signal?.throwIfAborted();
+    if (disposed) throw new Error('Second editor presentation disposed');
+    const initialHostState = asRecord(fullSnapshot.host_state) as HostState;
+    if (bootPreferenceEpoch !== preferenceEpoch) delete initialHostState.preferences;
+    await applyHostState(initialHostState);
+    if (replacementPending || disposed) return { dispose };
+    // Historical-only frames hand working content back to their direct host.
+    if (!inline && !contentLifecycle.historical
+        && new URLSearchParams(window.location.search).get('te2_secondary_isolated') === '1') return { dispose };
+    if (!contentLifecycle.historical) {
+      await bootInlineEditorHost(editorFrame, {
+        rendererIdentity: options.rendererIdentity,
+        editorRole: 'secondary',
+        ensureSocketIoLoaded,
+        bootSnapshot: fullSnapshot,
+      });
+      // Presentation readiness is local renderer readiness. Waiting for the
+      // backend editor-ready echo creates a cycle: the native/mobile host keeps
+      // the requested file queued until this realm is ready, while this realm
+      // cannot establish its model until that file command is delivered.
+      editorReady = true;
+      await publishPresentationReady();
+    }
+    bootComplete = true;
+    // Facts during asynchronous cold boot are reconciled from a fresh snapshot.
+    if (pendingStateRefresh) await requestHostState();
+    return { dispose };
+  } catch (error) { dispose(); throw error; }
 }

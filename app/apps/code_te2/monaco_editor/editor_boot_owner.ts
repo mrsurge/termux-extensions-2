@@ -1,22 +1,31 @@
-/** Transitional page owner: providers/models are still realm-scoped. */
-export class EditorBootOwner {
-  private root: object | null = null;
-  private ready: Promise<void> | null = null;
-  private controller: AbortController | null = null;
+interface EditorBootRecord {
+  ready: Promise<void>;
+  controller: AbortController;
+  rendererId?: string;
+}
 
-  mount(root: object, start: (signal: AbortSignal) => Promise<void>): Promise<void> {
-    if (this.root === root && this.controller?.signal.aborted) {
-      return Promise.reject(new Error('Working editor disposed; reload before remounting'));
+export class EditorBootAdmissionError extends Error {}
+
+/** Per-root boot admission; distinct mounts must not share a renderer identity. */
+export class EditorBootOwner {
+  private readonly records = new WeakMap<object, EditorBootRecord>();
+  private readonly rendererRoots = new Map<string, object>();
+
+  mount(root: object, start: (signal: AbortSignal) => Promise<void>, rendererId?: string): Promise<void> {
+    const existing = this.records.get(root);
+    if (existing?.controller.signal.aborted) {
+      return Promise.reject(new EditorBootAdmissionError('Working editor disposed; use a fresh mount root'));
     }
-    if (this.root && this.root !== root) {
-      return Promise.reject(new Error('Working editors still require separate realms until shared provider/model ownership is implemented.'));
+    if (existing) {
+      if (existing.rendererId !== rendererId) return Promise.reject(new EditorBootAdmissionError('Working editor root identity cannot change'));
+      return existing.ready;
     }
-    if (this.ready) return this.ready;
-    this.root = root;
+    if (rendererId && this.rendererRoots.has(rendererId)) {
+      return Promise.reject(new EditorBootAdmissionError('Working editor renderer identity is already mounted'));
+    }
     const controller = new AbortController();
-    this.controller = controller;
     // Publish ownership before invoking async boot, including synchronous errors.
-    this.ready = new Promise<void>((resolve, reject) => {
+    const ready = new Promise<void>((resolve, reject) => {
       const abort = (): void => reject(new Error('Working editor disposed'));
       controller.signal.addEventListener('abort', abort, { once: true });
       void Promise.resolve().then(() => {
@@ -24,19 +33,24 @@ export class EditorBootOwner {
         return start(controller.signal);
       }).then(resolve, reject).finally(() => controller.signal.removeEventListener('abort', abort));
     });
-    // Retain failures: boot may already have installed non-disposable providers.
-    // Retrying against partly initialized state requires a page reload today.
-    return this.ready;
+    this.records.set(root, { ready, controller, rendererId });
+    if (rendererId) this.rendererRoots.set(rendererId, root);
+    // Failed roots retain their result until explicitly disposed; they never
+    // silently retry against partially initialized state.
+    return ready;
   }
 
   dispose(root: object): boolean {
-    if (this.root !== root || !this.controller) return false;
-    this.controller.abort();
-    // Keep the realm reservation: not every outer/window service is scoped yet.
+    const record = this.records.get(root);
+    if (!record) return false;
+    record.controller.abort();
+    if (record.rendererId && this.rendererRoots.get(record.rendererId) === root) {
+      this.rendererRoots.delete(record.rendererId);
+    }
     return true;
   }
 
   isDisposed(root: object): boolean {
-    return this.root === root && this.controller?.signal.aborted === true;
+    return this.records.get(root)?.controller.signal.aborted === true;
   }
 }

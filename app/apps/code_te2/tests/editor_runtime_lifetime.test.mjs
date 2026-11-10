@@ -9,6 +9,19 @@ async function load(entry, plugins = []) {
 }
 const { createEditorRuntimeLifetime } = await load('monaco_editor/editor_runtime_lifetime.ts');
 
+test('runtime connection ownership closes only its namespace sockets, once, including late construction', async () => {
+  const { createEditorSocketConnectionOwner } = await load('monaco_editor/editor_socket_listener_owner.ts');
+  const first = createEditorSocketConnectionOwner(), second = createEditorSocketConnectionOwner();
+  const calls = [];
+  const socket = name => ({ disconnect() { calls.push(name); if (name === 'broken') throw Error('fixture'); } });
+  const editor = socket('editor'); first.own(editor);first.own(editor);first.own(socket('broken'));first.own(socket('wba'));
+  second.own(socket('survivor'));
+  first.dispose();first.dispose();
+  assert.deepEqual(calls,['editor','broken','wba']);
+  first.own(socket('late'));assert.equal(calls.at(-1),'late');
+  second.dispose();assert.equal(calls.at(-1),'survivor');
+});
+
 test('editor connection teardown removes socket hooks and fences captured notifications', async () => {
   const { registerEditorSocketConnectionHandlers } = await load('monaco_editor/editor_socket_connection_runtime.ts');
   const socket = new EventEmitter(), notifications = [], ready = [];

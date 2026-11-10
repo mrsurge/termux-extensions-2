@@ -322,9 +322,9 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   the existing iframe implementation, not live shared-DOM acceptance. File-menu
   targeting and full runtime teardown remain before enabling shared mounts.
 - [ ] Original mobile secondary extra-key focus bug remains unresolved: user
-  reproduced it after the ownership changes. These are preparatory ownership
-  mechanics, not the live fix. Address and validate the handoff with working
-  iframe removal; do not infer acceptance from the shared-document unit tests.
+  reproduced it after the ownership changes and again after working iframe
+  removal. Direct mounting did not resolve the live failure. Investigate and
+  validate the handoff; do not infer acceptance from shared-document unit tests.
 - [x] Transport teardown sub-slice: editor/WBA frontend transports now support
   terminal idempotent disposal. Pending RPCs/startup waits reject, timers and
   local notification handlers clear, owned socket/manager listeners detach,
@@ -348,9 +348,8 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   frontend/WBA no-Any checks/typechecks and asset build pass. The broader socket
   suite retains only its four known TextMate fixture failures. No commit, restart,
   native/WBA-server build or Android publication performed.
-- [ ] Remaining activation work: finish host/outer-window identity handoff
-  before lifting the single-mount guard/removing the working iframe.
-  This slice does not claim the original mobile extra-key bug is fixed.
+- [ ] Remaining activation acceptance: live-test the direct secondary working
+  mount and secondary -> primary mobile extra-key focus handoff implemented below.
 - [x] Controlled working-editor disposal API: runtime returns `ready` plus an
   idempotent `dispose`; inline host exposes presentation-only disposal. Abort
   during asset/import waits rejects boot immediately and fences late mounting;
@@ -372,6 +371,68 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   checks and asset build pass. No backend/WBA-server source change,
   runtime restart, iframe removal, Android publish or live shared-mount claim.
   User live acceptance: everything still working (2026-11-09); checkpoint approved.
+- [x] Shared TextMate ownership: working editors lease one window/Monaco-realm
+  catalog, factory and language-wide tokenizer registration set. New reads use a
+  surviving owner's transport; one release cannot dispose another editor's
+  tokenizer. Final release disposes providers and fences pending catalog/grammar
+  publication. Snippet-provider leases restore a survivor or clear on final
+  release instead of retaining a disposed editor. Same-realm admission and the
+  working iframe remain unchanged; live acceptance pending.
+  Repaired all four stale TextMate transport fixtures to use native metadata/
+  chunk RPC and valid packaged-cache assets. Updated the readiness assertion to
+  match the instance context. Full socket transport file: 46/46 pass. Expanded
+  sequential TextMate/lifecycle/transport selection: 104/104 pass; strict
+  frontend/WBA no-Any checks and build pass. A parallel run hit the existing
+  snippet tokenization time budget; that test passes isolated/sequentially.
+  No backend/native source change, restart or Android publication. Uncommitted.
+- [x] Controlled same-page mount admission: `EditorBootOwner` uses per-root boot
+  records and duplicate-renderer protection, replacing its page-wide reservation.
+  Inline host snapshots/validates identity before DOM mutation; repeated root
+  calls retain their boot result. Disposal releases only that renderer admission
+  for a fresh root, and stale disposal cannot evict its replacement. Failed boot
+  disposes its runtime. Shared presentation CSS uses host markers, and secondary
+  diagnostics cannot overwrite the primary boot alias.
+  Host-wiring tests use a runtime boundary double for two roots/assets/identity,
+  repeated mount, cancellation, failed boot and independent disposal. Actual
+  paired provider/model/input implementations are covered by their regression
+  suites, not a claim of live dual-Monaco rendering. 138 selected tests pass
+  sequentially; strict frontend/WBA no-Any checks and asset build pass. Existing
+  secondary iframe remains; visible direct mounting/mobile handoff is next.
+  User explicitly skips live acceptance of the preceding small TextMate slice;
+  neither that nor this controlled admission slice has live cutover acceptance.
+  No Python/Rust source change, restart, Android publication or new commit.
+- [x] Visible mobile working-iframe cutover: the existing secondary shell now
+  accepts an injected typed presentation bridge and explicit identity. The host
+  mounts working Monaco directly, hides its redundant File hamburger and uses
+  the shared same-window extra-key role routing. Historical comparisons retain
+  an isolated same-origin frame; working/empty transitions recreate a direct
+  mount without reloading the main page. Electron's native bridge/view/detach
+  path remains unchanged; generic desktop-browser enablement is still separate.
+  Shell disposal removes owned global hooks, aborts pending boot and terminally
+  disposes its UI RPC client. Runtime-created Editor/WBA namespace sockets now
+  have explicit ownership/disconnection on teardown; shared managers and other
+  editor instances are untouched. Native keyboard helpers use mount markers.
+  Integration tests use real controller/shell/key routing with Monaco/network
+  boundary doubles: direct DOM, primary focus return, close/reopen, historical
+  isolation/return, stale notification and slow-boot destruction pass. Expanded
+  gate: 147 selected frontend regressions, strict frontend/WBA no-Any checks and
+  asset build pass. User live-accepts the resulting cutover, except the extra-key
+  focus bug, which remains reproducible and open. This general acceptance does
+  not assert separately observed coverage of every restore/project-switch case.
+  Frontend only: no mypyc/Rust rebuild, runtime restart or Android publication.
+- [x] Reload lockstep identity fix: live Cefrium inspection confirmed two Monaco
+  editors on one file while requests contained distinct renderer IDs. The shipped
+  Socket.IO lookup caches a manager by origin/path and ignores a new namespace's
+  identity query when reusing it. A secondary editor booting against the cached
+  primary UI manager consequently inherits primary's handshake identity.
+  Renderer-owned UI, Editor and WBA sockets now explicitly bypass that cache;
+  generic RPC callers retain their default. A real shipped-client regression
+  reproduces query inheritance and proves isolated managers retain two distinct
+  foreground identities in either cold-boot order. 151 selected tests, strict
+  frontend/WBA no-Any checks and asset build pass. No cache diagnosis, restart,
+  backend state edit or Android publication was used. User live-accepted the
+  reload identity fix and requested commit/push; the separate extra-key focus
+  bug remains open.
 - [x] File-menu target-capture foundation: backend focus selection is scoped to
   trusted same-main-page renderer associations and live connections. Blur retains
   focus through a dialog; disconnect falls back without evicting a live duplicate
@@ -391,23 +452,23 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   Automated gate: 38 selected frontend tests, 32 selected backend tests and
   29 autosave regressions pass; frontend/WBA no-Any checks, full Code TE2 strict
   mypy plus extra disallow-any checks (255 files), and asset build pass.
-  Broader TextMate fixture repairs remain required before the cutover completes.
+  Broader TextMate fixture repairs are completed in the shared-ownership gate above.
 - [x] User live-tested File-menu action routing: everything working (2026-11-09).
   WBA server source is unchanged; `node build.mjs` also rebuilds WBA artifacts.
   No shared-runtime restart or Android publication was performed by the agent.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
-  pass. Electron strict checks and unit suite pass. Four existing TextMate
-  transport fixtures still use the retired full-grammar request instead of the
-  chunk protocol; that wider suite is not green and is not claimed as passing.
+  pass. Electron strict checks and unit suite passed at that checkpoint. The
+  four TextMate transport failures recorded then are repaired in the shared
+  TextMate ownership gate above; the transport suite now passes.
 - [ ] S2 secondary tab bar/direct Explorer-to-secondary open; unique tabs per
   area, unknown remote placement -> primary, restore/reconnect reconciliation.
   Test local presentation removal versus global last-local close, other-client
   dual placement, disconnect, draft/save/cancel and stale open/close revisions.
 - [ ] S3 ordinary desktop browser support and one responsive outer pane/tab
-  container; implement safe outer working-editor iframe removal with explicit
-  provider/global/editor identity/disposal ownership. Preserve historical and
-  extension isolation and native Electron overlay/detach behavior.
+  container. Mobile direct working mounting/iframe removal is implemented above;
+  live acceptance remains open. Preserve historical/extension isolation and
+  native Electron overlay/detach behavior.
 - [ ] S3 shared mobile/desktop File menu active-area targeting with menu-focus
   retention, stale target guards and extension-panel action policy.
 - [ ] S3 reuse terminal drawer's focus/modifier/extra-key ownership for primary

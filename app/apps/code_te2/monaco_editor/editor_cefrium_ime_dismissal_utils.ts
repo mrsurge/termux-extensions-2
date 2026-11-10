@@ -39,7 +39,8 @@ export function bindCefriumImeDismissal(
 ): { dispose(): void } | null {
   if (!isCefriumAndroidRuntime(win.location.search)) return null;
   const editorDom = editor.getDomNode?.();
-  const host = editorDom?.closest<HTMLElement>('#editor-frame');
+  const host = editorDom?.closest<HTMLElement>('[data-te2-working-editor-host]')
+    ?? editorDom?.closest<HTMLElement>('#editor-frame');
   if (!editorDom || !host) return null;
 
   let pendingFocusFrame: number | null = null;

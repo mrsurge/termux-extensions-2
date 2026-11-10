@@ -1,8 +1,12 @@
 import { recordValue } from '../../src/rpc/value-types.ts';
+import type { SecondaryEditorRuntimeHandle,
+  SecondaryPresentationBridge, SecondaryCommand as RuntimeSecondaryCommand } from './secondary-editor-runtime.ts';
+import { resolveCodeTe2ClientIdentity } from './client-identity.ts';
 import {
   mobileSecondaryShortcutVisible,
   mobileSecondaryTabVisible,
   parseSecondaryContentPresentation,
+  mobileSecondaryModeTransition,
 } from './secondary-editor-state.ts';
 import {
   MOBILE_EDITOR_MODIFIER_STATE_EVENT,
@@ -98,6 +102,7 @@ function secondaryFrameUrl(): string {
   const target = new URL(window.location.href);
   target.hash = '';
   target.searchParams.set('te2_editor_role', 'secondary');
+  target.searchParams.set('te2_secondary_isolated', '1');
   target.searchParams.delete('te2_desktop_editor');
   return target.href;
 }
@@ -107,6 +112,12 @@ export function createMobileSecondaryEditorController(
 ): MobileSecondaryEditorController {
   const supported = supportsMobileSecondEditor();
   let frame: HTMLIFrameElement | null = null;
+  let directRoot: HTMLElement | null = null;
+  let directRuntime: SecondaryEditorRuntimeHandle | null = null;
+  let directController: AbortController | null = null;
+  let directCommand: ((command: RuntimeSecondaryCommand) => void) | null = null;
+  let isolated = false;
+  let destroyed = false;
   let ready = false;
   let readyPromise: Promise<void> | null = null;
   let resolveReady: (() => void) | null = null;
@@ -186,22 +197,38 @@ export function createMobileSecondaryEditorController(
     });
   }
 
-  function destroyFrame(reason: string): void {
-    if (readyTimeout) window.clearTimeout(readyTimeout);
-    readyTimeout = 0;
-    rejectReady?.(new Error(reason));
-    for (const pending of pendingOpens.values()) {
-      window.clearTimeout(pending.timeout);
-      pending.reject(new Error(reason));
+  function destroyFrame(reason: string, preserveWaiters = false): void {
+    const wasReady = ready;
+    if (!preserveWaiters) {
+      if (readyTimeout) window.clearTimeout(readyTimeout);
+      readyTimeout = 0;
+      rejectReady?.(new Error(reason));
+      for (const pending of pendingOpens.values()) {
+        window.clearTimeout(pending.timeout);
+        pending.reject(new Error(reason));
+      }
+      pendingOpens.clear();
+      readyPromise = null;
+      resolveReady = null;
+      rejectReady = null;
+      isolated = false;
     }
-    pendingOpens.clear();
-    readyPromise = null;
-    resolveReady = null;
-    rejectReady = null;
+    if (preserveWaiters && wasReady) {
+      readyPromise = null;
+      resolveReady = null;
+      rejectReady = null;
+    }
+    directController?.abort();
+    directController = null;
+    directRuntime?.dispose();
+    directRuntime = null;
+    directCommand = null;
+    directRoot?.remove();
+    directRoot = null;
     frame?.remove();
     frame = null;
     ready = false;
-    populated = false;
+    if (!preserveWaiters) populated = false;
     options.container.replaceChildren();
   }
 
@@ -222,32 +249,78 @@ export function createMobileSecondaryEditorController(
   }
 
   function ensureFrame(): Promise<void> {
-    if (ready && frame?.contentWindow) return Promise.resolve();
-    if (readyPromise) return readyPromise;
+    if (destroyed) return Promise.reject(new Error('Second Window presentation destroyed'));
+    if (ready && (frame?.contentWindow || directRuntime)) return Promise.resolve();
+    if (readyPromise && (frame || directRoot)) return readyPromise;
+    if (!readyPromise) readyPromise = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+      readyTimeout = window.setTimeout(() => {
+        readyTimeout = 0;
+        readyPromise = null;
+        rejectReady = null;
+        resolveReady = null;
+        reject(new Error('Second Window editor did not become ready'));
+      }, 20_000);
+    });
+    if (!isolated) {
+      const mount = document.createElement('div');
+      mount.className = 'te2-mobile-secondary-editor-frame';
+      mount.style.cssText = 'width:100%;height:100%;position:relative;min-height:0;';
+      directRoot = mount;
+      options.container.replaceChildren(mount);
+      const controller = new AbortController();
+      directController = controller;
+      const publish = (data: Record<string, unknown>): void => {
+        if (!controller.signal.aborted) applyPresentation(data);
+      };
+      const bridge: SecondaryPresentationBridge = {
+        kind: 'mobile',
+        async ready() { publish({ type: 'ready' }); },
+        async setMode(mode) {
+          controller.signal.throwIfAborted();
+          const transition = mobileSecondaryModeTransition(mode);
+          // Closing can synchronously dispose the runtime; its caller must not
+          // need to touch the presentation again after this notification.
+          publish({ type: 'mode', mode: transition.hostMode });
+          return { mode: transition.rendererMode, dockSize: 0,
+            detachedBounds: { x: 0, y: 0, width: 0, height: 0 }, maximized: false };
+        },
+        publishForeground: path => publish({ type: 'foreground', path }),
+        publishContent: content => publish({ type: 'content', content }),
+        publishOpenResult: (requestId, ok, path, error) => publish({ type: 'openResult', requestId, ok, path, error }),
+        publishInputFocus() {}, publishModifiersConsumed() {}, publishPanelToggle() {},
+        onCommand(listener) { directCommand = listener; return () => { if (directCommand === listener) directCommand = null; }; },
+      };
+      void Promise.all([resolveCodeTe2ClientIdentity({ role: 'secondary' }),
+        import('./secondary-editor-runtime.ts')]).then(([identity, { bootSecondaryEditorRuntime }]) => {
+        controller.signal.throwIfAborted();
+        return bootSecondaryEditorRuntime(mount, { toast: options.toast }, {
+          rendererIdentity: { ...identity, clientRole: 'secondary' }, presentationBridge: bridge,
+          signal: controller.signal, reloadPresentation: () => replacePresentation(true),
+        });
+      }).then(runtime => {
+        if (controller.signal.aborted) runtime.dispose(); else directRuntime = runtime;
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted) onPresentationError(error);
+      });
+      updateVisibility();
+      return readyPromise;
+    }
     frame = document.createElement('iframe');
     frame.className = 'te2-mobile-secondary-editor-frame';
     frame.title = 'Second Window editor';
     frame.src = secondaryFrameUrl();
     frame.setAttribute('allow', 'clipboard-read; clipboard-write');
-    frame.addEventListener('error', onFrameError, { once: true });
+    const isolatedFrame = frame;
+    frame.addEventListener('error', () => { if (frame === isolatedFrame) onFrameError(); }, { once: true });
     options.container.replaceChildren(frame);
-    readyPromise = new Promise<void>((resolve, reject) => {
-      resolveReady = resolve;
-      rejectReady = reject;
-      readyTimeout = window.setTimeout(() => {
-        readyTimeout = 0;
-        const error = new Error('Second Window editor did not become ready');
-        readyPromise = null;
-        rejectReady = null;
-        resolveReady = null;
-        reject(error);
-      }, 20_000);
-    });
     updateVisibility();
     return readyPromise;
   }
 
   function postCommand(command: SecondaryCommand): void {
+    if (directRoot && directCommand) { directCommand(command); return; }
     const target = frame?.contentWindow;
     if (!target) throw new Error('Second Window editor is unavailable');
     target.postMessage({
@@ -285,6 +358,18 @@ export function createMobileSecondaryEditorController(
       || !data
       || data.channel !== 'te2.secondaryEditor.presentation'
     ) return;
+    applyPresentation(data);
+  }
+
+  function replacePresentation(nextIsolated: boolean): void {
+    if (destroyed) return;
+    if (isolated === nextIsolated && (frame || directRoot)) return;
+    destroyFrame('Second Window content changed', true);
+    isolated = nextIsolated;
+    void ensureFrame().catch((error: unknown) => onPresentationError(error));
+  }
+
+  function applyPresentation(data: Record<string, unknown>): void {
     if (data.type === 'ready') {
       ready = true;
       if (readyTimeout) window.clearTimeout(readyTimeout);
@@ -299,6 +384,10 @@ export function createMobileSecondaryEditorController(
     } else if (data.type === 'content') {
       const content = parseSecondaryContentPresentation(data.content);
       if (!content) return;
+      if (isolated && content.kind !== 'historicalDiff') {
+        replacePresentation(false);
+        return;
+      }
       applyPopulation(content.kind !== 'empty');
       if (options.tab) options.tab.title = content.kind === 'empty'
         ? 'Second Window'
@@ -332,7 +421,7 @@ export function createMobileSecondaryEditorController(
       updateVisibility();
       closeDrawer();
     } else if (data.type === 'inputFocus') {
-      if (options.container.hidden || frame.hidden || !populated) return;
+      if (options.container.hidden || frame?.hidden || !populated) return;
       setMobileEditorOwner(window, 'secondary');
     } else if (data.type === 'modifiersConsumed') {
       publishMobileEditorModifiersConsumed(window, 'secondary');
@@ -342,12 +431,18 @@ export function createMobileSecondaryEditorController(
   }
 
   function onFrameError(): void {
+    onPresentationError(new Error('Second Window editor failed to load'));
+  }
+
+  function onPresentationError(cause: unknown): void {
+    if (destroyed) return;
     ready = false;
-    const error = new Error('Second Window editor failed to load');
+    const error = cause instanceof Error ? cause : new Error(String(cause));
     rejectReady?.(error);
     readyPromise = null;
     resolveReady = null;
     rejectReady = null;
+    destroyFrame(error.message);
     options.toast(error.message);
   }
 
@@ -364,10 +459,11 @@ export function createMobileSecondaryEditorController(
   }
 
   function reconcileLayout(): void {
+    if (destroyed) return;
     updateVisibility();
-    if (supported && isMobileLayout() && !frame && !dismissed) {
+    if (supported && isMobileLayout() && !frame && !directRoot && !dismissed) {
       void ensureFrame().catch((error: unknown) => {
-        options.toast(error instanceof Error ? error.message : String(error));
+        if (!destroyed) options.toast(error instanceof Error ? error.message : String(error));
       });
     }
   }
@@ -442,6 +538,8 @@ export function createMobileSecondaryEditorController(
       show();
     },
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
       layoutObserver.disconnect();
       window.removeEventListener('message', onMessage);
       window.removeEventListener(MOBILE_EDITOR_OWNER_EVENT, onInputStateChanged);

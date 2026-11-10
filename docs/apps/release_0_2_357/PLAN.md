@@ -97,10 +97,10 @@ mechanics differ. Do not create a second mobile implementation of these rules.
 Implement a regular outer pane/tab container and remove the outer working-editor
 iframe as an explicit lifecycle step, not an assumed consequence of adding tabs.
 Monaco itself is already mounted into a regular element through
-bootInlineEditorHost. Electron presents that page in a WebContentsView; mobile
-loads a secondary-role page in an outer iframe. Do not simply remove the iframe:
-SecondaryContentLifecycle documents non-disposable working-editor providers and
-reloads between working/historical content kinds. Audit editor/global/provider
+bootInlineEditorHost. Electron retains its WebContentsView. Mobile now directly
+mounts working content using the same reduced shell with an injected bridge;
+historical comparisons retain an isolated secondary-role frame. Content-kind
+transitions replace that presentation without reloading the main page. Audit editor/global/provider
 ownership, identifiers, handlers and disposal before same-realm multi-editor
 mounting; do not replace isolation with singleton collisions. Establish this
 lifecycle before wiring the unified menu/focus behavior against the shared DOM
@@ -109,8 +109,14 @@ and preserve Electron native overlay/reparent/detach capabilities. Historical
 diffs stay read-only immutable content. Escalate any required isolation/design
 change rather than quietly dropping the outer-iframe removal requirement.
 Controlled instance disposal is implemented, including abort fences during
-asset/import boot; realm reservation and the working iframe remain until the
-outer-window identity ownership is ready.
+asset/import boot. Boot admission is now per root with duplicate renderer-ID
+protection. The visible mobile working iframe is removed; direct-mount/input
+handoff is implemented. The user live-accepted the cutover and reload identity
+fix, but explicitly confirms the extra-key focus bug remains unresolved; keep
+that repair and its live acceptance open.
+TextMate catalog/factory/token providers and snippet production now have shared
+lease ownership; the stale grammar-transport fixtures are repaired. These are
+preconditions for that direct mount; historical/extension isolation remains.
 
 - One shared File menu on desktop **and mobile** targets the last-focused editor area
   (capture/execution routing implemented; live acceptance pending). Existing

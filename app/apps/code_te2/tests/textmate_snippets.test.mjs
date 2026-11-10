@@ -98,6 +98,22 @@ test('real shared grammar preserves multiline state and reuses closure across sn
   assert.equal(await runtime.tokenizeSnippet({text:'x'.repeat(65537),language:'probe'}),null);
 });
 
+test('snippet provider leases restore the surviving editor and clear on last release', async () => {
+  const api = await fixture(), win = new Window();
+  const target = win.document.createElement('div'); target.textContent = 'code'; win.document.body.append(target);
+  const calls = [];
+  const first = api.acquireSnippetSyntaxProvider(async () => { calls.push('first'); return [{start:0,end:4,color:'#123456',fontStyle:0}]; });
+  api.highlightTextmateElement(target, {language:'probe'}); await tick();
+  assert.equal(target.querySelector('.te-textmate-token').style.color, '#123456');
+  const second = api.acquireSnippetSyntaxProvider(async () => { calls.push('second'); return [{start:0,end:4,color:'#abcdef',fontStyle:0}]; });
+  await tick(); assert.equal(target.querySelector('.te-textmate-token').style.color, '#abcdef');
+  second(); second(); await tick();
+  assert.equal(target.querySelector('.te-textmate-token').style.color, '#123456');
+  first(); await tick(); const before = calls.length;
+  api.refreshSnippetSyntax(); await tick(); assert.equal(calls.length, before);
+  assert.equal(target.textContent, 'code'); win.close();
+});
+
 test('no Highlight.js imports remain in production snippet rendering', async () => {
   const source = await fs.readFile(new URL('../src/explorer/search/render-styling.ts',import.meta.url),'utf8');
   assert.doesNotMatch(source,/hljs|highlightjs|HIGHLIGHT_LANGUAGE_FACTORIES/);
