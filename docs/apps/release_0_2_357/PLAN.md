@@ -108,6 +108,9 @@ host. Retain iframe isolation where appropriate for historical/extension content
 and preserve Electron native overlay/reparent/detach capabilities. Historical
 diffs stay read-only immutable content. Escalate any required isolation/design
 change rather than quietly dropping the outer-iframe removal requirement.
+Controlled instance disposal is implemented, including abort fences during
+asset/import boot; realm reservation and the working iframe remain until the
+outer-window identity ownership is ready.
 
 - One shared File menu on desktop **and mobile** targets the last-focused editor area
   (capture/execution routing implemented; live acceptance pending). Existing

@@ -42,6 +42,42 @@ test('partial initialization failure is retained, not silently retried', async (
   assert.equal(owner.mount(root, async () => { assert.fail('unsafe retry'); }), failed);
 });
 
+test('explicit disposal cancels pending boot immediately and fences late continuation', async () => {
+  const owner = new EditorBootOwner(), root = {};
+  let resume, lateMounts = 0;
+  const waiting = new Promise(resolve => { resume = resolve; });
+  const ready = owner.mount(root, async signal => {
+    await waiting;
+    signal.throwIfAborted();
+    lateMounts++;
+  });
+  await Promise.resolve();
+  assert.equal(owner.dispose({}), false);
+  assert.equal(owner.dispose(root), true);
+  await assert.rejects(ready, /disposed/);
+  resume(); await waiting; await Promise.resolve();
+  assert.equal(lateMounts, 0);
+  assert.equal(owner.isDisposed(root), true);
+  await assert.rejects(owner.mount(root, async () => {}), /reload before remounting/);
+  await assert.rejects(owner.mount({}, async () => {}), /separate realms/);
+});
+
+test('explicit disposal after ready releases instance once without affecting another realm', async () => {
+  const owner = new EditorBootOwner(), other = new EditorBootOwner(), root = {};
+  let disposals = 0, otherDisposals = 0;
+  await owner.mount(root, async signal => { signal.addEventListener('abort', () => disposals++, { once: true }); });
+  await other.mount({}, async signal => { signal.addEventListener('abort', () => otherDisposals++); });
+  owner.dispose(root); owner.dispose(root);
+  assert.equal(disposals, 1); assert.equal(otherDisposals, 0);
+});
+
+test('disposal before boot microtask prevents initialization entirely', async () => {
+  const owner = new EditorBootOwner(), root = {};
+  const ready = owner.mount(root, async () => { assert.fail('disposed boot must not initialize'); });
+  owner.dispose(root);
+  await assert.rejects(ready, /disposed/);
+});
+
 test('keyboard runtime releases handlers and cannot rebind after disposal', async () => {
   const win = new Window();
   const saved = new Map(['window', 'document', 'CustomEvent'].map(key => [key, globalThis[key]]));
@@ -129,7 +165,8 @@ test('working boot is explicit, not an import side effect or shared snapshot mai
   const runtime = await readFile('monaco_editor/m_editor_app.ts', 'utf8');
   const host = await readFile('monaco_editor/inline_host.ts', 'utf8');
   assert.match(runtime, /export function startWorkingEditorRuntime\(options:/);
-  assert.match(host, /await startWorkingEditorRuntime\(/);
+  assert.match(host, /const runtime = startWorkingEditorRuntime\(/);
+  assert.match(host, /await runtime.ready/);
   for (const source of [runtime, host]) {
     assert.doesNotMatch(source, /__te2InlineMonaco(?:BootSnapshot|BuildSidebarMentionPayload|RuntimeBoot)/);
   }

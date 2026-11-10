@@ -384,6 +384,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
 }
 
 interface WorkingEditorBootOptions {
+  signal?: AbortSignal;
   mount: WorkingEditorMount;
   editorRole?: MobileEditorRole;
   bootSnapshot?: unknown;
@@ -392,7 +393,13 @@ interface WorkingEditorBootOptions {
   ) => Record<string, unknown>;
 }
 
-export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Promise<void> {
+export interface WorkingEditorRuntime {
+  readonly ready: Promise<void>;
+  dispose(): void;
+}
+
+export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): WorkingEditorRuntime {
+  options.signal?.throwIfAborted();
   const runtimeSocketListeners = createEditorSocketListenerOwner();
   const lifetime = createEditorRuntimeLifetime({
     setTimeoutFn: (callback, delay) => window.setTimeout(callback, delay),
@@ -1258,6 +1265,9 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   const onPageHide = (): void => lifetime.dispose();
   window.addEventListener('pagehide', onPageHide, { once: true });
   lifetime.addCleanup(() => window.removeEventListener('pagehide', onPageHide));
+  const onAbort = (): void => lifetime.dispose();
+  options.signal?.addEventListener('abort', onAbort, { once: true });
+  lifetime.addCleanup(() => options.signal?.removeEventListener('abort', onAbort));
   let workbenchLanguageCatalogRuntime: ReturnType<
     typeof createEditorWorkbenchLanguageCatalogRuntime
   > | null = null;
@@ -2940,5 +2950,5 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   updateDebug("boot=init");
   bcInit();
   void bootMonaco().catch((error: unknown) => rejectInlineRuntimeBoot?.(error));
-  return ready;
+  return { ready, dispose: () => lifetime.dispose() };
 }

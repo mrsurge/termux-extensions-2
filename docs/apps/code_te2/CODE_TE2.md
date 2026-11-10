@@ -4194,6 +4194,11 @@ generation and foreground path at execution; they never fall back to another
 renderer after a dialog. Close retains the open-state revision fence. Save As
 validates the source snapshot separately from its destination. New retains its
 primary-host reset behavior pending an explicit secondary untitled contract.
+`startWorkingEditorRuntime` returns an instance handle (`ready`, `dispose`).
+`disposeInlineEditorHost` aborts pending asset/import boot and disposes an active
+instance before clearing its DOM, without closing backend documents or removing
+shared assets. A disposed/failed boot retains the realm reservation; remount and
+multiple working mounts remain blocked pending outer-window ownership cutover.
 The secondary tab-bar and same-DOM container/focus
 cutover remain separate work; the current reduced renderer still uses its
 existing lifecycle below.

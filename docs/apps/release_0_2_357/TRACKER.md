@@ -348,9 +348,18 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   frontend/WBA no-Any checks/typechecks and asset build pass. The broader socket
   suite retains only its four known TextMate fixture failures. No commit, restart,
   native/WBA-server build or Android publication performed.
-- [ ] Remaining activation work: finish host/outer-window identity handoff and expose controlled instance
-  unmount before lifting the single-mount guard/removing the working iframe.
+- [ ] Remaining activation work: finish host/outer-window identity handoff
+  before lifting the single-mount guard/removing the working iframe.
   This slice does not claim the original mobile extra-key bug is fixed.
+- [x] Controlled working-editor disposal API: runtime returns `ready` plus an
+  idempotent `dispose`; inline host exposes presentation-only disposal. Abort
+  during asset/import waits rejects boot immediately and fences late mounting;
+  an active runtime uses the same ordered cleanup as pagehide. Disposed boot
+  cannot redraw an error over a removed host. The realm reservation remains:
+  neither second same-realm mounting nor remount is enabled yet. Backend
+  membership and shared assets are untouched. 31 focused lifecycle/transport
+  tests pass; frontend/WBA no-Any checks and build pass. No runtime restart or
+  Android asset publication. This follow-up remains uncommitted.
 - [x] File-menu target-capture foundation: backend focus selection is scoped to
   trusted same-main-page renderer associations and live connections. Blur retains
   focus through a dialog; disconnect falls back without evicting a live duplicate

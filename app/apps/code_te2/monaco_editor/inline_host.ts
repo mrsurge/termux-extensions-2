@@ -354,20 +354,31 @@ export async function mountInlineEditorHost(
   if (!(editorFrame instanceof HTMLElement)) {
     throw new Error('Inline Monaco host requires an HTMLElement mount point.');
   }
-  await workingEditorBoot.mount(editorFrame, async () => {
+  await workingEditorBoot.mount(editorFrame, async signal => {
     window.__te2InlineMonacoApiBase = INLINE_EDITOR_API_BASE;
     markNativeRenderer(editorFrame);
     editorFrame.setAttribute('data-te2-working-editor-host', '');
     editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
     await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
+    signal.throwIfAborted();
     const { startWorkingEditorRuntime } = await import('./m_editor_app.ts');
-    await startWorkingEditorRuntime({
+    signal.throwIfAborted();
+    const runtime = startWorkingEditorRuntime({
+      signal,
       editorRole: options.editorRole ?? 'primary',
       mount: resolveWorkingEditorMount(editorFrame),
       bootSnapshot: options.bootSnapshot,
       buildSidebarMentionPayload: options.buildSidebarMentionPayload,
     });
+    await runtime.ready;
   });
+}
+
+/** Presentation teardown only; backend membership and shared assets survive. */
+export function disposeInlineEditorHost(editorFrame: HTMLElement): void {
+  if (!workingEditorBoot.dispose(editorFrame)) return;
+  editorFrame.replaceChildren();
+  editorFrame.removeAttribute('data-te2-working-editor-host');
 }
 
 export function bootInlineEditorHost(
@@ -375,6 +386,7 @@ export function bootInlineEditorHost(
   options: InlineEditorBootOptions = {},
 ): Promise<void> {
   const bootPromise = mountInlineEditorHost(editorFrame, options).catch((error: unknown) => {
+    if (workingEditorBoot.isDisposed(editorFrame)) throw error;
     console.error('[inline_monaco] boot failed', error);
     renderInlineEditorError(editorFrame, error);
     throw error;
