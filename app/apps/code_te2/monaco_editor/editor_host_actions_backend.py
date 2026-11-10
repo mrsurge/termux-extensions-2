@@ -31,6 +31,8 @@ async def handle_editor_host_action(
         )
         return {"ok": True}
     if method == EDITOR_RPC_METHOD_FOCUS:
+        from ..host.editor_menu_target import record_editor_menu_focus
+        record_editor_menu_focus(source_client)
         await emit_ui_ipc_rpc_notification(
             UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
             params,

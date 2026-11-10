@@ -158,7 +158,8 @@ test('editor tab chords are physical-key and focus scoped; preference requests a
     let focused = true, focusCalls = 0, actions = 0;
     const updates = [], cycles = [];
     const editor = { focus() { focusCalls++; }, hasTextFocus: () => focused, addAction() { actions++; } };
-    const runtime = installEditorKeyboardRuntime({ getEditor: () => editor, getPrefs: () => ({ editor: { relativeLineNumbers: false } }), updatePreference: async (...args) => updates.push(args) });
+    const root = document.createElement('div'); root.setAttribute('data-te2-working-editor-host', ''); document.body.append(root);
+    const runtime = installEditorKeyboardRuntime({ root, getEditor: () => editor, getPrefs: () => ({ editor: { relativeLineNumbers: false } }), updatePreference: async (...args) => updates.push(args) });
     runtime.bindEditor(); runtime.bindEditor(); assert.equal(actions, 1);
     window.addEventListener('code-te2:cycle-file-tab', event => cycles.push(event.detail));
     const key = (code, extras = {}) => document.dispatchEvent(new KeyboardEvent('keydown', { code, key: code === 'Comma' ? '<' : '>', ctrlKey: true, shiftKey: true, cancelable: true, ...extras }));
@@ -169,6 +170,93 @@ test('editor tab chords are physical-key and focus scoped; preference requests a
     await Promise.resolve(); assert.deepEqual(updates, [['relativeLineNumbers', true]]);
     window.dispatchEvent(new Event('code-te2:focus-editor')); assert.equal(focusCalls, 1);
     window.dispatchEvent(new Event('pagehide')); focused = true; key('Comma'); assert.equal(cycles.length, 2);
+  } finally { win.happyDOM.abort(); }
+});
+
+test('two working mounts route window actions once, retain toolbar focus ownership and release actions', async () => {
+  const win = dom();
+  try {
+    const { installEditorKeyboardRuntime } = await load('monaco_editor/editor_keyboard_runtime.ts');
+    document.body.innerHTML = '<div data-te2-working-editor-host id="a"><input></div><div data-te2-working-editor-host id="b"><input></div><input id="toolbar">';
+    const updates = [], focusCalls = [], actionHandles = [];
+    const create = (id, preference) => {
+      const root = document.getElementById(id), input = root.querySelector('input');
+      const editor = { focus() { focusCalls.push(id); input.focus(); }, hasTextFocus: () => document.activeElement === input,
+        addAction(action) { const handle = { action, disposals: 0, dispose() { this.disposals++; } }; actionHandles.push(handle); return handle; } };
+      const runtime = installEditorKeyboardRuntime({ root, getEditor: () => editor,
+        getPrefs: () => ({ editor: { relativeLineNumbers: preference } }),
+        updatePreference: async (...args) => { updates.push([id, ...args]); } });
+      runtime.bindEditor(); return { runtime, root, input };
+    };
+    const a = create('a', false), b = create('b', true);
+    a.input.focus(); b.input.focus();
+    document.getElementById('toolbar').focus();
+    const detail = {};
+    window.dispatchEvent(new CustomEvent('code-te2:relative-numbers-query', { detail }));
+    assert.equal(detail.enabled, true);
+    window.dispatchEvent(new CustomEvent('code-te2:palette-action', { detail: 'relative-numbers' }));
+    await Promise.resolve(); assert.deepEqual(updates, [['b', 'relativeLineNumbers', false]]);
+    window.dispatchEvent(new Event('code-te2:focus-editor'));
+    assert.deepEqual(focusCalls, ['b']);
+    const cycles = [];
+    window.addEventListener('code-te2:cycle-file-tab', event => cycles.push(event.detail));
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Period', ctrlKey: true, shiftKey: true, cancelable: true }));
+    assert.deepEqual(cycles, [1]);
+    b.root.hidden = true;
+    window.dispatchEvent(new Event('code-te2:focus-editor')); assert.deepEqual(focusCalls, ['b', 'a']);
+    b.root.hidden = false;
+    b.root.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    document.getElementById('toolbar').focus();
+    b.runtime.dispose(); b.runtime.dispose();
+    window.dispatchEvent(new Event('code-te2:focus-editor')); assert.deepEqual(focusCalls, ['b', 'a', 'a']);
+    a.runtime.dispose();
+    assert.ok(actionHandles.every(handle => handle.disposals === 1));
+    await actionHandles[1].action.run(); assert.equal(updates.length, 1);
+  } finally { win.happyDOM.abort(); }
+});
+
+test('nested mounts and separate windows keep their own input ownership', async () => {
+  const win = dom(), other = new Window();
+  try {
+    const { installEditorKeyboardRuntime } = await load('monaco_editor/editor_keyboard_runtime.ts');
+    document.body.innerHTML = '<div data-te2-working-editor-host id="outer"><input><div data-te2-working-editor-host id="inner"><input></div></div>';
+    const calls = [], runtimes = [];
+    for (const id of ['outer', 'inner']) {
+      const root = document.getElementById(id);
+      runtimes.push(installEditorKeyboardRuntime({ root,
+        getEditor: () => ({ focus() { calls.push(id); }, hasTextFocus: () => false }),
+        getPrefs: () => ({}), updatePreference: async () => {} }));
+    }
+    document.getElementById('inner').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    window.dispatchEvent(new Event('code-te2:focus-editor'));
+    assert.deepEqual(calls, ['inner']);
+    other.document.body.innerHTML = '<div data-te2-working-editor-host></div>';
+    runtimes.push(installEditorKeyboardRuntime({ root: other.document.querySelector('div'),
+      getEditor: () => ({ focus() { calls.push('other'); }, hasTextFocus: () => false }),
+      getPrefs: () => ({}), updatePreference: async () => {} }));
+    other.dispatchEvent(new other.Event('code-te2:focus-editor'));
+    assert.deepEqual(calls, ['inner', 'other']);
+    window.dispatchEvent(new Event('code-te2:focus-editor')); assert.deepEqual(calls, ['inner', 'other', 'inner']);
+    for (const runtime of runtimes) runtime.dispose();
+  } finally { win.happyDOM.abort(); other.happyDOM.abort(); }
+});
+
+test('keyboard binding follows the current modified editor and disposes every action once', async () => {
+  const win = dom();
+  try {
+    const { installEditorKeyboardRuntime } = await load('monaco_editor/editor_keyboard_runtime.ts');
+    const root = document.createElement('div'); root.setAttribute('data-te2-working-editor-host', ''); document.body.append(root);
+    const calls = [], handles = [];
+    const make = name => ({ focus() { calls.push(name); }, hasTextFocus: () => true,
+      addAction() { const handle = { count: 0, dispose() { this.count++; } }; handles.push(handle); return handle; } });
+    let current = make('plain');
+    const runtime = installEditorKeyboardRuntime({ root, getEditor: () => current, getPrefs: () => ({}), updatePreference: async () => {} });
+    runtime.bindEditor(); current = make('modified'); runtime.bindEditor(); runtime.bindEditor();
+    window.dispatchEvent(new Event('code-te2:focus-editor')); assert.deepEqual(calls, ['modified']);
+    assert.equal(handles.length, 2);
+    runtime.dispose(); runtime.dispose(); assert.ok(handles.every(handle => handle.count === 1));
+    const source = await readFile('monaco_editor/m_editor_app.ts', 'utf8');
+    assert.match(source, /root: options\.mount\.root,\s*getEditor: \(\) => diffEditor\?\.getModifiedEditor\?\.\(\) \?\? editor/);
   } finally { win.happyDOM.abort(); }
 });
 

@@ -137,6 +137,9 @@ import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
 import { createEditorMentionSender } from "./editor_mention_request_runtime.ts";
 import { installEditorKeyboardRuntime } from './editor_keyboard_runtime.ts';
+import { createEditorRuntimeLifetime } from './editor_runtime_lifetime.ts';
+import { createEditorSocketListenerOwner } from './editor_socket_listener_owner.ts';
+import type { MobileEditorRole } from '../src/mobile-input/editor-special-key-bridge.ts';
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
 import { createEditorExtensionStateRuntime, buildExtensionEditorSelection } from "./editor_extension_state_runtime.ts";
 import { createEditorHoverCommandRuntime } from './editor_hover_command_runtime.ts';
@@ -192,6 +195,7 @@ interface MonacoRuntimeModelLike {
 }
 
 interface MonacoRuntimeEditorLike {
+  dispose?(): void;
   hasTextFocus?(): boolean;
   layout?(): void;
   addCommand?(keybinding: number, handler: () => void): void;
@@ -237,6 +241,7 @@ interface MonacoRuntimeEditorLike {
 }
 
 interface MonacoRuntimeDiffEditorLike {
+  dispose?(): void;
   layout?(): void;
   setModel?(model: Record<string, unknown> | null): void;
   getOriginalEditor?(): MonacoRuntimeEditorLike | null;
@@ -380,6 +385,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
 
 interface WorkingEditorBootOptions {
   mount: WorkingEditorMount;
+  editorRole?: MobileEditorRole;
   bootSnapshot?: unknown;
   buildSidebarMentionPayload?: (
     payload: Record<string, unknown>,
@@ -387,6 +393,12 @@ interface WorkingEditorBootOptions {
 }
 
 export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Promise<void> {
+  const runtimeSocketListeners = createEditorSocketListenerOwner();
+  const lifetime = createEditorRuntimeLifetime({
+    setTimeoutFn: (callback, delay) => window.setTimeout(callback, delay),
+    clearTimeoutFn: timer => window.clearTimeout(timer),
+    onCleanupError: error => console.warn('[editor] instance cleanup failed', error),
+  });
   const documentLeaseOwner = {};
   let initialBootSnapshot = options.bootSnapshot || null;
   let resolveInlineRuntimeBoot: (() => void) | null = null;
@@ -394,7 +406,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   let inlineRuntimeReady = false;
   let initialProjectionPending = false;
   function resolveUsableInlineBoot(): void {
-    if (inlineRuntimeReady && !initialProjectionPending) resolveInlineRuntimeBoot?.();
+    if (!lifetime.isDisposed() && inlineRuntimeReady && !initialProjectionPending) resolveInlineRuntimeBoot?.();
   }
   const ready = new Promise<void>((resolve, reject) => {
     resolveInlineRuntimeBoot = resolve;
@@ -430,7 +442,8 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   let currentPath: string | null = null;
   let cachedPrefs: CachedPrefsLike | null = null;
   const keyboardRuntime = installEditorKeyboardRuntime({
-    getEditor: () => editor,
+    root: options.mount.root,
+    getEditor: () => diffEditor?.getModifiedEditor?.() ?? editor,
     getPrefs: () => cachedPrefs,
     updatePreference: (key, value) => editorRpcCall('editor.preference.update', { key, value }),
   });
@@ -639,6 +652,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   } as Parameters<typeof createEditorBreadcrumbRuntime>[0]);
 
   var editorHostActionRuntime = createEditorRpcHostActionRuntime({
+    getMobileInputBinding: () => ({ host: options.mount.root, role: options.editorRole }),
     getWindow: function () {
       return window;
     },
@@ -712,11 +726,11 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
     callback: () => void,
     delayMs: number,
   ): ReturnType<typeof setTimeout> {
-    return window.setTimeout(callback, delayMs);
+    return lifetime.setTimeout(callback, delayMs);
   }
 
   function _clearTimeoutBound(timer: ReturnType<typeof setTimeout>): void {
-    window.clearTimeout(timer);
+    lifetime.clearTimeout(timer);
   }
   var apiBase = deriveApiBase(window.location);
   var editorRpcTransport = createEditorRpcTransport({
@@ -1219,24 +1233,31 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       codeInspectorRuntime?.handleCommand(params);
     },
   );
-  window.addEventListener(
-    "pagehide",
-    function () {
-      codeInspectorRuntime?.dispose();
-      extensionEditorMenuRuntime?.dispose();
-      extensionEditorStateRuntime?.dispose();
-      hoverCommands?.dispose();
-      quickFixes?.dispose();
-      editorHostActionRuntime.dispose();
-      keyboardRuntime.dispose();
-      uiEditorRuntime.dispose();
-      languageBridgeProviders.dispose();
-      mirrorRuntime.flushMirrorDebounce();
-      mirrorRuntime.disposeMirrorPublisher();
-      releaseFileModelOwner(monaco, documentLeaseOwner);
-    },
-    { once: true },
-  );
+  lifetime.addCleanup(() => rejectInlineRuntimeBoot?.(new Error('Working editor disposed')));
+  lifetime.addCleanup(() => codeInspectorRuntime?.dispose());
+  lifetime.addCleanup(() => extensionEditorMenuRuntime?.dispose());
+  lifetime.addCleanup(() => extensionEditorStateRuntime?.dispose());
+  lifetime.addCleanup(() => hoverCommands?.dispose());
+  lifetime.addCleanup(() => quickFixes?.dispose());
+  lifetime.addCleanup(() => editorHostActionRuntime.dispose());
+  lifetime.addCleanup(() => runtimeSocketListeners.dispose());
+  lifetime.addCleanup(() => keyboardRuntime.dispose());
+  lifetime.addCleanup(() => uiEditorRuntime.dispose());
+  lifetime.addCleanup(() => languageBridgeProviders?.dispose());
+  lifetime.addCleanup(() => mirrorRuntime.flushMirrorDebounce());
+  lifetime.addCleanup(() => mirrorRuntime.disposeMirrorPublisher());
+  lifetime.addCleanup(() => _setScrollPublisherInstalled(false));
+  lifetime.addCleanup(() => diffEditor?.setModel?.(null));
+  lifetime.addCleanup(() => editor?.setModel?.(null));
+  lifetime.addCleanup(() => diffEditor?.dispose?.());
+  lifetime.addCleanup(() => editor?.dispose?.());
+  lifetime.addCleanup(() => _clearGitBaselineModelsRuntime());
+  lifetime.addCleanup(() => releaseFileModelOwner(monaco, documentLeaseOwner));
+  lifetime.addCleanup(() => editorRpcTransport.dispose());
+  lifetime.addCleanup(() => editorWbaRpcTransport.dispose());
+  const onPageHide = (): void => lifetime.dispose();
+  window.addEventListener('pagehide', onPageHide, { once: true });
+  lifetime.addCleanup(() => window.removeEventListener('pagehide', onPageHide));
   let workbenchLanguageCatalogRuntime: ReturnType<
     typeof createEditorWorkbenchLanguageCatalogRuntime
   > | null = null;
@@ -1721,6 +1742,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   }
 
   var editorLifecycleDeps = buildEditorLifecycleDeps({
+    isDisposed: lifetime.isDisposed,
     getMonaco: function () {
       return window.monaco || null;
     },
@@ -2113,7 +2135,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       _reapplyDraftZonesScheduled = !!value;
     },
     schedule: function (callback: () => void, delayMs: number) {
-      return setTimeout(callback, delayMs);
+      return _setTimeoutBound(callback, delayMs);
     },
   }) as Parameters<typeof applyDraftZonesRuntime>[0];
 
@@ -2363,7 +2385,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       }
       editorRpcTransport.attachSocket(editorRpcSocket);
       if (wbaRpcSocket) editorWbaRpcTransport.attachSocket(wbaRpcSocket);
-      registerEditorSocketConnectionHandlers(
+      const connectionHandlers = registerEditorSocketConnectionHandlers(
         editorRpcSocket as Parameters<
           typeof registerEditorSocketConnectionHandlers
         >[0],
@@ -2539,6 +2561,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
           applyGitBaselines: applyGitBaselines,
         }) as Parameters<typeof registerEditorSocketConnectionHandlers>[1],
       );
+      lifetime.addCleanup(connectionHandlers.dispose);
 
       registerEditorSaveMirrorSocketHandlers(
         editorRpcSocket as Parameters<
@@ -2627,7 +2650,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
           },
           rpcCall: editorRpcCall,
           schedule: function (callback, delayMs) {
-            return window.setTimeout(callback, delayMs);
+            return _setTimeoutBound(callback, delayMs);
           },
           reapplyCodeInspectorHighlights: function () {
             codeInspectorRuntime?.reapplyHighlights();
@@ -2712,14 +2735,14 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
       });
 
       if (wbaRpcSocket && typeof wbaRpcSocket.on === "function") {
-        wbaRpcSocket.on("connect", () => {
+        runtimeSocketListeners.listen(wbaRpcSocket, "connect", () => {
           refreshExtensionContributions();
           console.log("[wba] socket connected");
           notifyExtensionActivityBridgeReady();
           void extensionEditorMenuRuntime?.refresh("wba_connect");
           handleWbaSocketReadyForEditor("wba_socket_connect");
         });
-        wbaRpcSocket.on("disconnect", () => {
+        runtimeSocketListeners.listen(wbaRpcSocket, "disconnect", () => {
           console.warn("[wba] socket disconnected");
           wbaConnectionRevision += 1;
           hoverCommands?.reset();
@@ -2778,8 +2801,9 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
         return editorRpcNotify(method, payload);
       },
       shouldSendImmediately: shouldSendScrollImmediately,
+      clearScheduledSend: _clearTimeoutBound,
       scheduleSend: function (callback: () => void, delayMs: number) {
-        return scheduleScrollSend(setTimeout, callback, delayMs);
+        return scheduleScrollSend(_setTimeoutBound, callback, delayMs);
       },
     } as Parameters<typeof installScrollPublisherRuntime>[0]);
   }
@@ -2839,6 +2863,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Pr
   async function bootMonaco() {
     await bootMonacoRuntime(
       buildBootMonacoRuntimeDeps({
+        isDisposed: lifetime.isDisposed,
         getWindow: function () {
           return window;
         },

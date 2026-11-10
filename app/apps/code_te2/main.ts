@@ -26,6 +26,7 @@ import { createFontScaleController } from './main_page/frontend/ui/font-scale.ts
 import { createSearchPanelController } from './main_page/frontend/ui/search-panel.ts';
 import { createMenuCoreController } from './main_page/frontend/ui/menu-core.ts';
 import { installBasicMenuActions } from './main_page/frontend/ui/menu-actions-basic.ts';
+import { createEditorMenuActions } from './main_page/frontend/ui/editor-menu-actions.ts';
 import { createRunProfilesModalController } from './main_page/frontend/ui/run-profiles-modal.ts';
 import { installSimplePreferenceMenuActions } from './main_page/frontend/ui/menu-actions-preferences.ts';
 import { installAdvancedMenuActions } from './main_page/frontend/ui/menu-actions-advanced.ts';
@@ -1459,6 +1460,20 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   installBasicMenuActions({
+    performEditorAction: createEditorMenuActions({
+      request: (method, params) => uiIpcConnections.requestUiIpc(method, params),
+      pickFile: () => pickFile(),
+      pickSavePath: async path => {
+        const choice = await window.teFilePicker?.saveFile({ title: 'Save As',
+          startPath: toAbsolute(parentDir(path), null, HOME_DIR), filename: basename(path), selectLabel: 'Save' });
+        if (!choice?.path) return null;
+        if (choice.existed && !(await window.teUI.dialog.confirm('File exists. Overwrite?'))) return null;
+        return toAbsolute(choice.path, null, HOME_DIR);
+      },
+      promptLine: () => window.teUI.dialog.prompt('Go to line:'),
+      toast: message => host.toast(message),
+      saveUntitled: () => saveFlowController.saveAsDialog(),
+    }),
     bindMenuToggle,
     els: {
       miNew,

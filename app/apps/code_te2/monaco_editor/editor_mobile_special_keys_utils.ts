@@ -75,7 +75,13 @@ type MobileSpecialKeysWindow = Window & {
   ctrl?: boolean;
 };
 
-const activeModifierStates = new WeakMap<Window, ModifierState>();
+const modifierStates = new WeakMap<MobileSpecialKeyEditor, ModifierState>();
+const windowBindings = new WeakMap<Window, Map<MobileEditorRole, MobileSpecialKeyEditor>>();
+
+export interface MobileEditorInputBinding {
+  role?: MobileEditorRole;
+  host?: HTMLElement;
+}
 
 export function isMobileUserAgent(navigatorLike: MobileNavigatorLike): boolean {
   if (navigatorLike.userAgentData?.mobile === true) return true;
@@ -108,7 +114,7 @@ export function dispatchMobileEditorKey(
   }
   const quickInput = focusedQuickInput(win.document);
   if (quickInput) {
-    const state = activeModifierStates.get(win);
+    const state = modifierStates.get(editor);
     dispatchQuickInputKey(quickInput, key, options.modifiers ?? {
       ctrl: Boolean(state?.ctrl), alt: Boolean(state?.alt), shift: Boolean(state?.shift || state?.shiftArmed),
     });
@@ -124,7 +130,7 @@ export function dispatchMobileEditorKey(
   }
   if (!input) return false;
 
-  const modifierState = activeModifierStates.get(win);
+  const modifierState = modifierStates.get(editor);
   const useStickyModifiers = options.useStickyModifiers !== false;
   const modifiers = options.modifiers ?? {
     ctrl: useStickyModifiers && Boolean(modifierState?.ctrl),
@@ -150,7 +156,7 @@ export function openMobileTouchSelectionMenu(
   editorDom.dispatchEvent(new CustomEvent(OPEN_TOUCH_MENU_EVENT, {
     detail: { touchMode: true },
   }));
-  activeModifierStates.get(win)?.consumeOneShot();
+  modifierStates.get(editor)?.consumeOneShot();
   return true;
 }
 
@@ -240,20 +246,30 @@ export function bindMobileEditorSpecialKeys(
   editor: MobileSpecialKeyEditor,
   win: Window = window,
   onSave: (() => void) | null = null,
+  binding: MobileEditorInputBinding = {},
 ): { dispose(): void } | null {
   const editorDom = editor.getDomNode?.();
   if (!editorDom) return null;
   if (!isMobileUserAgent(win.navigator)) {
     return { dispose: bindQuickInputKeys(editor, editorDom.ownerDocument, () => false, () => {}) };
   }
-  const host = editorDom.closest<HTMLElement>('#editor-frame');
+  const host = binding.host ?? editorDom.closest<HTMLElement>('[data-te2-working-editor-host]')
+    ?? editorDom.closest<HTMLElement>('#editor-frame');
   if (!host) return null;
-  const role = mobileEditorRole(win);
+  if (!host.contains(editorDom)) throw new Error('Mobile editor input host does not own this editor.');
+  const role = binding.role ?? mobileEditorRole(win);
   const appRoot = host.closest<HTMLElement>('.fe-root');
   if (role === 'primary' && !appRoot) return null;
   const editorContainer = role === 'secondary'
     ? host.closest<HTMLElement>('.te2-secondary-editor-body') ?? host
     : host.closest<HTMLElement>('.fe-editor-container') ?? host;
+
+  let bindings = windowBindings.get(win);
+  if (!bindings) { bindings = new Map(); windowBindings.set(win, bindings); }
+  const ownedBindings = bindings;
+  if (ownedBindings.has(role)) throw new Error(`Mobile editor ${role} already has an input binding.`);
+  ownedBindings.set(role, editor);
+  const sharedPrimary = (): boolean => role === 'secondary' && ownedBindings.has('primary');
 
   const doc = editorDom.ownerDocument;
   const trigger = createOverlayButton(doc, 'Ctrl', 'Toggle editor special keys');
@@ -350,8 +366,11 @@ export function bindMobileEditorSpecialKeys(
   };
   const setCtrlMode = (mode: CtrlMode, publish = true): void => {
     state.ctrlMode = mode;
-    ctrlWindow.__te2MobileCtrlLocked = mode === 'locked';
     syncCtrlButtons();
+    // A shared-page secondary mirrors the primary's modifier projection; it
+    // must not publish that projection back into the primary's global helper.
+    if (sharedPrimary()) return;
+    ctrlWindow.__te2MobileCtrlLocked = mode === 'locked';
     if (!publish) return;
     const active = mode !== 'off';
     ctrlWindow.__androidTerminalCtrlDesired = active;
@@ -409,7 +428,7 @@ export function bindMobileEditorSpecialKeys(
   syncCtrlButtons();
   setPressed(alt, false);
   selectButtons.forEach((button) => setPressed(button, false));
-  activeModifierStates.set(win, state);
+  modifierStates.set(editor, state);
   publishModifierSnapshot();
 
   const syncOverlayOwner = (): void => {
@@ -429,7 +448,7 @@ export function bindMobileEditorSpecialKeys(
     const detail = (
       event as CustomEvent<MobileEditorSpecialKeyRequestDetail>
     ).detail;
-    if (!detail || detail.role !== role) return;
+    if (!detail || detail.role !== role || currentMobileEditorOwner(win) !== role) return;
     const handled = dispatchMobileEditorKey(editor, detail.key, win, {
       useStickyModifiers: false,
       modifiers: detail.modifiers,
@@ -551,7 +570,7 @@ export function bindMobileEditorSpecialKeys(
       let currentHandled = false;
       if (target === 'terminal') {
         currentHandled = requestTerminalSpecialKey(win, key, modifiers);
-      } else if (target === 'secondary') {
+      } else if (target === 'secondary' && role === 'primary') {
         currentHandled = requestMobileEditorSpecialKey(
           win,
           target,
@@ -730,8 +749,11 @@ export function bindMobileEditorSpecialKeys(
   editorContainer.append(overlay);
   setPanelOpen(currentMobileEditorPanelState(win));
 
+  let disposed = false;
   return {
     dispose() {
+      if (disposed) return;
+      disposed = true;
       cleanups.forEach((cleanup) => cleanup());
       win.removeEventListener(
         TERMINAL_SPECIAL_KEY_FOCUS_EVENT,
@@ -755,13 +777,20 @@ export function bindMobileEditorSpecialKeys(
       win.removeEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
       editorDom.removeEventListener('focusin', onEditorFocus);
       editorDom.removeEventListener('pointerdown', onEditorFocus);
-      if (activeModifierStates.get(win) === state) {
-        state.setCtrlMode('off');
-        state.setAlt(false);
-        state.setShift(false);
-        activeModifierStates.delete(win);
+      if (modifierStates.get(editor) === state) {
+        if (!sharedPrimary()) {
+          state.setCtrlMode('off');
+          state.setAlt(false);
+          state.setShift(false);
+        }
+        modifierStates.delete(editor);
       }
-      appRoot?.classList.remove('te2-mobile-special-keys-open');
+      if (ownedBindings.get(role) === editor) ownedBindings.delete(role);
+      if (!ownedBindings.size) windowBindings.delete(win);
+      if (role === 'secondary' && currentMobileEditorOwner(win) === role) {
+        publishMobileEditorFocus(win, 'primary');
+      }
+      if (role === 'primary') appRoot?.classList.remove('te2-mobile-special-keys-open');
       const retainedSecondWindow = overlayLeft.querySelector<HTMLElement>(
         '.te2-mobile-second-window-trigger',
       );

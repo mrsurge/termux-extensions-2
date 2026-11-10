@@ -344,9 +344,8 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
   - Async replies retain producer affinity across focus changes, but are dropped
     on lease disposal, context/path/language/version changes or model disposal.
     Current failures propagate; obsolete failures are discarded. No RPC lane or
-    backend protocol changes. Completion/hint/color/semantic registration and
-    resolve/release behavior stay on their existing owners in this slice.
-    Hover command gateway ownership remains separate from hover request routing.
+    backend protocol changes. Retained-result and hover-command ownership is
+    described below; it uses the same live model/context routing primitive.
     Same-realm multi-editor boot is not enabled yet; two-owner behavior is covered
     by focused routing and real WBA-bridge-factory tests, not live iframe removal.
 - `monaco_editor/shared_model_providers.ts` / `editor_hover_command_runtime.ts`
@@ -362,8 +361,58 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
     inline show/free callbacks receive the producing runtime's original list.
     Disposal fences further resolve/show calls but keeps release available.
     Stale pending results release exactly once. Provider display/group/debounce
-    metadata is preserved. Unkeyed external providers retain their original path;
-    color and semantic-token ownership remain separate work.
+    metadata is preserved. Unkeyed completion/inlay/inline/color providers retain
+    their original registration path.
+  - Aggregated color providers share by explicit producer signature and selector;
+    colors and presentations route through matching live model contexts.
+    Full/range semantic registrations remain separate and share only identical
+    immutable legends. Owner change events are multiplexed; teardown detaches
+    only that owner's subscription and invalidates surviving consumers.
+    A changed legend replaces the registration. Full-token result IDs are local
+    ownership aliases: same-producer/URI delta requests recover the original ID,
+    while another producer receives no prior cache ID. Release and obsolete-reply
+    cleanup call the original producer exactly once (the existing WBA full-token
+    release callback remains a no-op; no new backend release protocol is added).
+    Remaining work is window/global lifecycle and active-area input/menu ownership,
+    followed by working-editor iframe removal and secondary tabs.
+- `monaco_editor/editor_input_owner.ts` / `editor_keyboard_runtime.ts`
+  - Window-level relative-number query/toggle, editor-focus requests and tab-cycle
+    chords select one live working mount. DOM/text focus wins; the last interacted
+    mount remains selected while toolbar/palette controls own DOM focus. Hidden,
+    disconnected and disposed mounts are excluded. Nested mounts cannot activate
+    an enclosing owner; separate windows have separate registries. No backend
+    opened-document state is changed by this presentation-only selection.
+  - Keyboard listeners and retained Monaco action handles are disposed per owner.
+    Current editor lookup includes the modified diff editor. This does not yet
+    route File menus, remove the boot guard/working iframe,
+    or implement complete runtime teardown.
+- `monaco_editor/editor_runtime_lifetime.ts`
+  - One lifetime owns ordered working-page cleanup and instance timers. Each
+    disposer is failure-isolated; cleanup can finish synchronous RPC send paths
+    before transports close, then all remaining timers are cancelled. Cancelled
+    or disposed timer callbacks cannot execute. Pagehide rejects unfinished boot,
+    tears down providers/input/layout/mirroring/scroll, detaches and disposes
+    editor widgets, releases baseline/canonical-model leases and closes local
+    transports. Shared Monaco services and backend documents are not destroyed.
+  - Boot checks disposal after Monaco/socket/theme/syntax/editor awaits and before
+    late catalog callbacks. Lifecycle helpers cannot create a widget or update
+    its preferences after a delayed fetch outlives teardown. Connection-handler
+    disposal removes raw hooks/subscriptions and invalidates pending replay
+    sequences; WBA raw hooks use the existing owned-listener helper. The current
+    boot guard remains: no public multi-mount/remount capability is introduced.
+- `monaco_editor/editor_mobile_special_keys_utils.ts`
+  - Working boot supplies explicit role/mount input binding through the existing
+    host-action runtime. The secondary shell declares its role rather than
+    requiring a query-string identity; URL inference remains for legacy callers.
+    Each editor owns its sticky modifier state and cleanup. One binding per role
+    per window is allowed, and the mount must contain the editor DOM.
+  - The primary retains the shared panel and global Ctrl helper. A same-page
+    secondary applies projected modifiers without republishing into that helper;
+    disposing it preserves primary state/panel styling and relinquishes focus.
+    Forwarded requests use the current role, repeated keys stay bound to the
+    captured target and terminal routing is preserved. Cross-frame secondary
+    modifier synchronization remains supported. Shared-document tests exercise
+    these mechanics, but the working-editor iframe/boot guard is still present.
 - `monaco_editor/working_document_resources.ts` / `editor_model_utils.ts`
   - Per-Monaco-namespace canonical-URI model leases retain a working model until
     its last presentation owner releases it. Repeated acquisition by one owner
@@ -384,8 +433,29 @@ GeckoView IME and Browser Text Input** and **Touch selection**.
   - No shared transport, backend state protocol or same-DOM editor activation is
     introduced here. Remaining provider/command ownership, outer identity and active-area routing must
     be resolved before removing working-editor iframe isolation.
+- `host/editor_menu_target.py`
+  - A per-main-page ephemeral focus selection uses trusted renderer associations
+    and live editor-client identities. Focus notifications update it; blur does
+    not erase it when a toolbar/dialog takes focus. Secondary-origin menus stay
+    local. Unavailable/unrelated renderers cannot redirect another main page;
+    unregistering an old socket cannot evict a still-connected identity.
+  - `ui.host.editorState.get` accepts optional `captureEditorTarget: true` to
+    return `editorTarget` (renderer/main-page/area, current path, project and
+    open-state revision/generation). Ordinary state reads are unchanged. This
+    snapshot is a future menu intent target, not authority to execute arbitrary
+    actions. Frontend capture/use and backend execution-time validation remain
+    pending; existing File-menu actions are not redirected by this foundation.
 - `app/apps/code_te2/monaco_editor/editor_rpc_transport.ts`
   - Editor-facing JSON-RPC transport over `/rpc/editor`
+  - This and `editor_wba_rpc_transport.ts` expose terminal idempotent `dispose()`.
+    It rejects pending requests and startup connection waiters, clears timers and
+    notification callbacks, detaches only owned socket/manager listeners, and
+    prevents sends, reattachment and queued/late delivery. Ordered editor decode
+    is aborted/reset. WBA calls recheck disposal after awaiting connection.
+    `editor_socket_listener_owner.ts` keeps exact listener identities and fences
+    callbacks already captured by an event emitter; no shared socket is disconnected.
+    Working page teardown runs this after provider/mirror/model cleanup. Other
+    runtime lifecycle owners still need explicit unmount wiring.
 - `app/apps/code_te2/monaco_editor/editor_wba_rpc_transport.ts`
   - Editor-facing JSON-RPC transport over `/wba`
 - `app/apps/code_te2/monaco_editor/editor_workbench_runtime.ts`
@@ -4117,7 +4187,14 @@ primary copies remain open. A secondary boot with assigned working files but no
 foreground and no active/pending content rehomes orphaned placements to primary
 and publishes its repaired foreground. It does not infer closure from disconnect,
 remove global documents, disturb valid secondary views or replace history.
-The secondary tab-bar and same-DOM container/menu/focus
+The shared File menu captures the backend-selected focused renderer before
+opening a picker or prompt. Open/save/close, edit, find and line-jump intents
+revalidate its trusted same-main-page association, live connection, project
+generation and foreground path at execution; they never fall back to another
+renderer after a dialog. Close retains the open-state revision fence. Save As
+validates the source snapshot separately from its destination. New retains its
+primary-host reset behavior pending an explicit secondary untitled contract.
+The secondary tab-bar and same-DOM container/focus
 cutover remain separate work; the current reduced renderer still uses its
 existing lifecycle below.
 

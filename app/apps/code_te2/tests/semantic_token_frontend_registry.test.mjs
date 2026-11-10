@@ -68,6 +68,7 @@ function createDeps(languageBridge, registrations, invalidations, overrides = {}
   return {
     languageBridge,
     getDisableSemanticTokens: () => false,
+    getCurrentLanguageContext: () => ({ uri: 'file:///workspace/a.py', path: '/workspace/a.py', languageId: 'python', version: 1 }),
     getMonaco: () => ({
       languages: {
         registerDocumentSemanticTokensProvider(languageId, provider) {
@@ -137,6 +138,7 @@ test("semantic token registration deduplicates selectors and prefers full maps",
   );
   await settleInvalidations();
   assert.deepEqual(invalidations, ["rust"]);
+  assert.deepEqual(registrations, [["full", "rust"], ["full", "rust"]]);
 });
 
 test("range-only languages retain one stable range provider", async () => {

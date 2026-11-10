@@ -130,6 +130,128 @@ type Implementation = Parameters<NonNullable<MonacoLanguagesLike['registerImplem
 type Completion = Parameters<NonNullable<MonacoLanguagesLike['registerCompletionItemProvider']>>[1];
 type Inlay = Parameters<NonNullable<MonacoLanguagesLike['registerInlayHintsProvider']>>[1];
 type Inline = Parameters<NonNullable<MonacoLanguagesLike['registerInlineCompletionsProvider']>>[1];
+type Color = Parameters<NonNullable<MonacoLanguagesLike['registerColorProvider']>>[1];
+type FullSemantic = Parameters<NonNullable<MonacoLanguagesLike['registerDocumentSemanticTokensProvider']>>[1];
+type RangeSemantic = Parameters<NonNullable<MonacoLanguagesLike['registerDocumentRangeSemanticTokensProvider']>>[1];
+type Legend = ReturnType<FullSemantic['getLegend']>;
+
+interface SemanticEventsGroup {
+  legend: Legend;
+  listeners: Set<() => void>;
+  owners: number;
+}
+
+/** Immutable legend groups prevent token indices from being decoded with another legend. */
+class SemanticEvents {
+  private readonly groups = new Map<string, SemanticEventsGroup>();
+
+  acquire(selector: unknown, provider: Pick<FullSemantic, 'getLegend' | 'onDidChange'>) {
+    const raw = provider.getLegend();
+    const legend = { tokenTypes: [...raw.tokenTypes], tokenModifiers: [...raw.tokenModifiers] };
+    const signature = JSON.stringify([legend.tokenTypes, legend.tokenModifiers]);
+    const key = JSON.stringify([selectorKey(selector), signature]);
+    let group = this.groups.get(key);
+    if (!group) {
+      group = { legend, listeners: new Set(), owners: 0 };
+      this.groups.set(key, group);
+    }
+    const owned = group;
+    owned.owners++;
+    let disposed = false;
+    const subscription = provider.onDidChange?.(() => {
+      if (!disposed) for (const listener of [...owned.listeners]) listener();
+    });
+    return {
+      key,
+      current: () => JSON.stringify([provider.getLegend().tokenTypes, provider.getLegend().tokenModifiers]) === signature,
+      getLegend: () => owned.legend,
+      event: (listener: () => void): Disposable => {
+        owned.listeners.add(listener);
+        return { dispose: () => { owned.listeners.delete(listener); } };
+      },
+      dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        subscription?.dispose();
+        if (--owned.owners === 0) {
+          owned.listeners.clear(); this.groups.delete(key);
+        } else for (const listener of [...owned.listeners]) listener();
+      },
+    };
+  }
+}
+
+interface SemanticResultOwner {
+  source: FullSemantic;
+  id: string;
+  uri: string;
+  release(): void;
+}
+
+class FullSemanticRouter {
+  private readonly router = new ModelProviderRouter<FullSemantic>();
+  private readonly events = new SemanticEvents();
+  private readonly results = new Map<string, SemanticResultOwner>();
+  private sequence = 0;
+
+  acquire(languages: MonacoLanguagesLike, selector: unknown, provider: FullSemantic, context: ProviderContext): Disposable {
+    const register = languages.registerDocumentSemanticTokensProvider;
+    if (!register) throw new Error('Semantic token registration is unavailable.');
+    const events = this.events.acquire(selector, provider);
+    const guardedContext = { ...context, context: () => events.current() ? context.context() : null };
+    let lease: Disposable;
+    try {
+      lease = this.router.acquire(selector, provider, guardedContext, invoke => register.call(languages, selector, {
+        getLegend: events.getLegend, onDidChange: events.event,
+        provideDocumentSemanticTokens: (model, lastResultId, token) => invoke(model, source => {
+          const previous = lastResultId ? this.results.get(lastResultId) : undefined;
+          const uri = model.uri?.toString() ?? '';
+          // A different producer cannot consume this runtime's delta cache.
+          const originalId = previous?.source === source && previous.uri === uri ? previous.id : undefined;
+          return mapResult(source.provideDocumentSemanticTokens(model, originalId, token), result => {
+            if (!isRecord(result) || typeof result.resultId !== 'string') return result;
+            const id = result.resultId, alias = `te2.semantic.${++this.sequence}`;
+            let released = false;
+            const release = (): void => {
+              if (released) return;
+              released = true;
+              this.results.delete(alias);
+              source.releaseDocumentSemanticTokens(id);
+            };
+            this.results.set(alias, { source, id, uri, release });
+            return { ...result, resultId: alias, dispose: release };
+          });
+        }),
+        releaseDocumentSemanticTokens: id => this.results.get(id)?.release(),
+      }), events.key);
+    } catch (error) { events.dispose(); throw error; }
+    return { dispose: () => {
+      lease.dispose(); events.dispose();
+      for (const owner of [...this.results.values()]) if (owner.source === provider) owner.release();
+    } };
+  }
+}
+
+class RangeSemanticRouter {
+  private readonly router = new ModelProviderRouter<RangeSemantic>();
+  private readonly events = new SemanticEvents();
+
+  acquire(languages: MonacoLanguagesLike, selector: unknown, provider: RangeSemantic, context: ProviderContext): Disposable {
+    const register = languages.registerDocumentRangeSemanticTokensProvider;
+    if (!register) throw new Error('Range semantic token registration is unavailable.');
+    const events = this.events.acquire(selector, provider);
+    const guardedContext = { ...context, context: () => events.current() ? context.context() : null };
+    let lease: Disposable;
+    try {
+      lease = this.router.acquire(selector, provider, guardedContext, invoke => register.call(languages, selector, {
+        getLegend: events.getLegend, onDidChange: events.event,
+        provideDocumentRangeSemanticTokens: (model, range, token) => invoke(model,
+          source => source.provideDocumentRangeSemanticTokens(model, range, token)),
+      }), events.key);
+    } catch (error) { events.dispose(); throw error; }
+    return { dispose: () => { lease.dispose(); events.dispose(); } };
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -274,6 +396,9 @@ interface NamespaceRouters {
   completion: CompletionRouter;
   inlay: InlayRouter;
   inline: InlineRouter;
+  color: ModelProviderRouter<Color>;
+  fullSemantic: FullSemanticRouter;
+  rangeSemantic: RangeSemanticRouter;
 }
 const namespaces = new WeakMap<MonacoLanguagesLike, NamespaceRouters>();
 
@@ -288,12 +413,24 @@ export function sharedModelProviders(languages: MonacoLanguagesLike, context: Pr
       implementation: new ModelProviderRouter(),
       completion: new CompletionRouter(),
       inlay: new InlayRouter(), inline: new InlineRouter(),
+      color: new ModelProviderRouter(), fullSemantic: new FullSemanticRouter(), rangeSemantic: new RangeSemanticRouter(),
     };
     namespaces.set(languages, shared);
   }
   const routers = shared;
   return {
     ...languages,
+    registerColorProvider: languages.registerColorProvider ? (selector, provider) => provider.__te2ProviderKey
+      ? routers.color.acquire(selector, provider, context, invoke => languages.registerColorProvider?.(selector, {
+        __te2WorkbenchColorProvider: true,
+        provideDocumentColors: (model, token) => invoke(model, source => source.provideDocumentColors(model, token)),
+        provideColorPresentations: (model, info, token) => invoke(model, source => source.provideColorPresentations(model, info, token)),
+      }), JSON.stringify([selectorKey(selector), provider.__te2ProviderKey]))
+      : languages.registerColorProvider?.(selector, provider) : undefined,
+    registerDocumentSemanticTokensProvider: languages.registerDocumentSemanticTokensProvider ? (selector, provider) =>
+      routers.fullSemantic.acquire(languages, selector, provider, context) : undefined,
+    registerDocumentRangeSemanticTokensProvider: languages.registerDocumentRangeSemanticTokensProvider ? (selector, provider) =>
+      routers.rangeSemantic.acquire(languages, selector, provider, context) : undefined,
     registerInlayHintsProvider: languages.registerInlayHintsProvider ? (selector, provider) =>
       provider.__te2ProviderKey ? routers.inlay.acquire(languages, selector, provider, context)
         : languages.registerInlayHintsProvider?.(selector, provider) : undefined,

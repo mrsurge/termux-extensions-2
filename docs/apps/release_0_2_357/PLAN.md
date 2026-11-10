@@ -109,8 +109,12 @@ and preserve Electron native overlay/reparent/detach capabilities. Historical
 diffs stay read-only immutable content. Escalate any required isolation/design
 change rather than quietly dropping the outer-iframe removal requirement.
 
-- One shared File menu on desktop **and mobile** targets the last-focused editor
-  area. Remove the secondary editor's redundant hamburger/File menu to free tab
+- One shared File menu on desktop **and mobile** targets the last-focused editor area
+  (capture/execution routing implemented; live acceptance pending). Existing
+  document/edit actions pin the renderer before dialogs, then validate its live
+  association, project generation and foreground. New stays unchanged until
+  secondary untitled-document semantics exist.
+  Remove the secondary editor's redundant hamburger/File menu to free tab
   space. Opening/clicking the shared menu must retain the intended editor target
   instead of resetting it through menu focus. Capture a valid target for an
   action; reject stale/disposed/project-switched targets, with no cross-client
@@ -270,6 +274,33 @@ section is transferred from release_0_2_356/PLAN.md, not that entire plan.
 Other completed/deferred work and historical notes remain in their owning docs.
 The following is planning intake, not authorization to implement every item.
 
+### Terminal app termination and exited-session presentation — 2026-11-09
+
+User reports redundant Stop/Kill controls and a shell-exit path that disconnects
+the WebSocket and repeatedly toasts unsupported-pipe errors. Treat that transport
+sequence as a reported symptom to trace, not an established root cause.
+
+- Replace separate Stop/Kill controls with one deliberate termination action.
+  Audit their actual semantics first; if they are graceful/forceful termination
+  levels, make forceful termination a bounded fallback for the same action.
+  Keyboard interrupts remain available and are not synonymous with terminating
+  the session. Reuse existing backend-owned shell lifecycle methods.
+- On natural shell exit, preserve the final terminal render/checkpoint and show
+  an inert exited-session presentation with “Press Enter to exit” (and an
+  accessible touch/click dismissal). Do not replay input into a dead shell,
+  reconnect/reopen it or attempt unsupported pipe operations. Dismissal returns
+  to the terminal splash/session list; it does not close the whole app.
+- If the user explicitly terminates/exits the session through the UI, dismiss
+  its presentation and return to the splash/session list once termination is
+  confirmed. Do not leave that deliberate action on the retained-screen prompt.
+- Model natural exit, explicit termination, transport loss and genuine failure
+  distinctly. An expected shell/stream closure is not a reconnect/pipe-error
+  toast loop. Preserve useful reporting for actual failures without repetition.
+- Validate exit during startup and after output, termination escalation, final
+  screen retention, keyboard/touch dismissal, disconnect/reconnect distinction,
+  and repeated/late events on desktop and mobile. Trace other terminal surfaces
+  if shared code changes, but do not impose app-list navigation on the drawer.
+
 ### Login-shell environment and terminal profile setup
 
 Investigate the user-reported Termux login-shell prompt carrying the launcher's
@@ -422,3 +453,59 @@ Direct search/FS/Git operations reuse is a separate potential stage, not implied
 by shared packaging. Preserve authoritative framework state, authorization and
 scheduling; do not create competing owners. Runtime activation and live acceptance
 remain explicit gates after any separately approved implementation.
+
+## ALS — repo-memory maintenance and independent integration settings
+
+User intake 2026-11-09: schedule in this release alongside ALS work. Planning
+only; investigate the ALS source and approve a concrete implementation separately.
+
+- Define a configurable repo-memory size threshold (value/unit still to decide).
+  Above it, include a maintenance alert in every relevant KB MCP invocation's
+  output and every repo-memory/developer-instruction concatenation used for
+  session initialization and handoffs. Measure the canonical current file;
+  do not rely on stale transcript copies. Alert text instructs the agent to
+  spawn a specifically named repo-memory maintenance subagent to review/compress
+  the file. Ordinary compression does not require another user decision.
+- Preserve architectural facts, user-authored requirements and unresolved notes
+  while compressing. Offloading information into repository documentation is
+  optional and requires the user's discretion/approval; this is the user decision
+  within the maintenance operation. Do not silently discard facts to meet a limit.
+- Design a reserved subagent-name marker/escape sequence recognized by the
+  harness. It identifies a temporary maintenance role authorized by this feature's
+  policy, not an arbitrary string that grants unrestricted execution authority.
+  The harness must enforce Markdown-only writes, normally to the exact canonical
+  repo-memory file within the repository CWD. Other Markdown paths require the
+  separately approved documentation scope. No code/config/non-Markdown writes,
+  path/symlink escapes or repository-wide approval/permission bypass. Expire the
+  grant when the maintenance assignment ends; retain normal runtime/sandbox
+  enforcement. Audit the actual extension/harness enforcement points before
+  choosing the marker or claiming that these restrictions can be guaranteed.
+- Add explicit KB MCP usage instructions and automatic creation of the generic
+  repo-memory file when repo-memory integration is enabled. Reuse existing KB
+  and repo-memory mechanisms and preserve existing file contents/user changes.
+- Split settings into independent **Repo memory integration** and **TE2
+  integration** flags. Repo-memory integration creates/maintains the generic
+  file and installs its developer/KB instructions. Remaining TE2-specific
+  integration belongs to the latter flag. Define migration/defaults so existing
+  users do not unexpectedly lose instructions or receive duplicate injection.
+- Validate threshold crossings, repeated KB/init/handoff alerts, absent/disabled
+  memory, safe creation, compression fidelity, user-approved offload, reserved
+  marker spoofing, write-scope enforcement and grant expiry. Verify all settings
+  combinations and existing-session/handoff behavior. Implementation and live
+  acceptance remain separate gates; do not interrupt the current editor cutover.
+
+## Final backlog — native window presentation hints
+
+User proposal recorded 2026-11-09. Defer until the user confirms their Android
+Electron application base is ready; this is scheduling, not implementation approval.
+Keep this after the current editor cutover and existing backlog.
+
+At native window creation, investigate optional semantic presentation hints for
+external Electron-compatible hosts: role (`dialog`, `file-picker`, `tool`,
+`document`), owner-relative placement and animation category. Reuse existing
+dialog kind, parent/modality and window contracts rather than deriving intent
+from HTML or adding a parallel window manager. Android hosts may map hints to
+native presentation/animations; unsupported hosts retain existing behavior.
+Use semantic categories rather than Android resource IDs, respect reduced motion,
+and keep modality, focus, authorization and lifecycle rules authoritative.
+Audit and approve the concrete cross-host contract after the Android base is ready.

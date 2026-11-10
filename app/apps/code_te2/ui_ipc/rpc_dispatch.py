@@ -105,6 +105,17 @@ async def dispatch_ui_ipc_rpc_request(
     *,
     source_name: str,
 ) -> object:
+    if "menuRendererId" in params:
+        if method not in {
+            UI_IPC_RPC_METHOD_HOST_FILE_OPEN, UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
+            UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE, UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND,
+            UI_IPC_RPC_METHOD_HOST_EDITOR_FIND, UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE,
+        }:
+            raise ValueError("unsupported targeted editor menu action")
+        from ..host.editor_menu_target import validate_editor_menu_target
+        source_name = validate_editor_menu_target(source_name, params)
+        params = dict(params)
+        params["client_id"] = source_name
     if method == "ui.host.terminal.destination":
         from ..host.terminal_intent_backend import resolve_terminal_destination
         return await resolve_terminal_destination(params, client_id=source_name)
@@ -122,6 +133,9 @@ async def dispatch_ui_ipc_rpc_request(
         return await handle_project_directory_intent(params, client_id=source_name)
 
     if method == UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET:
+        if params.get("captureEditorTarget") is True:
+            from ..host.editor_menu_target import capture_editor_menu_target
+            return {"editorTarget": capture_editor_menu_target(source_name)}
         return handle_editor_state_get()
     if method == UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE:
         return handle_session_update(params)

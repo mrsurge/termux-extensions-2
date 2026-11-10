@@ -90,6 +90,9 @@ class EditorRpcSocketIONamespace(NativeNamespace):
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
         identity = unregister_editor_client(sid)
+        if identity is not None:
+            from ..host.editor_menu_target import release_editor_menu_focus
+            release_editor_menu_focus(identity["clientInstanceId"])
         try:
             await self.leave_room(sid, "code_te2")
             if identity is not None:

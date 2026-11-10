@@ -325,6 +325,7 @@ export interface MonacoLanguagesLike {
     selector: unknown,
     provider: {
       __te2WorkbenchColorProvider?: true;
+      __te2ProviderKey?: string;
       provideDocumentColors(
         model: MonacoModelLike,
         token: MonacoCancellationTokenLike,
@@ -1339,6 +1340,7 @@ export function createEditorLanguageBridgeProviders(
       documentColorProviderSelector(deps, langId),
       {
         __te2WorkbenchColorProvider: true,
+        __te2ProviderKey: JSON.stringify([langId, nextSignature]),
         provideDocumentColors(model, token) {
           try {
             if (token && token.isCancellationRequested) return [];
@@ -2102,7 +2104,7 @@ export function createEditorLanguageBridgeProviders(
     deps.languageBridge.semanticTokensLegendCache[langId] = legend;
     deps.languageBridge.semanticTokensRangeFlag[langId] = mode === "range";
     const changeEmitter = semanticTokensChangeEmitterForLanguage(langId);
-    if (previousMode === mode) {
+    if (previousMode === mode && previousSignature === nextSignature) {
       deps.languageBridge.semanticTokensRegistrationSignatureByLanguage[
         langId
       ] = nextSignature;

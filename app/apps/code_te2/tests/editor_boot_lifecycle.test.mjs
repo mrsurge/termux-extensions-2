@@ -49,7 +49,9 @@ test('keyboard runtime releases handlers and cannot rebind after disposal', asyn
   try {
     const { installEditorKeyboardRuntime } = await load('monaco_editor/editor_keyboard_runtime.ts');
     let focused = 0, actions = 0;
+    const root = win.document.createElement('div'); root.setAttribute('data-te2-working-editor-host', ''); win.document.body.append(root);
     const runtime = installEditorKeyboardRuntime({
+      root,
       getEditor: () => ({ focus: () => focused++, hasTextFocus: () => true, addAction: () => actions++ }),
       getPrefs: () => ({}), updatePreference: async () => {},
     });

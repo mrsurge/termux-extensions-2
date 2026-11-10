@@ -1,5 +1,6 @@
 import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { messagePackRpcWireCodec } from '../src/rpc/codec.ts';
+import { createEditorSocketListenerOwner } from './editor_socket_listener_owner.ts';
 
 export const WBA_RPC_EVENT = 'rpc' as const;
 
@@ -30,11 +31,13 @@ interface WbaRpcNotificationEnvelope {
 interface WbaRpcSocketLike {
   io?: {
     on?(eventName: string, handler: (payload: unknown) => void): void;
+    off?(eventName: string, handler: (payload: unknown) => void): void;
   };
   connected?: boolean;
   sendBuffer?: unknown[];
   emit?(eventName: string, payload: unknown): void;
   on?(eventName: string, handler: (payload: unknown) => void): void;
+  off?(eventName: string, handler: (payload: unknown) => void): void;
   readonly volatile?: {
     emit(eventName: string, payload: unknown): void;
   };
@@ -164,12 +167,15 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   onNotification(method: string, handler: (params: Record<string, unknown>) => void): () => void;
   getPendingRequests(): Map<string, PendingRequestEntry>;
   rejectPending(reason?: string): void;
+  dispose(): void;
 } {
   const pending = new Map<string, PendingRequestEntry>();
   const connectWaiters = new Set<ConnectWaiter>();
   const notificationHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
   let nextId = 1;
   let attached = false;
+  let disposed = false;
+  const listeners = createEditorSocketListenerOwner();
   let hasConnected = false;
   // Temporary bounded startup evidence; never retain payloads or alter retries.
   let traceCount = 0;
@@ -208,6 +214,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   }
 
   function handleEnvelope(message: unknown): void {
+    if (disposed) return;
     if (isSuccessEnvelope(message)) {
       const key = idKey(message.id);
       const entry = pending.get(key);
@@ -236,6 +243,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
       if (!handlers || !handlers.size) return;
       const params = asParamsRecord(message.params);
       handlers.forEach((handler) => {
+        if (disposed) return;
         try {
           handler(params);
         } catch (_) {}
@@ -259,30 +267,30 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   }
 
   function attachSocket(socket: WbaRpcSocketLike): void {
-    if (attached || !socket || typeof socket.on !== 'function') return;
+    if (disposed || attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
     trace('socket.attached', { connected: socket.connected === true });
     // Manager events distinguish the underlying transport from namespace readiness.
     for (const event of ['open', 'close', 'error', 'reconnect_attempt', 'reconnect', 'reconnect_error', 'reconnect_failed']) {
-      socket.io?.on?.(event, (payload) => trace(`manager.${event}`, {
+      listeners.listen(socket.io, event, (payload) => trace(`manager.${event}`, {
         ...(typeof payload === 'number' ? { attempt: payload } : {}),
         ...(payload instanceof Error ? { error: payload.message.slice(0, 160) } : {}),
       }));
     }
-    socket.on(WBA_RPC_EVENT, handleMessage);
+    listeners.listen(socket, WBA_RPC_EVENT, handleMessage);
     const handleConnect = () => {
       trace('socket.connected');
       hasConnected = true;
       resolveConnectWaiters();
     };
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', () => {
+    listeners.listen(socket, 'connect', handleConnect);
+    listeners.listen(socket, 'disconnect', () => {
       trace('socket.disconnected');
       clearSocketReplayBuffer(socket);
       rejectConnectWaiters('wba rpc socket disconnected');
       rejectAllPending('wba rpc socket disconnected');
     });
-    socket.on('connect_error', (error) => {
+    listeners.listen(socket, 'connect_error', (error) => {
       trace('socket.connect_error', { error: error instanceof Error ? error.message.slice(0, 160) : 'unknown' });
       clearSocketReplayBuffer(socket);
       rejectConnectWaiters('wba rpc socket connect error');
@@ -292,11 +300,13 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   }
 
   function isConnected(): boolean {
+    if (disposed) return false;
     const socket = deps.getSocket();
     return !!(socket && socket.connected);
   }
 
   function waitForConnected(method: string, timeoutMs: number): Promise<WbaRpcSocketLike> {
+    if (disposed) return Promise.reject(new Error('wba rpc transport disposed'));
     const socket = deps.getSocket();
     if (socket?.connected) return Promise.resolve(socket);
     if (hasConnected) {
@@ -325,6 +335,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     const startedAt = Date.now();
     if (tracedMethods.has(method)) trace('rpc.wait_for_socket', { method, connected: isConnected() });
     const socket = await waitForConnected(method, timeoutMs);
+    if (disposed) throw new Error('wba rpc transport disposed');
     const remainingMs = timeoutMs - (Date.now() - startedAt);
     if (remainingMs <= 0) {
       return Promise.reject(new Error(`wba rpc timeout: ${method}`));
@@ -365,6 +376,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   }
 
   function notify(method: string, params: Record<string, unknown>): boolean {
+    if (disposed) return false;
     const socket = deps.getSocket();
     const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
       ? socket.volatile.emit.bind(socket.volatile)
@@ -387,6 +399,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   }
 
   function onNotification(method: string, handler: (params: Record<string, unknown>) => void): () => void {
+    if (disposed) return () => {};
     let handlers = notificationHandlers.get(method);
     if (!handlers) {
       handlers = new Set();
@@ -409,5 +422,13 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     onNotification,
     getPendingRequests: () => pending,
     rejectPending: (reason?: string) => rejectAllPending(String(reason || 'wba rpc pending requests rejected')),
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      listeners.dispose();
+      rejectConnectWaiters('wba rpc transport disposed');
+      rejectAllPending('wba rpc transport disposed');
+      notificationHandlers.clear();
+    },
   };
 }

@@ -330,8 +330,8 @@ async def _handle_editor_save_request(
         expected_abs_path = None
 
     raw_path = (
-        expected_abs_path
-        or get_opt_str(payload, "target_path")
+        get_opt_str(payload, "target_path")
+        or expected_abs_path
         or snapshot_path
         or get_opt_str(payload, "path")
     )

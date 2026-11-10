@@ -360,6 +360,43 @@ test('two real WBA bridge owners share static registrations and route RPCs to th
   assert.equal(provider.provideDefinition({ uri: { toString: () => a.context.uri } }, {}, {}), undefined);
 });
 
+for (const kind of ['color', 'fullSemantic', 'rangeSemantic']) {
+  test(`two WBA bridge owners share ${kind} routing and survive first-owner disposal`, async () => {
+    const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+    let provider, registrations = 0, disposals = 0, focused = 'a';
+    const register = (_selector, value) => { provider = value; registrations++; return { dispose() { disposals++; } }; };
+    const sharedLanguages = kind === 'color' ? { registerColorProvider: register }
+      : kind === 'fullSemantic' ? { registerDocumentSemanticTokensProvider: register }
+      : { registerDocumentRangeSemanticTokensProvider: register };
+    const method = kind === 'color' ? 'document_colors' : kind === 'fullSemantic' ? 'semantic_tokens' : 'semantic_tokens_range';
+    const create = name => createHarness(createEditorLanguageBridgeProviders, false, {
+      sharedLanguages, focused: () => focused === name,
+      workbenchCall(request) { return { ok: true, result: request === 'document_colors' ? { colors: [] }
+        : request === 'color_presentations' ? { presentations: [] }
+        : { type: 'full', id: 7, data: [0, 0, 1, 0, 0] } }; },
+    });
+    const a = create('a'), b = create('b');
+    for (const owner of [a, b]) {
+      if (kind === 'color') owner.providers.cacheDocumentColorProviderRegistration('example-language', { handle: '7' });
+      else owner.providers.registerSemanticTokensWithLegend('example-language', { tokenTypes: ['class'], tokenModifiers: [] }, kind === 'rangeSemantic');
+    }
+    assert.equal(registrations, 1);
+    const model = { uri: { toString: () => a.context.uri }, getVersionId: () => 1, getLanguageId: () => a.context.languageId };
+    const request = last => kind === 'color' ? provider.provideDocumentColors(model, {})
+      : kind === 'fullSemantic' ? provider.provideDocumentSemanticTokens(model, last, {})
+      : provider.provideDocumentRangeSemanticTokens(model, {}, {});
+    const first = await request(null);
+    assert.equal(a.calls.filter(c => c.method === method).length, 1); assert.equal(b.calls.length, 0);
+    focused = 'b';
+    await request(first?.resultId);
+    assert.equal(b.calls.filter(c => c.method === method).length, 1);
+    if (kind === 'fullSemantic') assert.equal(b.calls[0].params.previousResultId, '0');
+    a.providers.dispose(); assert.equal(disposals, 0);
+    await request(null); assert.equal(b.calls.filter(c => c.method === method).length, 2);
+    b.providers.dispose(); assert.equal(disposals, 1);
+  });
+}
+
 test('in-flight completion results are cancelled and released after owner disposal', async () => {
   const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
   let finish;

@@ -14,6 +14,7 @@ import {
 import { messagePackRpcWireCodec, type RpcWireCodec } from '../src/rpc/codec.ts';
 import { inspectRpcFrame, RPC_CODEC_MSGPACK_GZIP_V1 } from '../src/rpc/gzip-codec.ts';
 import { createOrderedRpcReceiver } from '../src/rpc/ordered-receiver.ts';
+import { createEditorSocketListenerOwner } from './editor_socket_listener_owner.ts';
 
 export function publishEditorControlResponse(
   transport: { publishReliable(method: EditorRpcMethodName, params: Record<string, unknown>, opts?: { timeoutMs?: number }): boolean },
@@ -32,6 +33,7 @@ interface EditorRpcSocketLike {
   sendBuffer?: unknown[];
   emit?(eventName: string, payload: unknown): void;
   on?(eventName: string, handler: (payload: unknown) => void): void;
+  off?(eventName: string, handler: (payload: unknown) => void): void;
   disconnect?(): void;
   readonly volatile?: {
     emit(eventName: string, payload: unknown): void;
@@ -84,6 +86,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   notify(method: EditorRpcMethodName | EditorRpcNotificationName, params: Record<string, unknown>): boolean;
   onNotification(method: EditorRpcNotificationName, handler: (params: Record<string, unknown>) => void): () => void;
   getPendingRequests(): Map<string, PendingRequestEntry>;
+  dispose(): void;
 } {
   const pending = new Map<string, PendingRequestEntry>();
   let hasConnected = false;
@@ -91,6 +94,8 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   const notificationHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
   let nextId = 1;
   let attached = false;
+  let disposed = false;
+  const listeners = createEditorSocketListenerOwner();
   const codec = deps.codec ?? messagePackRpcWireCodec;
 
   function settleConnectionWaiters(error?: Error): void {
@@ -104,6 +109,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
 
   // Wait on the existing socket's events, never polling or starting another lane.
   function waitUntilConnected(timeoutMs = 12000): Promise<void> {
+    if (disposed) return Promise.reject(new Error('editor rpc transport disposed'));
     if (isConnected()) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const waiter: ConnectionWaiter = {
@@ -126,6 +132,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   }
 
   function handleEnvelope(message: unknown): void {
+    if (disposed) return;
     if (isJsonRpcSuccessEnvelope(message)) {
       const key = idKey(message.id);
       const entry = pending.get(key);
@@ -152,6 +159,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
       if (!handlers || !handlers.size) return;
       const params = asRecord(message.params) || {};
       handlers.forEach((handler) => {
+        if (disposed) return;
         try {
           handler(params);
         } catch (_) {}
@@ -174,6 +182,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
       : ArrayBuffer.isView(payload) ? payload.byteLength : payload instanceof ArrayBuffer ? payload.byteLength : 0,
     deliver,
     onError: error => {
+      if (disposed) return;
       rejectAllPending('editor rpc protocol failure');
       deps.onProtocolError?.(error);
       deps.getSocket()?.disconnect?.();
@@ -181,21 +190,21 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   });
 
   function attachSocket(socket: EditorRpcSocketLike): void {
-    if (attached || !socket || typeof socket.on !== 'function') return;
+    if (disposed || attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
-    socket.on(EDITOR_RPC_EVENT, payload => receiver.receive(payload));
-    socket.on('connect', () => {
+    listeners.listen(socket, EDITOR_RPC_EVENT, payload => receiver.receive(payload));
+    listeners.listen(socket, 'connect', () => {
       settleConnectionWaiters();
       if (hasConnected) deps.onReconnect?.();
       hasConnected = true;
     });
-    socket.on('disconnect', () => {
+    listeners.listen(socket, 'disconnect', () => {
       receiver.reset();
       settleConnectionWaiters(new Error('editor rpc socket disconnected'));
       clearSocketReplayBuffer(socket);
       rejectAllPending('editor rpc socket disconnected');
     });
-    socket.on('connect_error', () => {
+    listeners.listen(socket, 'connect_error', () => {
       receiver.reset();
       settleConnectionWaiters(new Error('editor rpc socket connect error'));
       clearSocketReplayBuffer(socket);
@@ -204,6 +213,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   }
 
   function isConnected(): boolean {
+    if (disposed) return false;
     const socket = deps.getSocket();
     return !!(socket && socket.connected);
   }
@@ -213,6 +223,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     params: Record<string, unknown>,
     opts?: { timeoutMs?: number },
   ): Promise<unknown> {
+    if (disposed) return Promise.reject(new Error('editor rpc transport disposed'));
     const timeoutMs = opts && Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 12000;
     const requestId: JsonRpcId = `editor_rpc_${nextId++}_${Date.now()}`;
     const socket = deps.getSocket();
@@ -244,6 +255,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   }
 
   function notify(method: EditorRpcMethodName | EditorRpcNotificationName, params: Record<string, unknown>): boolean {
+    if (disposed) return false;
     const socket = deps.getSocket();
     const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
       ? socket.volatile.emit.bind(socket.volatile)
@@ -266,12 +278,13 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     if (!isConnected()) return false;
     void call(method, params, opts).catch((error: unknown) => {
       const resolved = error instanceof Error ? error : new Error(String(error));
-      deps.onReliablePublishError?.(method, resolved);
+      if (!disposed) deps.onReliablePublishError?.(method, resolved);
     });
     return true;
   }
 
   function onNotification(method: EditorRpcNotificationName, handler: (params: Record<string, unknown>) => void): () => void {
+    if (disposed) return () => {};
     let handlers = notificationHandlers.get(method);
     if (!handlers) {
       handlers = new Set();
@@ -295,5 +308,14 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     notify,
     onNotification,
     getPendingRequests: () => pending,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      listeners.dispose();
+      receiver.reset();
+      settleConnectionWaiters(new Error('editor rpc transport disposed'));
+      rejectAllPending('editor rpc transport disposed');
+      notificationHandlers.clear();
+    },
   };
 }

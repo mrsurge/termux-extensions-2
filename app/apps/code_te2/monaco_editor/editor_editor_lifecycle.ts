@@ -41,6 +41,7 @@ interface MonacoRefLike {
 }
 
 interface EditorLifecycleDeps {
+  isDisposed?(): boolean;
   getMonaco(): MonacoRefLike | null;
   getEditorContainer(): HTMLElement | null;
   fetchSSOTState(): Promise<unknown>;
@@ -174,6 +175,7 @@ export function disposeGitBaselines(deps: EditorLifecycleDeps): void {
 }
 
 export async function ensureEditorWithPrefs(deps: EditorLifecycleDeps): Promise<MonacoEditorLike | null> {
+  if (deps.isDisposed?.()) return null;
   const existing = deps.getEditor();
   if (existing) return existing;
 
@@ -182,12 +184,18 @@ export async function ensureEditorWithPrefs(deps: EditorLifecycleDeps): Promise<
   if (!container || !monacoRef) return null;
 
   try {
-    if (!deps.getCachedPrefs()) deps.setCachedPrefs(await deps.fetchSSOTState());
+    if (!deps.getCachedPrefs()) {
+      const prefs = await deps.fetchSSOTState();
+      if (deps.isDisposed?.()) return null;
+      deps.setCachedPrefs(prefs);
+    }
   } catch (error) {
+    if (deps.isDisposed?.()) return null;
     deps.updateDebug('ssot=fail');
     throw error;
   }
 
+  if (deps.isDisposed?.()) return null;
   const created = monacoRef.editor.create(container, deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs()));
   deps.setEditor(created);
   const model = deps.getModel();
@@ -206,6 +214,7 @@ export async function ensureEditorWithPrefs(deps: EditorLifecycleDeps): Promise<
 }
 
 export function ensurePlainEditorWithPrefs(deps: EditorLifecycleDeps): MonacoEditorLike | null {
+  if (deps.isDisposed?.()) return null;
   const current = deps.getEditor();
   const diffEditor = deps.getDiffEditor();
 
@@ -252,6 +261,7 @@ export function ensurePlainEditorWithPrefs(deps: EditorLifecycleDeps): MonacoEdi
 }
 
 export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiffEditorLike | null {
+  if (deps.isDisposed?.()) return null;
   const existing = deps.getDiffEditor();
   if (existing) return existing;
 

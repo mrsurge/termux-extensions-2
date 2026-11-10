@@ -1,8 +1,8 @@
 import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
 
 interface MonacoEditorLike {
-  onDidScrollChange?(listener: () => void): void;
-  onDidChangeCursorPosition?(listener: () => void): void;
+  onDidScrollChange?(listener: () => void): { dispose?(): void } | void;
+  onDidChangeCursorPosition?(listener: () => void): { dispose?(): void } | void;
 }
 
 interface EditorScrollPublisherRuntimeDeps {
@@ -16,6 +16,7 @@ interface EditorScrollPublisherRuntimeDeps {
   notifyEditorRpc(method: string, payload: Record<string, unknown>): boolean;
   shouldSendImmediately(now: number, lastSentAt: number, thresholdMs: number): boolean;
   scheduleSend(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
+  clearScheduledSend?(timer: ReturnType<typeof setTimeout>): void;
 }
 
 export interface EditorScrollPublisherRuntime {
@@ -37,10 +38,16 @@ export function installScrollPublisherRuntime(
     deps.setInstalled(true);
 
     let lastSentAt = 0;
+    let disposed = false;
+    const subscriptions: Array<{ dispose?(): void }> = [];
+    const cancel = (timer: ReturnType<typeof setTimeout>): void => {
+      if (deps.clearScheduledSend) deps.clearScheduledSend(timer); else clearTimeout(timer);
+    };
     let pendingT: ReturnType<typeof setTimeout> | null = null;
     let pendingPayload: Record<string, unknown> | null = null;
 
     const send = (): boolean => {
+      if (disposed) return false;
       pendingT = null;
       try {
         const payload = pendingPayload;
@@ -56,6 +63,7 @@ export function installScrollPublisherRuntime(
     };
 
     const capture = (): boolean => {
+      if (disposed) return false;
       try {
         pendingPayload = deps.buildScrollStatePayload();
         return pendingPayload != null;
@@ -70,7 +78,7 @@ export function installScrollPublisherRuntime(
         if (!capture()) return;
         const now = Date.now();
         if (deps.shouldSendImmediately(now, lastSentAt, 400)) {
-          if (pendingT) clearTimeout(pendingT);
+          if (pendingT) cancel(pendingT);
           send();
           return;
         }
@@ -79,22 +87,28 @@ export function installScrollPublisherRuntime(
       } catch (_) {}
     };
 
-    if (typeof editor.onDidScrollChange === 'function') editor.onDidScrollChange(schedule);
-    if (typeof editor.onDidChangeCursorPosition === 'function') editor.onDidChangeCursorPosition(schedule);
+    const scroll = editor.onDidScrollChange?.(schedule);
+    const cursor = editor.onDidChangeCursorPosition?.(schedule);
+    if (scroll) subscriptions.push(scroll);
+    if (cursor) subscriptions.push(cursor);
 
     return {
       flush(): boolean {
         if (!capture()) return false;
         if (pendingT) {
-          clearTimeout(pendingT);
+          cancel(pendingT);
           pendingT = null;
         }
         return send();
       },
       dispose(): void {
-        if (pendingT) clearTimeout(pendingT);
+        if (disposed) return;
+        disposed = true;
+        if (pendingT) cancel(pendingT);
         pendingT = null;
         pendingPayload = null;
+        for (const subscription of subscriptions) subscription.dispose?.();
+        subscriptions.length = 0;
       },
     };
   } catch (_) {

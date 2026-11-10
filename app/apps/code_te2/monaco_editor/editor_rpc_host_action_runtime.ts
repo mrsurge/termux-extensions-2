@@ -3,7 +3,7 @@ import { bindFocusRelay } from './editor_rpc_focus_relay_utils.ts';
 import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.ts';
 import { bindAndroidKeyboardRecovery } from './editor_android_keyboard_recovery_utils.ts';
 import { bindCefriumImeDismissal } from './editor_cefrium_ime_dismissal_utils.ts';
-import { bindMobileEditorSpecialKeys } from './editor_mobile_special_keys_utils.ts';
+import { bindMobileEditorSpecialKeys, type MobileEditorInputBinding } from './editor_mobile_special_keys_utils.ts';
 import {
   EDITOR_RPC_METHODS,
   EDITOR_RPC_NOTIFICATIONS,
@@ -38,6 +38,7 @@ interface EditorRpcHostActionRuntimeDeps {
   getWindow(): WindowWithEditorHostActions;
   getEditor(): EditorLike | null;
   getDiffEditor(): DiffEditorLike | null;
+  getMobileInputBinding?(): MobileEditorInputBinding;
   replayOpenFileAfterBaton(): void;
   onAdapterReady?(): void;
   onProjectSwitching?(params: Record<string, unknown>): void;
@@ -222,6 +223,7 @@ export function createEditorRpcHostActionRuntime(
         () => {
           deps.notifyEditorRpc(EDITOR_RPC_METHODS.hostSave, {});
         },
+        deps.getMobileInputBinding?.(),
       );
     } catch (error) {
       console.warn('[mobile_special_keys] bind failed', error);

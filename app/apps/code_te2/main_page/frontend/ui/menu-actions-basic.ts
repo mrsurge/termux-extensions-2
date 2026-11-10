@@ -1,7 +1,9 @@
 import { objectValue } from './settings-contracts.ts';
+import type { EditorMenuAction } from './editor-menu-actions.ts';
 // @ts-check
 
 interface Dependencies {  bindMenuToggle: (el: HTMLElement, action: () => unknown) => void,
+  performEditorAction?: (action: EditorMenuAction) => Promise<void>,
   els: {
     miNew: HTMLElement,
     miOpen: HTMLElement,
@@ -46,6 +48,15 @@ export function installBasicMenuActions(deps: Dependencies) {
   const e = deps.els;
 
   b(e.miNew, () => deps.resetToNewFile());
+  const editorActions: [HTMLElement, EditorMenuAction][] = [
+    [e.miOpen, 'open'], [e.miSave, 'save'], [e.miSaveAs, 'saveAs'], [e.miClose, 'close'],
+    [e.miUndo, 'undo'], [e.miRedo, 'redo'], [e.miCut, 'cut'], [e.miCopy, 'copy'],
+    [e.miPaste, 'paste'], [e.miSelectAll, 'selectAll'], [e.miFind, 'find'], [e.miGoto, 'goto'],
+  ];
+  if (deps.performEditorAction) {
+    const perform = deps.performEditorAction;
+    for (const [element, action] of editorActions) b(element, () => perform(action));
+  } else {
   b(e.miOpen, async () => {
     const p = await deps.pickFile();
     if (p) await deps.openFile(p);
@@ -53,6 +64,7 @@ export function installBasicMenuActions(deps: Dependencies) {
   b(e.miSave, () => deps.saveFile());
   b(e.miSaveAs, () => deps.saveAsDialog());
   b(e.miClose, () => deps.resetToNewFile());
+  }
   b(e.miOpenSecondWindow, () => void deps.openInSecondWindow());
   b(e.miQuit, () => void deps.quitApp());
 
@@ -88,6 +100,7 @@ export function installBasicMenuActions(deps: Dependencies) {
     }
   };
 
+  if (!deps.performEditorAction) {
   b(e.miUndo, () => {
     void editorCommand('undo');
   });
@@ -120,4 +133,5 @@ export function installBasicMenuActions(deps: Dependencies) {
     }
     await deps.jumpToCurrentFileLine(line);
   });
+  }
 }

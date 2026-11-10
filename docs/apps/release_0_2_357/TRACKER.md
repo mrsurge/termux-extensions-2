@@ -282,7 +282,98 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   All 158 selected editor/provider/lifecycle regression tests pass; frontend/WBA
   strict no-Any typechecks and asset build pass. User live acceptance recorded above;
   no runtime restart, native rebuild or Android publication performed by the agent.
-  Color/semantic ownership remains next.
+  Checkpointed locally as a4eb1a69; no push requested.
+- [x] Color/semantic ownership slice: color callbacks route by live model context;
+  full/range semantic registrations share identical immutable legends, multiplex
+  change events and detach owner subscriptions. Changed legends replace the SDK
+  registration. Full-token result aliases preserve producer/URI cache affinity,
+  restart full requests on producer changes and release obsolete results exactly
+  once. Existing WBA release semantics are unchanged. All 182 selected regression
+  tests pass; frontend/WBA no-Any checks/typechecks and asset build pass.
+- [ ] Live color/semantic regression: color decorators/presentations, semantic
+  highlighting, file switches and reconnect. This slice is frontend-only: no
+  mypyc/Rust/WBA binary rebuild required. User restored interpreted shellspec;
+  preserve it and its binary backup. No agent restart or Android publication.
+- [ ] Next ownership prerequisite: editor/window lifecycle and active-area
+  focus/menu routing, before working iframe removal and secondary tabs.
+- [x] Input-ownership sub-slice: mount-scoped per-window ownership gates shared
+  keyboard/palette/focus actions; toolbar focus retains the last editor. Nested,
+  hidden/disconnected and disposed mounts cannot steal ownership. Diff mode uses
+  the modified editor. Monaco keyboard action handles and DOM listeners are
+  owner-disposed. Two-mount/toolbar/hidden/teardown, nested/separate-window and
+  editor-replacement tests pass. All 185 selected regressions pass;
+  frontend/WBA no-Any checks/typechecks and asset build pass.
+- [ ] Input-ownership live regression: existing relative-number toggle, tab-cycle
+  chords and Explorer-to-editor focus return. Single-editor boot/iframe remains;
+  this is not live shared-mount acceptance. File-menu targeting, mobile extra-key
+  handoff and complete per-runtime teardown remain unfinished. No runtime restart,
+  native build, Android publication or WBA server source change in this slice.
+- [x] Mobile input-ownership sub-slice: working boot/host actions pass explicit
+  role and mount; sticky modifier state is editor-owned. A shared-page secondary
+  does not republish projected Ctrl state into the primary helper. Primary panel
+  ownership, current-role dispatch, terminal routing and existing iframe paths
+  remain intact. Cleanup is idempotent; secondary disposal preserves primary
+  Ctrl lock and restores its ownership. Shared-document and existing mobile
+  tests cover routing/modifiers/teardown and wrong/duplicate binding rejection.
+  All 187 selected regressions pass; frontend/WBA no-Any checks/typechecks and
+  asset build pass. No WBA server source change, native rebuild or restart.
+- [ ] Live mobile regression after matching assets: primary/secondary extra keys,
+  sticky modifiers, return-to-primary and terminal-drawer routing. This is still
+  the existing iframe implementation, not live shared-DOM acceptance. File-menu
+  targeting and full runtime teardown remain before enabling shared mounts.
+- [ ] Original mobile secondary extra-key focus bug remains unresolved: user
+  reproduced it after the ownership changes. These are preparatory ownership
+  mechanics, not the live fix. Address and validate the handoff with working
+  iframe removal; do not infer acceptance from the shared-document unit tests.
+- [x] Transport teardown sub-slice: editor/WBA frontend transports now support
+  terminal idempotent disposal. Pending RPCs/startup waits reject, timers and
+  local notification handlers clear, owned socket/manager listeners detach,
+  ordered decoding aborts and late callbacks cannot revive/send/deliver work.
+  Disposal does not disconnect a shared socket or remove another owner's handlers.
+  Working page cleanup invokes it after provider/mirror/model cleanup. WBA server
+  source/protocol and native binaries are unchanged. Full instance teardown and
+  File-menu targeting remain separate unfinished prerequisites.
+  Automated gate: 218 selected tests pass, one optional Rust-fixture test skips;
+  frontend/WBA no-Any checks/typechecks and asset build pass. Separately, the
+  broader socket suite has 40 passes and its four pre-existing TextMate fixture
+  failures. No whole-suite green claim, commit, runtime restart or Android publish.
+- [x] Instance-lifetime sub-slice: ordered failure-isolated cleanup replaces the
+  monolithic pagehide callback. Instance timers are tracked/cancelled and stale
+  timer callbacks cannot execute. Startup and late language-catalog stages are
+  disposal-fenced; a late preference fetch cannot create or update a disposed
+  editor. Scroll subscriptions and raw editor/WBA connection hooks are owned,
+  and connection disposal invalidates in-flight replay sequences. Widget detach/
+  disposal precedes model-lease release. Shared services/backend documents remain.
+  Automated gate: 229 selected tests pass and one optional fixture skips;
+  frontend/WBA no-Any checks/typechecks and asset build pass. The broader socket
+  suite retains only its four known TextMate fixture failures. No commit, restart,
+  native/WBA-server build or Android publication performed.
+- [ ] Remaining activation work: finish host/outer-window identity handoff and expose controlled instance
+  unmount before lifting the single-mount guard/removing the working iframe.
+  This slice does not claim the original mobile extra-key bug is fixed.
+- [x] File-menu target-capture foundation: backend focus selection is scoped to
+  trusted same-main-page renderer associations and live connections. Blur retains
+  focus through a dialog; disconnect falls back without evicting a live duplicate
+  connection. Secondary-local menus stay local. Existing editor-state RPC can
+  capture renderer/path/project/revision metadata without changing ordinary reads.
+  Seven target/focus/host tests and 29 selected backend regression tests pass;
+  strict mypy plus disallow-any expression/explicit/generic/decorated checks pass
+  across all 255 Code TE2 source files and the new target test module.
+- [x] User confirmed live acceptance of the preceding slice before File-menu
+  action wiring (2026-11-09). This is not acceptance of the new actions below.
+- [x] File-menu capture/use: Open, Save, Save As, Close, edit commands, Find and
+  Go to Line pin a backend-selected renderer before dialogs. Execution rejects
+  stale document/project generation, disconnected or cross-main-page targets.
+  Close uses existing revision-fenced presentation membership. Save As checks
+  the source snapshot independently of its destination. New stays unchanged
+  until the secondary-tab/untitled-document slice.
+  Automated gate: 38 selected frontend tests, 32 selected backend tests and
+  29 autosave regressions pass; frontend/WBA no-Any checks, full Code TE2 strict
+  mypy plus extra disallow-any checks (255 files), and asset build pass.
+  Broader TextMate fixture repairs remain required before the cutover completes.
+- [x] User live-tested File-menu action routing: everything working (2026-11-09).
+  WBA server source is unchanged; `node build.mjs` also rebuilds WBA artifacts.
+  No shared-runtime restart or Android publication was performed by the agent.
 - [x] S2b automated: backend integration/state/legacy tests and focused frontend
   identity/tab/lifecycle tests pass; frontend and WBA strict no-Any checks/build
   pass. Electron strict checks and unit suite pass. Four existing TextMate
@@ -521,6 +612,23 @@ from short Python-driven ping trials. Running-process replacement remains user-o
 
 ## Consolidated terminal and app-install UX
 
+### Terminal app stop/kill and shell-exit cleanup — 2026-11-09
+
+- [x] Record user report and intended behavior without interrupting the editor cutover.
+- [ ] Trace Stop/Kill semantics, shell-exit/stream closure and unsupported-pipe
+  toast spam; confirm the cause from source/runtime evidence.
+- [ ] Replace Stop/Kill with one termination action and bounded graceful-to-force
+  escalation if applicable. Preserve keyboard interrupts and backend ownership.
+- [ ] Natural exit: retain the final terminal screen with “Press Enter to exit”
+  and touch/click dismissal to the splash/session list; no dead-shell input or reopen.
+- [ ] Deliberate UI termination: return to splash/session list after confirmation,
+  without retained-screen limbo or repeated error toasts.
+- [ ] Distinguish expected exit from connectivity loss/genuine failure; test final
+  snapshot, startup/exit races, escalation, repeated events and desktop/mobile UX.
+  Preserve drawer-specific navigation if shared lifecycle code is touched.
+
+### Existing terminal/profile/app-install intake
+
 Canonical active scope: matching section in this release's PLAN.md. Only the
 deferred shell-execution section is carried from .356, not the entire old plan.
 
@@ -605,3 +713,36 @@ deferred shell-execution section is carried from .356, not the entire old plan.
 - [ ] Validate Linux and Termux artifacts and obtain live acceptance.
 
 No production integration or release approval is implied by this backlog.
+
+## ALS — repo-memory maintenance and integration flags
+
+- [x] Schedule user-requested ALS feature in this release (2026-11-09), after
+  existing work and before the deferred Android presentation-hints proposal.
+- [ ] Audit ALS KB responses, repo-memory/developer-instruction injection at
+  initialization/handoffs, subagent identity/permission handling and settings.
+- [ ] Decide size threshold and reserved maintenance-subagent name/marker;
+  approve a concrete implementation and enforceable temporary grant contract.
+- [ ] Alert on every relevant KB response and init/handoff memory concatenation
+  while oversized; instruct automatic delegated compression of the canonical file.
+- [ ] Enforce Markdown-only, exact repo-memory-path writes by the maintenance
+  subagent. Other repo documentation needs explicit user approval. Enforce CWD/
+  symlink containment and grant expiry; naming alone must not bypass permissions.
+- [ ] Preserve user notes/facts during compression; obtain user direction only
+  for optional documentation offload within the maintenance workflow.
+- [ ] Add KB MCP usage instructions and non-clobbering automatic generic
+  repo-memory creation when enabled.
+- [ ] Split Repo memory integration from TE2 integration; migrate settings and
+  developer instructions without unintended loss or duplicated injection.
+- [ ] Test thresholds, all alert paths, safe creation, fidelity/offload, marker
+  spoofing/write restrictions/grant expiry and every settings combination;
+  obtain live acceptance separately. No implementation is authorized by intake.
+
+## Final backlog — native window presentation hints
+
+- [x] Record user proposal 2026-11-09 at the end of the plan/tracker.
+- [ ] Wait for the user to confirm the Android Electron application base is ready.
+- [ ] Audit existing dialog/window contracts and approve optional semantic role,
+  placement and animation hints for external hosts. Preserve desktop defaults,
+  reduced-motion behavior, modality/focus/security and existing lifecycle owners.
+- [ ] Implement and validate only after separate approval; no Android edits,
+  build, dependency or current-cutover scope expansion is authorized now.

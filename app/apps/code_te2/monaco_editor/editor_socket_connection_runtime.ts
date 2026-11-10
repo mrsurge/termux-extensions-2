@@ -5,9 +5,11 @@ import { withDiffLineNumbers } from './editor_diff_line_numbers.ts';
 import { acceptDocumentProjection, isCurrentDocumentProjection } from './editor_document_revision_runtime.ts';
 import { traceInlineDiffInit } from './editor_inline_diff_init_trace.ts';
 import { updateComparisonBaselineFence } from './editor_git_baseline_runtime.ts';
+import { createEditorSocketListenerOwner } from './editor_socket_listener_owner.ts';
 
 interface EditorSocketLike {
   on(eventName: string, handler: (payload: unknown) => void): void;
+  off?(eventName: string, handler: (payload: unknown) => void): void;
 }
 
 interface EditorRpcNotificationSource {
@@ -179,8 +181,17 @@ function applyModelLifecycle(deps: EditorSocketConnectionDeps, content: string, 
 
 export function registerEditorSocketConnectionHandlers(
   socket: EditorSocketLike,
-  deps: EditorSocketConnectionDeps,
-): void {
+  input: EditorSocketConnectionDeps,
+): { dispose(): void } {
+  const listeners = createEditorSocketListenerOwner();
+  const subscriptions: Array<() => void> = [];
+  let disposed = false;
+  const notifications = input.rpcNotifications;
+  const deps = input;
+  const subscribe = (method: string, handler: (payload: Record<string, unknown>) => void): void => {
+    const unsubscribe = notifications?.onNotification(method, payload => { if (!disposed) return handler(payload); });
+    if (unsubscribe) subscriptions.push(unsubscribe);
+  };
   // One presentation fence for both replay snapshots and explicit opens.
   // Per-path document revisions cannot supersede a different selected file.
   let snapshotSequence = 0;
@@ -473,27 +484,27 @@ export function registerEditorSocketConnectionHandlers(
     }
   };
 
-  socket.on('connect', () => {
+  listeners.listen(socket, 'connect', () => {
     deps.emitToHost('editor_ready', {});
     deps.emitToHost('editor:iframe_ready', {});
   });
-  socket.on('disconnect', () => {
+  listeners.listen(socket, 'disconnect', () => {
     // Retain the visible model, but invalidate unfinished work from this session.
     snapshotSequence += 1;
   });
 
   if (deps.rpcNotifications) {
-    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.stateSsot, handleSsotSnapshot);
-    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.comparisonChanged, (payload) => {
+    subscribe(EDITOR_RPC_NOTIFICATIONS.stateSsot, handleSsotSnapshot);
+    subscribe(EDITOR_RPC_NOTIFICATIONS.comparisonChanged, (payload) => {
       const project = typeof payload.projectPath === 'string' ? payload.projectPath : '';
       if (!project || !deps.getCurrentPath()?.startsWith(project + '/')) return;
       if (typeof payload.ref === 'string' && typeof payload.revision === 'number') {
         updateComparisonBaselineFence(payload.ref, payload.revision);
       }
     });
-    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
-    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
-    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);
+    subscribe(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
+    subscribe(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
+    subscribe(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);
   }
 
   const handleGitBaselinesPayload = (payload: unknown): void => {
@@ -505,6 +516,14 @@ export function registerEditorSocketConnectionHandlers(
   };
 
   if (deps.rpcNotifications) {
-    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.gitBaselines, handleGitBaselinesPayload);
+    subscribe(EDITOR_RPC_NOTIFICATIONS.gitBaselines, handleGitBaselinesPayload);
   }
+  return { dispose() {
+    if (disposed) return;
+    disposed = true;
+    snapshotSequence++;
+    listeners.dispose();
+    for (const unsubscribe of subscriptions) unsubscribe();
+    subscriptions.length = 0;
+  } };
 }

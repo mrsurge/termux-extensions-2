@@ -24,6 +24,127 @@ function context(uri, focused = false) {
 }
 const model = uri => ({ uri: { toString: () => uri }, getVersionId: () => 1 });
 
+test('color providers share by producer signature and route both callbacks with model fences', async () => {
+  const records = [], calls = [];
+  const namespace = { registerColorProvider(selector, provider) {
+    const entry = { selector, provider, disposed: 0 }; records.push(entry);
+    return { dispose() { entry.disposed++; } };
+  } };
+  const a = context('file:///a.py'), b = context('file:///b.py', true);
+  let finish;
+  const source = name => ({ __te2ProviderKey: 'colors:7',
+    provideDocumentColors(...args) { calls.push([name, 'colors', args]); return name; },
+    provideColorPresentations(...args) { calls.push([name, 'presentations', args]); return new Promise(resolve => { finish = resolve; }); },
+  });
+  const ad = sharedModelProviders(namespace, a).registerColorProvider('python', source('a'));
+  const bd = sharedModelProviders(namespace, b).registerColorProvider('python', source('b'));
+  assert.equal(records.length, 1);
+  const provider = records[0].provider, target = model(b.state.uri), info = {}, token = {};
+  assert.equal(provider.provideDocumentColors(target, token), 'b');
+  assert.deepEqual(calls[0], ['b', 'colors', [target, token]]);
+  const pending = provider.provideColorPresentations(target, info, token);
+  assert.deepEqual(calls[1], ['b', 'presentations', [target, info, token]]);
+  b.state.version++; finish(['obsolete']); assert.equal(await pending, undefined);
+  ad.dispose(); assert.equal(records[0].disposed, 0);
+  bd.dispose(); assert.equal(records[0].disposed, 1);
+});
+
+function semanticFixture(range = false) {
+  const records = [], calls = [], eventListeners = { a: new Set(), b: new Set() };
+  const register = (selector, provider) => {
+    const entry = { selector, provider, disposed: 0 }; records.push(entry);
+    return { dispose() { entry.disposed++; } };
+  };
+  const namespace = range ? { registerDocumentRangeSemanticTokensProvider: register }
+    : { registerDocumentSemanticTokensProvider: register };
+  const a = context('file:///a.py', true), b = context('file:///a.py');
+  const legends = { a: { tokenTypes: ['class'], tokenModifiers: [] }, b: { tokenTypes: ['class'], tokenModifiers: [] } };
+  const source = name => ({
+    getLegend: () => legends[name],
+    onDidChange(listener) { eventListeners[name].add(listener); return { dispose() { eventListeners[name].delete(listener); } }; },
+    provideDocumentSemanticTokens(...args) { calls.push([name, 'full', args]); return { resultId: '7', data: new Uint32Array([0, 0, 1, 0, 0]) }; },
+    provideDocumentRangeSemanticTokens(...args) { calls.push([name, 'range', args]); return { resultId: '7', data: new Uint32Array([0, 0, 1, 0, 0]) }; },
+    releaseDocumentSemanticTokens(id) { calls.push([name, 'release', id]); },
+  });
+  const registerOwner = (ctx, provider) => {
+    const facade = sharedModelProviders(namespace, ctx);
+    return range ? facade.registerDocumentRangeSemanticTokensProvider('python', provider)
+      : facade.registerDocumentSemanticTokensProvider('python', provider);
+  };
+  const ap = source('a'), bp = source('b');
+  return { a, b, ap, bp, legends, records, calls, eventListeners, registerOwner };
+}
+
+test('full semantic tokens retain producer IDs and restart deltas when focus selects another runtime', async () => {
+  const f = semanticFixture(), ad = f.registerOwner(f.a, f.ap), bd = f.registerOwner(f.b, f.bp);
+  assert.equal(f.records.length, 1);
+  const provider = f.records[0].provider, target = model(f.a.state.uri), token = {};
+  const first = await provider.provideDocumentSemanticTokens(target, null, token);
+  assert.notEqual(first.resultId, '7');
+  const again = await provider.provideDocumentSemanticTokens(target, first.resultId, token);
+  assert.equal(f.calls[1][2][1], '7');
+  f.a.state.focused = false; f.b.state.focused = true;
+  const second = await provider.provideDocumentSemanticTokens(target, first.resultId, token);
+  assert.equal(f.calls[2][0], 'b'); assert.equal(f.calls[2][2][1], undefined);
+  assert.notEqual(first.resultId, second.resultId);
+  provider.releaseDocumentSemanticTokens(first.resultId); provider.releaseDocumentSemanticTokens(first.resultId);
+  assert.deepEqual(f.calls[3], ['a', 'release', '7']);
+  ad.dispose(); // also releases the second retained result from a
+  assert.deepEqual(f.calls[4], ['a', 'release', '7']);
+  provider.releaseDocumentSemanticTokens(again.resultId); assert.equal(f.calls.length, 5);
+  provider.releaseDocumentSemanticTokens(second.resultId);
+  assert.deepEqual(f.calls[5], ['b', 'release', '7']);
+  bd.dispose(); assert.equal(f.records[0].disposed, 1);
+});
+
+for (const range of [false, true]) {
+  test(`${range ? 'range' : 'full'} semantic events aggregate owners and detach only the disposed source`, async () => {
+    const f = semanticFixture(range), ad = f.registerOwner(f.a, f.ap), bd = f.registerOwner(f.b, f.bp);
+    const provider = f.records[0].provider;
+    let changes = 0;
+    const subscription = provider.onDidChange(() => { changes++; });
+    for (const listeners of Object.values(f.eventListeners)) for (const listener of listeners) listener();
+    assert.equal(changes, 2);
+    ad.dispose(); assert.equal(changes, 3); // surviving provider must be re-queried
+    assert.equal(f.eventListeners.a.size, 0); assert.equal(f.eventListeners.b.size, 1);
+    assert.equal(f.records[0].disposed, 0);
+    const target = model(f.b.state.uri), bounds = {}, token = {};
+    const result = range ? await provider.provideDocumentRangeSemanticTokens(target, bounds, token)
+      : await provider.provideDocumentSemanticTokens(target, null, token);
+    assert.ok(result.data instanceof Uint32Array); assert.equal(f.calls[0][0], 'b');
+    if (range) assert.deepEqual(f.calls[0][2], [target, bounds, token]);
+    subscription.dispose(); bd.dispose();
+    assert.equal(f.eventListeners.b.size, 0); assert.equal(f.records[0].disposed, 1);
+  });
+
+  test(`${range ? 'range' : 'full'} semantic incompatible legends never share a registration or decode token indices`, async () => {
+    const f = semanticFixture(range), ad = f.registerOwner(f.a, f.ap);
+    f.legends.b = { tokenTypes: ['function'], tokenModifiers: [] };
+    const bd = f.registerOwner(f.b, f.bp);
+    assert.equal(f.records.length, 2);
+    assert.deepEqual(f.records[0].provider.getLegend().tokenTypes, ['class']);
+    assert.deepEqual(f.records[1].provider.getLegend().tokenTypes, ['function']);
+    f.legends.a.tokenTypes.push('variable'); // stale provider must be re-registered first
+    const provider = f.records[0].provider, target = model(f.a.state.uri);
+    const result = range ? await provider.provideDocumentRangeSemanticTokens(target, {}, {})
+      : await provider.provideDocumentSemanticTokens(target, null, {});
+    assert.equal(result, undefined); assert.equal(f.calls.length, 0);
+    assert.deepEqual(provider.getLegend().tokenTypes, ['class']);
+    ad.dispose(); bd.dispose();
+  });
+}
+
+test('obsolete pending full semantic replies release original IDs and never enter Monaco', async () => {
+  const f = semanticFixture();
+  let finish;
+  f.ap.provideDocumentSemanticTokens = () => new Promise(resolve => { finish = resolve; });
+  const lease = f.registerOwner(f.a, f.ap), provider = f.records[0].provider;
+  const pending = provider.provideDocumentSemanticTokens(model(f.a.state.uri), null, {});
+  lease.dispose(); finish({ resultId: 'late', data: new Uint32Array() });
+  assert.equal(await pending, undefined);
+  assert.deepEqual(f.calls, [['a', 'release', 'late']]);
+});
+
 test('completion lists resolve and release with their producer across focus changes', async () => {
   const registrations = [], calls = [];
   const namespace = { registerCompletionItemProvider(selector, provider) {
@@ -132,10 +253,13 @@ test('distinct selectors and Monaco namespaces never share a registration accide
   for (const lease of leases) lease.dispose();
 });
 
-test('remaining retained-result provider registrations pass through unchanged', () => {
-  const functions = { registerColorProvider() {}, registerDocumentSemanticTokensProvider() {} };
-  const facade = sharedModelProviders(functions, context('file:///a.py'));
-  for (const [key, value] of Object.entries(functions)) assert.equal(facade[key], value);
+test('unkeyed external color providers retain the original registration path', () => {
+  let received;
+  const namespace = { registerColorProvider(...args) { received = args; return 'original'; } };
+  const facade = sharedModelProviders(namespace, context('file:///a.py'));
+  const provider = { provideDocumentColors() {}, provideColorPresentations() {} };
+  assert.equal(facade.registerColorProvider('python', provider), 'original');
+  assert.deepEqual(received, ['python', provider]);
 });
 
 test('inlay hints resolve and release through their producer after focus changes', async () => {

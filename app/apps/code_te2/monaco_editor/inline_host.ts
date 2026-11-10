@@ -1,5 +1,6 @@
 import { EditorBootOwner } from './editor_boot_owner.ts';
 import { resolveWorkingEditorMount } from './editor_mount.ts';
+import type { MobileEditorRole } from '../src/mobile-input/editor-special-key-bridge.ts';
 
 const workingEditorBoot = new EditorBootOwner();
 const INLINE_EDITOR_API_BASE = '/api/app/code_te2';
@@ -231,6 +232,7 @@ const INLINE_EDITOR_HOST_STYLE = `
 `;
 
 interface InlineEditorBootOptions {
+  editorRole?: MobileEditorRole;
   ensureSocketIoLoaded?: (() => Promise<unknown>) | null;
   bootSnapshot?: unknown;
   buildSidebarMentionPayload?: (
@@ -360,6 +362,7 @@ export async function mountInlineEditorHost(
     await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
     const { startWorkingEditorRuntime } = await import('./m_editor_app.ts');
     await startWorkingEditorRuntime({
+      editorRole: options.editorRole ?? 'primary',
       mount: resolveWorkingEditorMount(editorFrame),
       bootSnapshot: options.bootSnapshot,
       buildSidebarMentionPayload: options.buildSidebarMentionPayload,

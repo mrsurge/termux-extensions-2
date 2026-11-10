@@ -923,6 +923,7 @@ export async function bootSecondaryEditorRuntime(
   await applyHostState(initialHostState);
   if (!contentLifecycle.historical) {
     await bootInlineEditorHost(editorFrame, {
+      editorRole: 'secondary',
       ensureSocketIoLoaded,
       bootSnapshot: fullSnapshot,
     });

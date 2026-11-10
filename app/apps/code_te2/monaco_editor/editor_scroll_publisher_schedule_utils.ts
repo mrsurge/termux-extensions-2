@@ -1,5 +1,5 @@
 export function scheduleScrollSend(
-  setTimeoutFn: typeof setTimeout,
+  setTimeoutFn: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>,
   sendFn: () => void,
   delayMs: number,
 ): ReturnType<typeof setTimeout> {

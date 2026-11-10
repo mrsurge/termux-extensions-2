@@ -12,6 +12,7 @@ type WindowWithMonacoBoot = Window & {
 };
 
 interface EditorMonacoBootRuntimeDeps {
+  isDisposed?(): boolean;
   getWindow(): WindowWithMonacoBoot;
   getApiBase(): string;
   getBootSnapshot(): unknown;
@@ -141,6 +142,7 @@ function configureMonacoEnvironment(
 export async function bootMonacoRuntime(
   deps: EditorMonacoBootRuntimeDeps,
 ): Promise<void> {
+  if (deps.isDisposed?.()) return;
   traceColdBoot('editor.boot.started', {});
   try {
     const apiBase = deps.getApiBase() || '';
@@ -158,6 +160,7 @@ export async function bootMonacoRuntime(
 
     const languageWorkersEnabled = deps.languageWorkersEnabled();
     const monacoNs = await loadBundledMonaco({ languageWorkersEnabled });
+    if (deps.isDisposed?.()) return;
     traceColdBoot('editor.monaco.loaded', {});
     win._loadedMonacoBundle = 'host.js';
     console.log(
@@ -173,6 +176,7 @@ export async function bootMonacoRuntime(
     // a boot snapshot or live replay may create/attach a document model.
     deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
+    if (deps.isDisposed?.()) return;
     traceColdBoot('editor.socket.connected', {});
     // Theme and backend-projected syntax can prepare concurrently. Both are
     // first-paint prerequisites; neither waits for WBA or the extension host.
@@ -180,16 +184,19 @@ export async function bootMonacoRuntime(
       deps.ensureDocumentTheme(),
       deps.ensureDocumentSyntax(),
     ]);
+    if (deps.isDisposed?.()) return;
     traceColdBoot('editor.theme_syntax.ready', {});
     deps.applyBootSnapshot();
     traceColdBoot('editor.snapshot.applied', {});
     await deps.ensureEditorWithPrefs();
+    if (deps.isDisposed?.()) return;
     const activeModel = deps.getActiveModelTrace?.();
     if (activeModel) traceColdBoot('model.first_mount', activeModel);
     if (!languageWorkersEnabled) {
       // Catalog enrichment follows WBA availability, not editor readiness. A
       // cold extension host must not delay the editor-ready/open-model handshake.
       void deps.ensureWorkbenchLanguageCatalogInstalled().then(() => {
+        if (deps.isDisposed?.()) return;
         deps.installWorkbenchLanguageBridgeProviders();
         deps.applyActiveModelLanguage();
       }).catch(() => {});
@@ -205,6 +212,7 @@ export async function bootMonacoRuntime(
     deps.updateDebug('boot=ok');
     deps.onReady?.();
   } catch (error) {
+    if (deps.isDisposed?.()) return;
     traceColdBoot('editor.boot.failed', {});
     console.error('[Monaco] boot failed', error);
     deps.updateDebug('boot=fail');
