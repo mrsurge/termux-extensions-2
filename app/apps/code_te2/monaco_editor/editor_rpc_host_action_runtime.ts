@@ -1,4 +1,5 @@
 import { bindSaveKeyCommand } from './editor_rpc_save_key_utils.ts';
+import type { EditorReadinessState } from './editor_renderer_context.ts';
 import { bindFocusRelay } from './editor_rpc_focus_relay_utils.ts';
 import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.ts';
 import { bindAndroidKeyboardRecovery } from './editor_android_keyboard_recovery_utils.ts';
@@ -36,6 +37,7 @@ type WindowWithEditorHostActions = Window & {
 
 interface EditorRpcHostActionRuntimeDeps {
   getWindow(): WindowWithEditorHostActions;
+  getReadinessState?(): EditorReadinessState;
   getEditor(): EditorLike | null;
   getDiffEditor(): DiffEditorLike | null;
   getMobileInputBinding?(): MobileEditorInputBinding;
@@ -68,6 +70,7 @@ export function createEditorRpcHostActionRuntime(
   let androidKeyboardRecoveryDisposable: DisposableLike | null = null;
   let cefriumImeDismissalDisposable: DisposableLike | null = null;
   let mobileSpecialKeysDisposable: DisposableLike | null = null;
+  const readiness = (): EditorReadinessState => deps.getReadinessState?.() ?? deps.getWindow();
 
   function resolveActiveEditor(): EditorLike | null {
     const diffEditor = deps.getDiffEditor();
@@ -87,7 +90,7 @@ export function createEditorRpcHostActionRuntime(
         const project = typeof params.project === 'string' ? params.project : null;
         console.log('[adapter_state] editor rpc received:', status);
         if (status === 'ready') {
-          const win = deps.getWindow();
+          const win = readiness();
           win.__te2AdapterReady = true;
           win.__te2AdapterProject = project;
           // The backend readiness snapshot/event gates intelligence transport,
@@ -95,7 +98,7 @@ export function createEditorRpcHostActionRuntime(
           deps.onAdapterReady?.();
           deps.replayOpenFileAfterBaton();
         } else {
-          const win = deps.getWindow();
+          const win = readiness();
           win.__te2AdapterReady = false;
           if (project) win.__te2AdapterProject = project;
         }
@@ -105,7 +108,7 @@ export function createEditorRpcHostActionRuntime(
       });
       projectSwitchingUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.projectSwitching, (params) => {
         if (disposed) return;
-        const win = deps.getWindow();
+        const win = readiness();
         const project = typeof params.projectPath === 'string' ? params.projectPath : null;
         const switchId = typeof params.switchId === 'string' ? params.switchId : null;
         win.__te2AdapterReady = false;
@@ -116,7 +119,7 @@ export function createEditorRpcHostActionRuntime(
       });
       projectSwitchedUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.projectSwitched, (params) => {
         if (disposed) return;
-        const win = deps.getWindow();
+        const win = readiness();
         const project = typeof params.projectPath === 'string' ? params.projectPath : null;
         const switchId = typeof params.switchId === 'string' ? params.switchId : null;
         win.__te2ProjectSwitchId = switchId;

@@ -1,4 +1,6 @@
 import { isUnknownArray } from '../src/rpc/value-types.ts';
+import type { EditorReadinessState } from './editor_renderer_context.ts';
+import type { SocketClientIdentity } from '../src/rpc/socketio-topology.ts';
 import { isAdapterReady, wbIsFrameworkReady, wbIsBarrierOpen } from './editor_workbench_barrier_utils.js';
 import { wbFlushDidChangeIfReady, wbFlushPendingAfterOpen, wbFlushSymbolsIfReady, wbPublishDidChange } from './editor_workbench_flush_utils.js';
 import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
@@ -107,6 +109,8 @@ interface ElectronProjectionTraceEvent {
 
 interface WorkbenchRuntimeDeps {
   getWindow(): Window & typeof globalThis;
+  getReadinessState?(): EditorReadinessState;
+  getRendererIdentity?(): Readonly<SocketClientIdentity>;
   getMonaco(): MonacoLike | null;
   getEditor(): EditorLike | null;
   getModel(): MonacoModelLike | null;
@@ -244,7 +248,8 @@ export function createEditorWorkbenchRuntime(
         : '';
     } catch (_) {}
     return {
-      role: new URLSearchParams(deps.getWindow().location.search).get('te2_editor_role') || 'primary',
+      role: deps.getRendererIdentity?.().clientRole ?? new URLSearchParams(deps.getWindow().location.search).get('te2_editor_role') ?? 'primary',
+      rendererId: deps.getRendererIdentity?.().clientInstanceId ?? null,
       url: deps.getWindow().location.href,
       currentPath: deps.getCurrentPath(),
       generation: currentGeneration(),
@@ -466,11 +471,13 @@ export function createEditorWorkbenchRuntime(
   }
 
   function isProjectSwitchInProgress(): boolean {
+    if (deps.getReadinessState) return deps.getReadinessState().__te2ProjectSwitchInProgress === true;
     const win = deps.getWindow() as Window & typeof globalThis & { __te2ProjectSwitchInProgress?: boolean };
     return !!win.__te2ProjectSwitchInProgress;
   }
 
   function activeAdapterProject(): string {
+    if (deps.getReadinessState) return deps.getReadinessState().__te2AdapterProject || '';
     const win = deps.getWindow() as Window & typeof globalThis & { __te2AdapterProject?: string | null };
     return typeof win.__te2AdapterProject === 'string' ? win.__te2AdapterProject : '';
   }
@@ -746,6 +753,7 @@ export function createEditorWorkbenchRuntime(
 
   function barrierOpen(path: string | null, generation?: number): boolean {
     return wbIsBarrierOpen({
+      readiness: deps.getReadinessState?.(),
       win: deps.getWindow(),
       editor: deps.getEditor(),
       model: deps.getModel(),
@@ -964,7 +972,8 @@ export function createEditorWorkbenchRuntime(
   function canSendOpenFile(payload?: WorkbenchPendingOpenFilePayload | null): boolean {
     if (isProjectSwitchInProgress()) return false;
     const path = String(payload?.path || deps.getCurrentPath() || '');
-    return isAdapterReady(deps.getWindow()) && deps.isWbaRpcConnected() && frameworkReady() && adapterAcceptsPath(path);
+    const ready = deps.getReadinessState ? deps.getReadinessState().__te2AdapterReady === true : isAdapterReady(deps.getWindow());
+    return ready && deps.isWbaRpcConnected() && frameworkReady() && adapterAcceptsPath(path);
   }
 
   function sameOpenRequest(

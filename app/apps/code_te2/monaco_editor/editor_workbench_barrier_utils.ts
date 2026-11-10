@@ -1,3 +1,4 @@
+import type { EditorReadinessState } from './editor_renderer_context.ts';
 interface WorkbenchBarrierFlowLike {
   openAckGeneration?: number;
   openAckPath?: string;
@@ -5,6 +6,7 @@ interface WorkbenchBarrierFlowLike {
 
 interface WorkbenchBarrierOptions {
   win?: Window & typeof globalThis;
+  readiness?: EditorReadinessState;
   editor?: object | null;
   model?: object | null;
   currentPath?: string | null;
@@ -24,7 +26,7 @@ export function wbIsFrameworkReady(editor: object | null | undefined, model: obj
 
 export function wbIsBarrierOpen(opts: WorkbenchBarrierOptions | null | undefined): boolean {
   const options = opts || {};
-  if (!isAdapterReady(options.win)) return false;
+  if (!(options.readiness ? options.readiness.__te2AdapterReady : isAdapterReady(options.win))) return false;
   if (!wbIsFrameworkReady(options.editor, options.model, options.currentPath)) return false;
   const wantPath = String(options.path || options.currentPath || '');
   const wantGen = Number.isFinite(Number(options.generation)) ? Number(options.generation) : Number(options.currentGeneration || 0);

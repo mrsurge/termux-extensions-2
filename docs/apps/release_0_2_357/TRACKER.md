@@ -359,7 +359,19 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   neither second same-realm mounting nor remount is enabled yet. Backend
   membership and shared assets are untouched. 31 focused lifecycle/transport
   tests pass; frontend/WBA no-Any checks and build pass. No runtime restart or
-  Android asset publication. This follow-up remains uncommitted.
+  Android asset publication. Checkpoint committed/pushed as `55cc4e04`.
+- [x] Renderer context ownership: socket queries, mirror source identity, quick
+  fixes and mobile input role use an immutable per-instance identity snapshot,
+  validated by the existing topology normalizer. Inline boot accepts an explicit
+  identity; isolated pages retain the configured page identity as their default.
+  Host-action notifications, WBA acknowledgments and workbench barriers use an
+  instance-owned readiness/project-switch object instead of shared `window`
+  fields. Diagnostic role/renderer metadata follows that context too. Existing
+  helper callers without the new injection retain their legacy behavior.
+  36 focused identity/lifecycle/workbench tests, strict frontend/WBA no-Any
+  checks and asset build pass. No backend/WBA-server source change,
+  runtime restart, iframe removal, Android publish or live shared-mount claim.
+  User live acceptance: everything still working (2026-11-09); checkpoint approved.
 - [x] File-menu target-capture foundation: backend focus selection is scoped to
   trusted same-main-page renderer associations and live connections. Blur retains
   focus through a dialog; disconnect falls back without evicting a live duplicate

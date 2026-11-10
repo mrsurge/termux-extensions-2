@@ -27,7 +27,7 @@ export const SOCKET_IO_NAMESPACES = {
   wba: RPC_NAMESPACES.wba,
 } as const;
 
-interface SocketClientIdentity {
+export interface SocketClientIdentity {
   clientInstanceId: string;
   mainPageClientInstanceId?: string;
   windowId?: string | null;
@@ -39,6 +39,10 @@ let socketClientIdentity: Readonly<SocketClientIdentity> | null = null;
 export function configureCodeTe2SocketIdentity(
   identity: SocketClientIdentity,
 ): void {
+  socketClientIdentity = normalizeCodeTe2SocketIdentity(identity);
+}
+
+export function normalizeCodeTe2SocketIdentity(identity: SocketClientIdentity): Readonly<SocketClientIdentity> {
   const clientInstanceId = String(identity.clientInstanceId || '').trim().toLowerCase();
   const windowId = String(identity.windowId || '').trim().toLowerCase();
   const clientRole = identity.clientRole === 'secondary' ? 'secondary' : 'primary';
@@ -53,7 +57,7 @@ export function configureCodeTe2SocketIdentity(
   if (windowId && !/^window_[a-z0-9]{20,64}$/.test(windowId)) {
     throw new Error('Code TE2 socket window identity is invalid');
   }
-  socketClientIdentity = Object.freeze({
+  return Object.freeze({
     clientInstanceId,
     mainPageClientInstanceId,
     windowId: windowId || null,
@@ -61,20 +65,24 @@ export function configureCodeTe2SocketIdentity(
   });
 }
 
+export function getCodeTe2SocketIdentity(): Readonly<SocketClientIdentity> {
+  if (socketClientIdentity === null) throw new Error('Code TE2 socket identity has not been configured');
+  return socketClientIdentity;
+}
+
+export function codeTe2SocketQuery(identity: Readonly<SocketClientIdentity>, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    app_id: CODE_TE2_APP_ID,
+    client_instance_id: identity.clientInstanceId,
+    main_page_client_instance_id: identity.mainPageClientInstanceId,
+    client_role: identity.clientRole,
+    ...(identity.windowId ? { window_id: identity.windowId } : {}),
+    ...extra,
+  };
+}
+
 export function fileEditorSocketQuery(
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  if (socketClientIdentity === null) {
-    throw new Error('Code TE2 socket identity has not been configured');
-  }
-  return {
-    app_id: CODE_TE2_APP_ID,
-    client_instance_id: socketClientIdentity.clientInstanceId,
-    main_page_client_instance_id: socketClientIdentity.mainPageClientInstanceId,
-    client_role: socketClientIdentity.clientRole,
-    ...(socketClientIdentity.windowId
-      ? { window_id: socketClientIdentity.windowId }
-      : {}),
-    ...extra,
-  };
+  return codeTe2SocketQuery(getCodeTe2SocketIdentity(), extra);
 }

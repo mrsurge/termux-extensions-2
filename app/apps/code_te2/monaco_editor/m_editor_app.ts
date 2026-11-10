@@ -29,7 +29,6 @@ import {
 } from "./editor_textmate_debug_utils.ts";
 import { applyJumpToLine as applyJumpToLineAt } from "./editor_jump_utils.ts";
 import { resolveMonacoThemeId } from "./editor_theme_resolver_utils.ts";
-import { isAdapterReady } from "./editor_workbench_barrier_utils.js";
 import { buildMonacoOptionsFromPrefsState } from "./editor_monaco_options_utils.ts";
 import { ensureTe2DiffThemeApplied } from "./editor_diff_theme_utils.ts";
 import { vscodeThemeToMonacoTheme } from "./editor_theme_convert_utils.ts";
@@ -114,6 +113,8 @@ import { bootMonacoRuntime } from "./editor_monaco_boot_runtime.ts";
 import { registerEditorSocketConnectionHandlers } from "./editor_socket_connection_runtime.ts";
 import { createEditorWorkbenchLanguageCatalogRuntime } from "./editor_workbench_language_catalog_runtime.ts";
 import { createEditorWorkbenchRuntime } from "./editor_workbench_runtime.ts";
+import { createEditorRendererContext } from './editor_renderer_context.ts';
+import type { SocketClientIdentity } from '../src/rpc/socketio-topology.ts';
 import { createEditorRpcTransport, publishEditorControlResponse } from "./editor_rpc_transport.ts";
 import {
   EDITOR_RPC_METHODS,
@@ -129,7 +130,6 @@ import {
   APP_WORKER_SOCKET_IO_TRANSPORTS,
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
-  fileEditorSocketQuery,
 } from "../src/rpc/socketio-topology.ts";
 import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.ts";
 import { createEditorExtensionNavigationRuntime } from "./editor_extension_navigation_runtime.ts";
@@ -384,6 +384,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
 }
 
 interface WorkingEditorBootOptions {
+  rendererIdentity?: SocketClientIdentity;
   signal?: AbortSignal;
   mount: WorkingEditorMount;
   editorRole?: MobileEditorRole;
@@ -400,6 +401,10 @@ export interface WorkingEditorRuntime {
 
 export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): WorkingEditorRuntime {
   options.signal?.throwIfAborted();
+  const rendererContext = createEditorRendererContext(options.rendererIdentity);
+  if (options.editorRole && options.editorRole !== rendererContext.identity.clientRole) {
+    throw new Error('Working editor role does not match its renderer identity');
+  }
   const runtimeSocketListeners = createEditorSocketListenerOwner();
   const lifetime = createEditorRuntimeLifetime({
     setTimeoutFn: (callback, delay) => window.setTimeout(callback, delay),
@@ -659,7 +664,8 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   } as Parameters<typeof createEditorBreadcrumbRuntime>[0]);
 
   var editorHostActionRuntime = createEditorRpcHostActionRuntime({
-    getMobileInputBinding: () => ({ host: options.mount.root, role: options.editorRole }),
+    getReadinessState: () => rendererContext.readiness,
+    getMobileInputBinding: () => ({ host: options.mount.root, role: rendererContext.identity.clientRole }),
     getWindow: function () {
       return window;
     },
@@ -1155,6 +1161,8 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     semanticTokensDiagGated: new Set<string>(),
   };
   var workbenchRuntime = createEditorWorkbenchRuntime({
+    getReadinessState: () => rendererContext.readiness,
+    getRendererIdentity: () => rendererContext.identity,
     getWindow: function () {
       return window;
     },
@@ -1332,7 +1340,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   // Routes hover/symbols/openFile through editor_ws.py → adapter stdio pipe.
   // Replaces the old deprecated websocket harness path.
   function _isAdapterReady(): boolean {
-    return isAdapterReady(window);
+    return rendererContext.readiness.__te2AdapterReady === true;
   }
 
   function _wbCurrentGeneration() {
@@ -1482,7 +1490,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
       monaco: window.monaco as unknown as Parameters<typeof createEditorQuickFixRuntime>[0]['monaco'],
       getContext: _currentLanguageContext,
       getGeneration: () => wbaConnectionRevision,
-      getClient: () => String(fileEditorSocketQuery().client_instance_id || ''),
+      getClient: () => rendererContext.identity.clientInstanceId,
       isEnabled: () => !_languageWorkersEnabled(),
       getEditor: () => (diffEditor?.getModifiedEditor?.() ?? editor) as unknown as ReturnType<Parameters<typeof createEditorQuickFixRuntime>[0]['getEditor']>,
       call: (method, params) => {
@@ -2379,7 +2387,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
       editorRpcSocket = window.io(SOCKET_IO_NAMESPACES.editorRpc, {
         path: SOCKET_IO_PATHS.editor,
         transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
-        query: fileEditorSocketQuery(),
+        query: rendererContext.socketQuery(),
         auth: { rpcCodec: RPC_CODEC_MSGPACK_GZIP_V1 },
       }) as EditorSocketLike;
       if (!_languageWorkersEnabled()) {
@@ -2389,7 +2397,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
           autoConnect: false,
           path: SOCKET_IO_PATHS.wba,
           transports: ["websocket"],
-          query: fileEditorSocketQuery(),
+          query: rendererContext.socketQuery(),
           auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
         }) as EditorSocketLike;
       }
@@ -2612,8 +2620,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
             });
           },
           getClientInstanceId: function () {
-            const value = fileEditorSocketQuery().client_instance_id;
-            return typeof value === 'string' ? value : null;
+            return rendererContext.identity.clientInstanceId;
           },
           setApplyingRemote: function (value: boolean) {
             isApplyingRemote = !!value;
@@ -2709,12 +2716,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
           languageBridgeProviders.resetDynamicProviderCaches(reason);
         },
         onWorkspaceSwitchedAck: function (event) {
-          const win = window as Window &
-            typeof globalThis & {
-              __te2AdapterReady?: boolean;
-              __te2AdapterProject?: string | null;
-              __te2ProjectSwitchInProgress?: boolean;
-            };
+          const win = rendererContext.readiness;
           const project =
             typeof event.workspaceFolder === "string"
               ? event.workspaceFolder
@@ -2764,7 +2766,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
 
       // Cover a readiness snapshot received before socket construction too;
       // later snapshots/events use onAdapterReady above. No polling is needed.
-      if ((window as Window & { __te2AdapterReady?: boolean }).__te2AdapterReady) {
+      if (rendererContext.readiness.__te2AdapterReady) {
         wbaRpcSocket?.connect();
       }
 

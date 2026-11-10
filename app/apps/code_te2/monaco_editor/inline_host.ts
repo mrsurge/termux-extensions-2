@@ -1,6 +1,7 @@
 import { EditorBootOwner } from './editor_boot_owner.ts';
 import { resolveWorkingEditorMount } from './editor_mount.ts';
 import type { MobileEditorRole } from '../src/mobile-input/editor-special-key-bridge.ts';
+import type { SocketClientIdentity } from '../src/rpc/socketio-topology.ts';
 
 const workingEditorBoot = new EditorBootOwner();
 const INLINE_EDITOR_API_BASE = '/api/app/code_te2';
@@ -232,6 +233,7 @@ const INLINE_EDITOR_HOST_STYLE = `
 `;
 
 interface InlineEditorBootOptions {
+  rendererIdentity?: SocketClientIdentity;
   editorRole?: MobileEditorRole;
   ensureSocketIoLoaded?: (() => Promise<unknown>) | null;
   bootSnapshot?: unknown;
@@ -364,6 +366,7 @@ export async function mountInlineEditorHost(
     const { startWorkingEditorRuntime } = await import('./m_editor_app.ts');
     signal.throwIfAborted();
     const runtime = startWorkingEditorRuntime({
+      rendererIdentity: options.rendererIdentity,
       signal,
       editorRole: options.editorRole ?? 'primary',
       mount: resolveWorkingEditorMount(editorFrame),

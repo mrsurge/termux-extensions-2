@@ -4199,6 +4199,12 @@ primary-host reset behavior pending an explicit secondary untitled contract.
 instance before clearing its DOM, without closing backend documents or removing
 shared assets. A disposed/failed boot retains the realm reservation; remount and
 multiple working mounts remain blocked pending outer-window ownership cutover.
+`editor_renderer_context.ts` snapshots a validated renderer/main-page/role
+identity per runtime. Inline boot accepts an explicit identity; existing isolated
+pages default to their configured identity. Editor/WBA socket queries, mirror
+source matching, quick fixes and mobile role use that snapshot. Readiness and
+project-switch gates are per instance: host notifications and WBA acknowledgments
+update the same object consumed by workbench barriers, not page-global fields.
 The secondary tab-bar and same-DOM container/focus
 cutover remain separate work; the current reduced renderer still uses its
 existing lifecycle below.
