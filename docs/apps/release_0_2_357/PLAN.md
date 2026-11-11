@@ -112,8 +112,8 @@ Controlled instance disposal is implemented, including abort fences during
 asset/import boot. Boot admission is now per root with duplicate renderer-ID
 protection. The visible mobile working iframe is removed; direct-mount/input
 handoff is implemented. The user live-accepted the cutover and reload identity
-fix, but explicitly confirms the extra-key focus bug remains unresolved; keep
-that repair and its live acceptance open.
+fix. The subsequent outer-mount focus capture and Android Monaco blur correction
+are also user-live-accepted, including one-tap extra-key handoff (2026-11-10).
 TextMate catalog/factory/token providers and snippet production now have shared
 lease ownership; the stale grammar-transport fixtures are repaired. These are
 preconditions for that direct mount; historical/extension isolation remains.

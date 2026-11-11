@@ -321,10 +321,36 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   sticky modifiers, return-to-primary and terminal-drawer routing. This is still
   the existing iframe implementation, not live shared-DOM acceptance. File-menu
   targeting and full runtime teardown remain before enabling shared mounts.
-- [ ] Original mobile secondary extra-key focus bug remains unresolved: user
+- [x] Original mobile secondary extra-key focus bug fixed and live-accepted: user
   reproduced it after the ownership changes and again after working iframe
   removal. Direct mounting did not resolve the live failure. Investigate and
   validate the handoff; do not infer acceptance from shared-document unit tests.
+  First follow-up (capture on Monaco's element) failed live. A bounded Cefrium
+  trace confirmed primary textarea focus followed by a handled secondary key
+  request, without an ownership-change event. The corrected binding reuses
+  `bindMobileEditorFocusCapture` on the stable outer mount, ahead of Monaco's
+  own capture handlers. A regression with earlier stopImmediatePropagation
+  capture listeners fails before this correction and passes after it; both
+  editor handoffs and teardown are covered. All 25 selected mobile/direct-mount/
+  keyboard tests pass; frontend/WBA typechecks report zero Any findings/compiler
+  diagnostics and the asset build passes. At that checkpoint live acceptance remained open; no
+  restart/APK publication.
+  User confirmed routing works after the outer-mount correction, but switching
+  editors requires two taps. A second bounded Cefrium trace shows first-tap
+  ownership changing correctly, then old-editor focus restoring at touch-end.
+  Focus stacks identify Android `TextAreaInput` blur -> native textarea write ->
+  `setSelectionRange` -> `focus()`, before `_hasFocus` is cleared. The maintained
+  `worktrees/vscode-te2-diff` source now flushes/cancels pending IME work, clears
+  focus, then reseeds without selecting/refocusing the old textarea. The real
+  source regression in `android_selection_sync.test.mjs` fails before and passes
+  after the fix for Chromium and Gecko; it also checks exactly-once pending-input
+  delivery, no delayed refocus and subsequent return focus. Monaco `editor-distro`
+  compiled with zero errors; only the affected ESM module/map was published,
+  followed by bootstrap/host regeneration. All nine IME tests pass against both
+  fork source and published ESM; 18 selected direct-mount/input/keyboard tests
+  pass, and frontend/WBA typechecks report zero Any/compiler findings. User
+  confirmed one-tap switching and requested commit/push (2026-11-10), closing
+  this focus bug. This is not an APK/native change.
 - [x] Transport teardown sub-slice: editor/WBA frontend transports now support
   terminal idempotent disposal. Pending RPCs/startup waits reject, timers and
   local notification handlers clear, owned socket/manager listeners detach,

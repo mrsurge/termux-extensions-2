@@ -16,6 +16,7 @@ import {
   currentMobileEditorModifiers,
   currentMobileEditorOwner,
   currentMobileEditorPanelState,
+  bindMobileEditorFocusCapture,
   markMobileEditorPanelToggleHandled,
   markMobileEditorSpecialKeyHandled,
   publishMobileEditorFocus,
@@ -437,8 +438,9 @@ export function bindMobileEditorSpecialKeys(
   const onOwnerChanged = (): void => syncOverlayOwner();
   const onEditorFocus = (): void => publishMobileEditorFocus(win, role);
   win.addEventListener(MOBILE_EDITOR_OWNER_EVENT, onOwnerChanged);
-  editorDom.addEventListener('focusin', onEditorFocus);
-  editorDom.addEventListener('pointerdown', onEditorFocus);
+  // Capture outside Monaco: its own capture handlers can stop later listeners
+  // on editorDom as well as bubbling. Reuse the secondary mount's ownership rule.
+  const releaseFocusCapture = bindMobileEditorFocusCapture(host, win, role);
   syncOverlayOwner();
   if (doc.activeElement && editorDom.contains(doc.activeElement)) {
     onEditorFocus();
@@ -775,8 +777,7 @@ export function bindMobileEditorSpecialKeys(
       );
       win.removeEventListener(MOBILE_EDITOR_PANEL_STATE_EVENT, syncPanelState);
       win.removeEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
-      editorDom.removeEventListener('focusin', onEditorFocus);
-      editorDom.removeEventListener('pointerdown', onEditorFocus);
+      releaseFocusCapture();
       if (modifierStates.get(editor) === state) {
         if (!sharedPrimary()) {
           state.setCtrlMode('off');

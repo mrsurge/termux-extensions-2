@@ -10,7 +10,7 @@ const bundle = await build({ stdin: { contents: `
 `, resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', platform: 'browser' });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
-function fixture() {
+function fixture(interceptMonacoCapture = false) {
   const win = new Window({ url: 'http://localhost/app/code_te2' });
   Object.defineProperty(win.navigator, 'userAgent', { value: 'Android Mobile' });
   const saved = new Map();
@@ -26,7 +26,16 @@ function fixture() {
   const make = role => {
     const host = win.document.getElementById(role), input = host.querySelector('textarea');
     input.addEventListener('keydown', event => keys.push([role, event.key, event.ctrlKey, event.altKey, event.shiftKey]));
-    const editor = { getDomNode: () => host, focus: () => input.focus(),
+    const editorDom = win.document.createElement('div');
+    editorDom.className = 'monaco-editor';
+    host.append(editorDom);
+    editorDom.append(input);
+    if (interceptMonacoCapture) {
+      const consume = event => event.stopImmediatePropagation();
+      editorDom.addEventListener('pointerdown', consume, true);
+      editorDom.addEventListener('focusin', consume, true);
+    }
+    const editor = { getDomNode: () => editorDom, focus: () => input.focus(),
       getAction: id => ({ run() { actions.push([role, id]); } }) };
     const binding = api.bindMobileEditorSpecialKeys(editor, win, () => saves.push(role), { role, host });
     return { host, input, editor, binding };
@@ -75,6 +84,30 @@ test('explicit roles in one document route extra keys and keep primary modifier 
   } finally { f.dispose(); }
 });
 
+test('Monaco-consumed pointer and focus events still reclaim primary extra-key ownership', () => {
+  const f = fixture();
+  try {
+    const consume = event => event.stopPropagation();
+    f.primary.input.addEventListener('pointerdown', consume);
+    f.primary.input.addEventListener('focusin', consume);
+    f.secondary.input.focus();
+    assert.equal(api.currentMobileEditorOwner(f.win), 'secondary');
+    f.primary.input.dispatchEvent(new f.win.Event('pointerdown', { bubbles: true }));
+    assert.equal(api.currentMobileEditorOwner(f.win), 'primary');
+    f.tap(f.button('Right'));
+    assert.equal(f.keys.at(-1)[0], 'primary');
+    f.secondary.input.focus();
+    f.primary.input.focus();
+    assert.equal(api.currentMobileEditorOwner(f.win), 'primary');
+    f.tap(f.button('Right'));
+    assert.equal(f.keys.at(-1)[0], 'primary');
+    f.primary.binding.dispose();
+    api.setMobileEditorOwner(f.win, 'secondary');
+    f.primary.input.dispatchEvent(new f.win.Event('pointerdown', { bubbles: true }));
+    assert.equal(api.currentMobileEditorOwner(f.win), 'secondary');
+  } finally { f.dispose(); }
+});
+
 test('same-page secondary forwards terminal keys once and returns to the focused editor', () => {
   const f = fixture();
   try {
@@ -93,5 +126,24 @@ test('same-page secondary forwards terminal keys once and returns to the focused
       { role: 'primary', host: f.primary.host }), /already has an input binding/);
     assert.throws(() => api.bindMobileEditorSpecialKeys(f.primary.editor, f.win, null,
       { role: 'secondary', host: f.secondary.host }), /does not own/);
+  } finally { f.dispose(); }
+});
+
+test('mount ownership precedes Monaco capture interception in both editors', () => {
+  const f = fixture(true);
+  try {
+    for (const role of ['secondary', 'primary', 'secondary', 'primary']) {
+      const target = f[role];
+      target.input.dispatchEvent(new f.win.Event('pointerdown', { bubbles: true }));
+      assert.equal(api.currentMobileEditorOwner(f.win), role);
+      target.input.focus();
+      assert.equal(api.currentMobileEditorOwner(f.win), role);
+      f.tap(f.button('Right'));
+      assert.equal(f.keys.at(-1)[0], role);
+    }
+    f.primary.binding.dispose();
+    api.setMobileEditorOwner(f.win, 'secondary');
+    f.primary.input.dispatchEvent(new f.win.Event('pointerdown', { bubbles: true }));
+    assert.equal(api.currentMobileEditorOwner(f.win), 'secondary');
   } finally { f.dispose(); }
 });

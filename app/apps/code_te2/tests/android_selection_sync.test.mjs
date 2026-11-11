@@ -123,4 +123,33 @@ test('guard mapping uses UTF-16 columns and retains empty-line caret boundaries'
   assert.equal(TextAreaState.deduceAndroidImeSelection(empty, empty), null);
 });
 
+for (const chrome of [false, true]) {
+  test(`Android ${chrome ? 'Chromium' : 'Gecko'} blur flushes pending input without reclaiming textarea focus`, async () => {
+    const f = fixture(chrome);
+    const destination = document.createElement('textarea');
+    document.body.append(destination);
+    try {
+      f.textarea.value = '\u21ddhelloX world\n\n';
+      f.textarea.setSelectionRange(7, 7);
+      f.textarea.dispatchEvent(new win.InputEvent('input', { data: 'X', inputType: 'insertText' }));
+      let blurSelectionWrites = 0;
+      const write = f.wrapper.setSelectionRange.bind(f.wrapper);
+      f.wrapper.setSelectionRange = (...args) => { blurSelectionWrites++; return write(...args); };
+      destination.focus();
+      assert.equal(blurSelectionWrites, 0, 'blur-time reseeding must not select/refocus the old textarea');
+      assert.equal(document.activeElement, destination);
+      assert.equal(f.input.isFocused(), false);
+      assert.equal(f.edits.length, 1, 'pending IME input must flush exactly once before leaving');
+      assert.equal(f.edits[0].text, 'X');
+      await new Promise(resolve => win.requestAnimationFrame(() => setTimeout(resolve, 10)));
+      assert.equal(f.edits.length, 1);
+      assert.equal(document.activeElement, destination);
+      assert.equal(blurSelectionWrites, 0);
+      f.textarea.focus();
+      assert.equal(document.activeElement, f.textarea);
+      assert.equal(f.input.isFocused(), true);
+    } finally { f.dispose(); destination.remove(); }
+  });
+}
+
 test.after(() => win.happyDOM.abort());

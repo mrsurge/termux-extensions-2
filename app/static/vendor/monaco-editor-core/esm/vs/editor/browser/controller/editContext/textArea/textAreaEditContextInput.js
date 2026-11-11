@@ -307,12 +307,16 @@ let TextAreaInput = class TextAreaInput extends Disposable {
             if (this._browser.isAndroid) {
                 this._flushAndroidImeInput();
                 this._cancelAndroidImeTransaction();
-                this.writeNativeTextAreaContent('android blur');
             }
             else if (endedComposition) {
                 this.writeNativeTextAreaContent('blurWithoutCompositionEnd');
             }
             this._setHasFocus(false);
+            if (this._browser.isAndroid) {
+                // A focused-state write selects and refocuses the textarea. Finish
+                // losing focus before reseeding, or switching editors takes two taps.
+                this.writeNativeTextAreaContent('android blur');
+            }
         }));
         this._register(this._textArea.onSyntheticTap(() => {
             if (this._browser.isAndroid) {
@@ -365,10 +369,6 @@ let TextAreaInput = class TextAreaInput extends Disposable {
         this._androidImeReseed.cancel();
         this._androidImeTransactionPending = false;
         this._androidImeInputType = '';
-    }
-    _initializeFromTest(textAreaState) {
-        this._hasFocus = true;
-        this._textAreaState = textAreaState ?? TextAreaState.readFromTextArea(this._textArea, null);
     }
     _installSelectionChangeListener() {
         // See https://github.com/microsoft/vscode/issues/27216 and https://github.com/microsoft/vscode/issues/98256
@@ -673,3 +673,4 @@ export class TextAreaWrapper extends Disposable {
         }
     }
 }
+//# sourceMappingURL=textAreaEditContextInput.js.map
