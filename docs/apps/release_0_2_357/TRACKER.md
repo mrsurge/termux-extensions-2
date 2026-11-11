@@ -351,6 +351,23 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   pass, and frontend/WBA typechecks report zero Any/compiler findings. User
   confirmed one-tap switching and requested commit/push (2026-11-10), closing
   this focus bug. This is not an APK/native change.
+- [x] Extra-key haptic feedback implemented: Code TE2's shared editor key row
+  (also used for terminal-drawer routing) and editor overlay buttons request
+  one optional 100 ms vibration per primary-pointer press. Hold repeats and
+  secondary dispatch do not duplicate pulses. Missing/throwing APIs leave input
+  intact. `MobileEditorInputBinding.getVibrationDurationMs` supports a live
+  future settings value; zero disables, invalid values fall back to 100 ms.
+  All 26 selected extra-key/direct-mount/palette tests pass, including held-key
+  single-pulse behavior, renderer/terminal targeting, live override, unavailable/
+  denied vibration and teardown. Frontend/WBA no-Any typechecks and asset build
+  pass. Repaired one stale zoom-guard assertion to use the existing shared mount
+  selector; production zoom CSS is unchanged.
+- [x] User live-accepted extra-key vibration in the browser (2026-11-10).
+  User reports the current Android Cefrium port does not support the API;
+  feedback remains an optional no-op there. The planned replacement Electron
+  port will provide its own API support; no native workaround is added here.
+- [ ] Later wire haptic duration/disable UI and persistence through the existing
+  preference owner. Standalone Terminal/File Explorer rows remain unchanged.
 - [x] Transport teardown sub-slice: editor/WBA frontend transports now support
   terminal idempotent disposal. Pending RPCs/startup waits reject, timers and
   local notification handlers clear, owned socket/manager listeners detach,

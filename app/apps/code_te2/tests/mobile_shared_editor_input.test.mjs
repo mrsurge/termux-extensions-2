@@ -10,9 +10,12 @@ const bundle = await build({ stdin: { contents: `
 `, resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', platform: 'browser' });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
-function fixture(interceptMonacoCapture = false) {
+function fixture(interceptMonacoCapture = false, getVibrationDurationMs) {
   const win = new Window({ url: 'http://localhost/app/code_te2' });
   Object.defineProperty(win.navigator, 'userAgent', { value: 'Android Mobile' });
+  const vibrations = [];
+  Object.defineProperty(win.navigator, 'vibrate', { configurable: true,
+    value(duration) { assert.equal(this, win.navigator); vibrations.push(duration); return true; } });
   const saved = new Map();
   for (const key of ['window', 'document', 'CustomEvent', 'Event', 'InputEvent', 'KeyboardEvent', 'Element', 'HTMLElement', 'Node']) {
     saved.set(key, globalThis[key]); globalThis[key] = key === 'window' ? win : win[key];
@@ -37,7 +40,7 @@ function fixture(interceptMonacoCapture = false) {
     }
     const editor = { getDomNode: () => editorDom, focus: () => input.focus(),
       getAction: id => ({ run() { actions.push([role, id]); } }) };
-    const binding = api.bindMobileEditorSpecialKeys(editor, win, () => saves.push(role), { role, host });
+    const binding = api.bindMobileEditorSpecialKeys(editor, win, () => saves.push(role), { role, host, getVibrationDurationMs });
     return { host, input, editor, binding };
   };
   const primary = make('primary'), secondary = make('secondary');
@@ -51,7 +54,7 @@ function fixture(interceptMonacoCapture = false) {
       target.dispatchEvent(event);
     }
   };
-  return { win, primary, secondary, panel, button, tap, keys, saves, actions,
+  return { win, primary, secondary, panel, button, tap, keys, saves, actions, vibrations,
     dispose() {
       primary.binding.dispose(); secondary.binding.dispose();
       win.happyDOM.abort();
@@ -119,6 +122,7 @@ test('same-page secondary forwards terminal keys once and returns to the focused
     f.win.dispatchEvent(new f.win.CustomEvent(api.TERMINAL_SPECIAL_KEY_FOCUS_EVENT, { detail: { active: true } }));
     f.tap(f.button('Right'));
     assert.deepEqual(terminalKeys, ['ArrowRight']); assert.equal(f.keys.length, 0);
+    assert.deepEqual(f.vibrations, [100]);
     f.win.dispatchEvent(new f.win.CustomEvent(api.TERMINAL_SPECIAL_KEY_FOCUS_EVENT, { detail: { active: false } }));
     f.primary.input.focus(); f.tap(f.button('Right'));
     assert.equal(f.keys.at(-1)[0], 'primary');
@@ -145,5 +149,47 @@ test('mount ownership precedes Monaco capture interception in both editors', () 
     api.setMobileEditorOwner(f.win, 'secondary');
     f.primary.input.dispatchEvent(new f.win.Event('pointerdown', { bubbles: true }));
     assert.equal(api.currentMobileEditorOwner(f.win), 'secondary');
+  } finally { f.dispose(); }
+});
+
+test('extra keys vibrate once per press, not per hold repeat or renderer', async () => {
+  const f = fixture();
+  try {
+    f.secondary.input.focus();
+    const button = f.button('Right');
+    const press = new f.win.Event('pointerdown', { bubbles: true, cancelable: true });
+    Object.defineProperties(press, { pointerId: { value: 1 }, button: { value: 0 }, isPrimary: { value: true } });
+    button.dispatchEvent(press);
+    await new Promise(resolve => setTimeout(resolve, 520));
+    button.dispatchEvent(new f.win.Event('pointerup', { bubbles: true, cancelable: true }));
+    assert.ok(f.keys.length > 1, 'the hold must actually repeat');
+    assert.deepEqual(f.vibrations, [100]);
+    assert.ok(f.keys.every(key => key[0] === 'secondary'));
+    f.primary.input.focus();
+    f.tap(f.button('Control'));
+    assert.deepEqual(f.vibrations, [100, 100]);
+    f.tap(f.primary.host.parentElement.querySelector('.te2-mobile-special-key-trigger'));
+    assert.deepEqual(f.vibrations, [100, 100, 100]);
+    f.primary.binding.dispose();
+    f.tap(button);
+    assert.equal(f.vibrations.length, 3, 'disposed row must not retain haptic listeners');
+  } finally { f.dispose(); }
+});
+
+test('haptic duration supports a live override, zero disables, and failures preserve input', () => {
+  let duration = 35;
+  const f = fixture(false, () => duration);
+  try {
+    f.primary.input.focus();
+    f.tap(f.button('Right'));
+    duration = 0; f.tap(f.button('Right'));
+    duration = Number.NaN; f.tap(f.button('Right'));
+    assert.deepEqual(f.vibrations, [35, 100]);
+    Object.defineProperty(f.win.navigator, 'vibrate', { value: undefined, configurable: true });
+    f.tap(f.button('Right'));
+    Object.defineProperty(f.win.navigator, 'vibrate', { value() { throw new Error('denied'); }, configurable: true });
+    f.tap(f.button('Right'));
+    assert.equal(f.keys.length, 5);
+    assert.ok(f.keys.every(key => key[0] === 'primary'));
   } finally { f.dispose(); }
 });

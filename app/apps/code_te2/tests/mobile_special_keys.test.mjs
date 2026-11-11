@@ -22,7 +22,7 @@ test("keeps Cefrium focused Monaco textareas above Chromium's small-input zoom t
 
   assert.match(
     source,
-    /#editor-frame\[data-te2-native-renderer='cefrium'\] \.monaco-editor textarea\.inputarea\.android-ime-input \{\s*font-size: 16px !important;/,
+    /\[data-te2-working-editor-host\]\[data-te2-native-renderer='cefrium'\] \.monaco-editor textarea\.inputarea\.android-ime-input \{\s*font-size: 16px !important;/,
   );
 });
 

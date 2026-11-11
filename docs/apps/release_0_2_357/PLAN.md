@@ -503,6 +503,20 @@ only; investigate the ALS source and approve a concrete implementation separatel
   combinations and existing-session/handoff behavior. Implementation and live
   acceptance remain separate gates; do not interrupt the current editor cutover.
 
+## Follow-up — extra-key haptic settings
+
+Code TE2 extra-key presses default to a 100 ms optional `navigator.vibrate`
+pulse, once per press rather than each hold repeat. The editor overlay and
+shared row (including terminal-drawer targeting) use one capture-bound helper;
+unavailable/denied vibration must not affect input or focus. The typed binding
+callback `getVibrationDurationMs` is the future settings injection point.
+
+Later add a persisted duration/disable setting through the existing preference
+owner, passing its current value through that callback (0 disables feedback).
+Do not add a second settings store. Standalone Terminal and File Explorer rows
+are outside this initial implementation and can reuse the behavior in a later
+approved slice. No Android native changes are needed for the browser API.
+
 ## Final backlog — native window presentation hints
 
 User proposal recorded 2026-11-09. Defer until the user confirms their Android

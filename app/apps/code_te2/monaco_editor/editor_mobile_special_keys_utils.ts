@@ -31,6 +31,7 @@ import {
   type MobileEditorSpecialKeyRequestDetail,
 } from '../src/mobile-input/editor-special-key-bridge.ts';
 import { bindPointerHoldRepeat } from '../src/mobile-input/pointer-hold-repeat.ts';
+import { bindExtraKeyHaptics } from '../src/mobile-input/extra-key-haptics.ts';
 import { bindQuickInputKeys, focusedQuickInput, dispatchQuickInputKey, quickInputAction } from './editor_quick_input_keys.ts';
 
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
@@ -82,6 +83,7 @@ const windowBindings = new WeakMap<Window, Map<MobileEditorRole, MobileSpecialKe
 export interface MobileEditorInputBinding {
   role?: MobileEditorRole;
   host?: HTMLElement;
+  getVibrationDurationMs?: () => number;
 }
 
 export function isMobileUserAgent(navigatorLike: MobileNavigatorLike): boolean {
@@ -659,6 +661,8 @@ export function bindMobileEditorSpecialKeys(
   win.addEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
 
   const cleanups = [
+    bindExtraKeyHaptics(panel, binding.getVibrationDurationMs),
+    bindExtraKeyHaptics(overlay, binding.getVibrationDurationMs),
     bindQuickInputKeys(editor, doc, () => state.shiftArmed, () => {
       state.consumeOneShot();
       if (role === 'secondary') publishMobileEditorModifiersConsumed(win, role);
