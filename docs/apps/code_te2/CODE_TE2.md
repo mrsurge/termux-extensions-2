@@ -4225,17 +4225,27 @@ editor; new grammar requests use a remaining owner's editor RPC transport.
 Final release disposes providers and invalidates pending publication. Snippet
 syntax-provider leases similarly restore a live survivor or clear on last
 release, preventing retained snippets from calling a disposed editor.
-The secondary tab-bar and ordinary desktop-browser enablement remain separate
-work. Mobile working content uses the direct shell below; its focus cutover
-still requires live acceptance. Electron retains its native presentation.
+Both primary and secondary working-file tabs use `createFileTabsController` and
+the shared `file-tab-styles.ts` chrome. Secondary consumes only its UI RPC
+placement/foreground/decoration facts, never the primary page's window state.
+Tab activation and revision/generation-fenced close reuse existing host RPCs.
+Ordering is optional local presentation state keyed by project, main-page id
+and area; legacy primary order seeds the new primary key. Unknown membership
+and global final-close remain backend-owned. Tab-cycle routing queries the
+existing mount input owner, so only the active area responds. Controller
+disposal removes global/document listeners, reorder timers/scroll locks and
+context menus. Historical content hides the working strip instead of becoming
+a working-file tab. Ordinary desktop-browser enablement remains separate work;
+Electron retains its native presentation and mobile uses the direct shell below.
 
 Electron main owns one retained framework-partition `WebContentsView`. Dock,
 Collapse, Detach, and Attach reparent that exact renderer between the main
 window and a frameless `BrowserWindow` without navigation. Close disposes the
-renderer but does not clear its backend foreground, so reopen reconstructs a
-fresh renderer against the warm client state. The reduced renderer mounts one
-inline Monaco surface and a filename/action header without a background tab
-strip. Its Save, Save As, Discard Draft, file open, and WBA traffic use its own
+renderer only after the existing fenced backend area-close succeeds; collapse
+and detach do not close documents. Closing one tab uses the existing local
+presentation/global-final-close transaction instead. The reduced renderer
+mounts one inline Monaco surface and a working-file tab/action header. Its Save,
+Save As, Discard Draft, file open, and WBA traffic use its own
 authenticated UI IPC, Editor, and WBA identities; Editor-originated Save, Focus,
 and Blur notifications target only that client's presentation room.
 

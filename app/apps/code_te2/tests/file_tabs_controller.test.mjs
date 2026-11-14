@@ -50,7 +50,7 @@ test('host chrome uses file tabs without a duplicate filename projection', async
   );
   assert.match(template, /fe-panel-toggle-icon--right/);
   assert.match(
-    template,
+    await readFile(path.join(appRoot, 'main_page/frontend/ui/file-tab-styles.ts'), 'utf8'),
     /\.fe-file-tab\.fe-draft \.fe-file-tab-label::before\s*\{[^}]*content:\s*"\*"/s,
   );
   assert.doesNotMatch(template, /\.fe-file-tab\.fe-draft::after/);
@@ -105,6 +105,90 @@ test('tab close submits revision and project fences before opening its backend-s
       if (!changeFocus) assert.deepEqual(calls[1], ['open', '/workspace/b']);
     } finally { dom.restore(); }
   }
+});
+
+test('paired tab controllers isolate order, projection, cycling and disposal', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController, fileTabOrderStorageKey } = await importFileTabs();
+    let activeArea = 'secondary';
+    const opened = [];
+    const create = area => {
+      const track = new FakeElement(), viewport = new FakeElement();
+      track.querySelectorAll = () => track.children.filter(tab => tab.dataset.exists === 'true');
+      const controller = createFileTabsController({viewport, track,
+        orderScope: `${area}:client_a`, isActive: () => activeArea === area,
+        formatFileNameDisplay: name => name,
+        openFile: async path => {opened.push([area,path]);}, closeRecentFile: async()=>{}, resetToNewFile(){},
+      });
+      controller.installWindowHooks({stateEvents:area === 'primary'});
+      return {track,viewport,controller};
+    };
+    const primary = create('primary'), secondary = create('secondary');
+    const state = (area, revision = 3) => ({projectPath:'/project', revision, projectGeneration:2,
+      recents:['a','b','c'].map(name=>({path:`/project/${name}`,exists:true})),
+      editorPlacement:{paths:area === 'primary' ? ['/project/a','/project/b'] : ['/project/b','/project/c'],revision},
+      clientForeground:{path:'/project/b'}});
+    localStorage.setItem(fileTabOrderStorageKey('/project'),JSON.stringify(['/project/b','/project/a']));
+    primary.controller.broadcastOpenState(state('primary'));
+    secondary.controller.refreshOpenState(state('secondary'));
+    secondary.controller.refreshClientForeground(state('secondary'));
+    assert.deepEqual(primary.track.children.map(tab=>tab.dataset.path),['/project/b','/project/a']);
+    assert.deepEqual(secondary.track.children.map(tab=>tab.dataset.path),['/project/b','/project/c']);
+    assert.notEqual(fileTabOrderStorageKey('/project','primary:client_a'),fileTabOrderStorageKey('/project','secondary:client_a'));
+    const cycle = ()=>window.dispatchEvent(new CustomEvent('code-te2:cycle-file-tab',{detail:1}));
+    cycle(); await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(opened,[['secondary','/project/c']]);
+    window.dispatchEvent(new CustomEvent('code-te2:open-state-changed',{detail:state('primary',4)}));
+    assert.deepEqual(secondary.track.children.map(tab=>tab.dataset.path),['/project/b','/project/c']);
+    secondary.controller.dispose(); secondary.controller.dispose();
+    cycle(); await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(opened.length,1);
+    activeArea='primary'; cycle(); await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(opened.at(-1),['primary','/project/a']);
+    const wheel = new Event('wheel',{cancelable:true});Object.defineProperties(wheel,{deltaX:{value:0},deltaY:{value:30}});
+    secondary.viewport.dispatchEvent(wheel);
+    assert.equal(secondary.viewport.scrollLeft,0);
+    primary.controller.dispose();
+  } finally {dom.restore();}
+});
+
+test('tab projection accepts a new project generation and rejects old-generation facts', async () => {
+  const dom=installDom();
+  try {
+    const {createFileTabsController}=await importFileTabs();
+    const track=new FakeElement();
+    const controller=createFileTabsController({viewport:new FakeElement(),track,
+      formatFileNameDisplay:n=>n,openFile:async()=>{},closeRecentFile:async()=>{},resetToNewFile(){}});
+    const state=(generation,revision,path)=>({projectPath:'/project',projectGeneration:generation,revision,
+      recents:[{path,exists:true}]});
+    controller.refreshOpenState(state(2,20,'/project/old'));
+    controller.refreshOpenState(state(3,1,'/project/new'));
+    controller.refreshOpenState(state(2,30,'/project/stale'));
+    assert.equal(track.children[0].dataset.path,'/project/new');
+    controller.dispose();
+  } finally {dom.restore();}
+});
+
+test('disposing during a touch reorder releases the document scroll lock', async () => {
+  const dom=installDom();
+  try {
+    const {createFileTabsController}=await importFileTabs();
+    const track=new FakeElement(),viewport=new FakeElement();
+    const controller=createFileTabsController({viewport,track,formatFileNameDisplay:n=>n,
+      openFile:async()=>{},closeRecentFile:async()=>{},resetToNewFile(){}});
+    controller.refreshOpenState({projectPath:'/project',recents:[{path:'/project/a',exists:true}]});
+    controller.installWindowHooks();
+    const down=new Event('pointerdown');
+    Object.defineProperties(down,{target:{get:()=>track.children[0]},pointerId:{value:9},pointerType:{value:'touch'},clientX:{value:10},clientY:{value:10}});
+    track.dispatchEvent(down);
+    await new Promise(resolve=>setTimeout(resolve,440));
+    assert.equal(viewport.classList.values.has('is-reordering'),true);
+    controller.dispose();
+    assert.equal(viewport.classList.values.has('is-reordering'),false);
+    const move=new Event('touchmove',{cancelable:true});document.dispatchEvent(move);
+    assert.equal(move.defaultPrevented,false);
+  }finally{dom.restore();}
 });
 
 async function importFileTabs() {

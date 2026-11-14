@@ -303,11 +303,9 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   owner-disposed. Two-mount/toolbar/hidden/teardown, nested/separate-window and
   editor-replacement tests pass. All 185 selected regressions pass;
   frontend/WBA no-Any checks/typechecks and asset build pass.
-- [ ] Input-ownership live regression: existing relative-number toggle, tab-cycle
-  chords and Explorer-to-editor focus return. Single-editor boot/iframe remains;
-  this is not live shared-mount acceptance. File-menu targeting, mobile extra-key
-  handoff and complete per-runtime teardown remain unfinished. No runtime restart,
-  native build, Android publication or WBA server source change in this slice.
+- [x] This earlier single-editor ownership checkpoint is superseded by the
+  subsequent accepted direct-mount/File-menu cutover and live focus fixes below;
+  it is not another pending iframe-removal implementation task.
 - [x] Mobile input-ownership sub-slice: working boot/host actions pass explicit
   role and mount; sticky modifier state is editor-owned. A shared-page secondary
   does not republish projected Ctrl state into the primary helper. Primary panel
@@ -317,10 +315,9 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   tests cover routing/modifiers/teardown and wrong/duplicate binding rejection.
   All 187 selected regressions pass; frontend/WBA no-Any checks/typechecks and
   asset build pass. No WBA server source change, native rebuild or restart.
-- [ ] Live mobile regression after matching assets: primary/secondary extra keys,
-  sticky modifiers, return-to-primary and terminal-drawer routing. This is still
-  the existing iframe implementation, not live shared-DOM acceptance. File-menu
-  targeting and full runtime teardown remain before enabling shared mounts.
+- [x] This iframe-era mobile-input checkpoint is superseded by the accepted
+  direct-mount and one-tap extra-key handoff below. Preserve the recorded tests
+  and acceptance limits rather than scheduling the old iframe implementation.
 - [x] Original mobile secondary extra-key focus bug fixed and live-accepted: user
   reproduced it after the ownership changes and again after working iframe
   removal. Direct mounting did not resolve the live failure. Investigate and
@@ -504,19 +501,37 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   pass. Electron strict checks and unit suite passed at that checkpoint. The
   four TextMate transport failures recorded then are repaired in the shared
   TextMate ownership gate above; the transport suite now passes.
-- [ ] S2 secondary tab bar/direct Explorer-to-secondary open; unique tabs per
-  area, unknown remote placement -> primary, restore/reconnect reconciliation.
-  Test local presentation removal versus global last-local close, other-client
-  dual placement, disconnect, draft/save/cancel and stale open/close revisions.
+- [x] Direct Explorer-to-secondary opening already exists for Electron and
+  mobile through `main.ts::openInSecondWindow`; this slice preserves it.
+- [x] Secondary working-file tab bar implemented using the primary controller
+  and shared tab chrome, not another file/model state machine. Both areas scope
+  order to project/main-page/area; existing primary order seeds migration.
+  Secondary snapshots and its own UI IPC facts project backend placement,
+  foreground and decorations. Existing host open/close RPCs preserve membership
+  and revision/project-generation fences. Historical comparisons remain separate.
+  Controllers now dispose listeners, reorder timers/scroll locks, pending reveal
+  and menus. Both tab bars query the existing editor input owner for cycle chords;
+  secondary never consumes primary window state or overwrites its singleton.
+  Automated gate: 58 selected tab/direct-shell/mobile/keyboard/content/geometry
+  tests pass; the Electron bridge test uses native/network/Monaco construction
+  boundary doubles, not a live native window. Unchanged backend ownership/
+  restore/content suites pass 37 tests plus 10 subtests. Frontend/WBA no-Any
+  typechecks and asset build pass. No Python/Rust/WBA server source changes,
+  shared restart or Android asset publication; no mypyc/native rebuild required.
+- [x] User generally live-accepted the new tab UI and requested commit/push
+  (2026-11-14): everything working well. This does not claim separately observed
+  coverage of every Electron/mobile restore/close/project-switch scenario.
+- [ ] Follow-up presentation-state bug reported by the user; details will follow
+  this checkpoint. Do not infer the symptom or treat acceptance as its resolution.
 - [ ] S3 ordinary desktop browser support and one responsive outer pane/tab
   container. Mobile direct working mounting/iframe removal is implemented above;
-  live acceptance remains open. Preserve historical/extension isolation and
+  that cutover is live-accepted. Preserve historical/extension isolation and
   native Electron overlay/detach behavior.
-- [ ] S3 shared mobile/desktop File menu active-area targeting with menu-focus
-  retention, stale target guards and extension-panel action policy.
-- [ ] S3 reuse terminal drawer's focus/modifier/extra-key ownership for primary
-  and secondary; fix secondary -> primary key routing and verify sticky/consumed
-  modifiers, file switches, pane close/hide and terminal transitions.
+- [x] S3 shared File-menu target capture/action routing implemented and
+  live-accepted above. New/untitled secondary semantics and extension-panel
+  action policy stay with their later feature slices.
+- [x] S3 primary/secondary extra-key focus handoff fixed and live-accepted above;
+  do not reopen it as an iframe-removal prerequisite. Preserve its regressions.
 - [ ] S4 extension-created secondary panels as tabs and sidebar transfer;
   preserve surface identity, live state, messages, readiness, focus/visibility,
   retained contexts, disposal, native reparenting and project/WBA generation.

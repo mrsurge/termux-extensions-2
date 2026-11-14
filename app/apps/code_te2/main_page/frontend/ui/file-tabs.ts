@@ -27,6 +27,8 @@ interface FileTabsControllerDeps {
   onError?: (message: string) => void;
   resetToNewFile: () => void;
   onActiveDraftChanged?: (path: string, hasDraft: boolean) => void;
+  orderScope?: string;
+  isActive?: () => boolean;
 }
 
 interface FileTabsOpenState {
@@ -166,8 +168,8 @@ function normalizedDecorations(payload: unknown): Map<string, FileTabDecoration>
   return result;
 }
 
-export function fileTabOrderStorageKey(projectPath: string): string {
-  return `${ORDER_STORAGE_PREFIX}${projectPath}`;
+export function fileTabOrderStorageKey(projectPath: string, scope = ''): string {
+  return scope ? `${ORDER_STORAGE_PREFIX}${scope}:${projectPath}` : `${ORDER_STORAGE_PREFIX}${projectPath}`;
 }
 
 export function mergeFileTabOrder(
@@ -238,10 +240,12 @@ export function revealFileTabInViewport(
   }
 }
 
-function storedOrder(projectPath: string): string[] {
+function storedOrder(projectPath: string, scope = ''): string[] {
   if (!projectPath) return [];
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(fileTabOrderStorageKey(projectPath)) || '[]');
+    const stored = localStorage.getItem(fileTabOrderStorageKey(projectPath, scope))
+      ?? (scope.startsWith('primary:') ? localStorage.getItem(fileTabOrderStorageKey(projectPath)) : null);
+    const value: unknown = JSON.parse(stored || '[]');
     return isUnknownArray(value)
       ? value.filter((path): path is string => typeof path === 'string' && Boolean(path))
       : [];
@@ -250,10 +254,10 @@ function storedOrder(projectPath: string): string[] {
   }
 }
 
-function persistOrder(projectPath: string, paths: string[]): void {
+function persistOrder(projectPath: string, paths: string[], scope = ''): void {
   if (!projectPath) return;
   try {
-    localStorage.setItem(fileTabOrderStorageKey(projectPath), JSON.stringify(paths));
+    localStorage.setItem(fileTabOrderStorageKey(projectPath, scope), JSON.stringify(paths));
   } catch {
     // Ordering persistence is optional presentation state.
   }
@@ -271,6 +275,8 @@ async function applyFileIcon(icon: HTMLElement, fileName: string): Promise<void>
 }
 
 export function createFileTabsController(deps: FileTabsControllerDeps) {
+  let disposed = false;
+  const cleanups: Array<() => void> = [];
   let projectPath = '';
   let openRevision = 0;
   let projectGeneration = 0;
@@ -294,7 +300,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   }
 
   function openContextMenu(entry: RecentFileEntry, clientX: number, clientY: number): void {
-    if (!entry.exists || !deps.openInSecondWindow) return;
+    if (disposed || !entry.exists || !deps.openInSecondWindow) return;
     closeContextMenu();
     const menu = document.createElement('div');
     menu.className = 'fe-file-tab-context-menu';
@@ -344,7 +350,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     const byPath = new Map(recents.map((entry) => [entry.path, entry]));
     const paths = mergeFileTabOrder(
       recents.map((entry) => entry.path),
-      storedOrder(projectPath),
+      storedOrder(projectPath, deps.orderScope),
     );
     return paths
       .map((path) => byPath.get(path))
@@ -356,7 +362,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       deps.track.querySelectorAll<HTMLElement>('.fe-file-tab[data-path]'),
       (tab) => tab.dataset.path || '',
     ).filter(Boolean);
-    persistOrder(projectPath, paths);
+    persistOrder(projectPath, paths, deps.orderScope);
   }
 
   function scheduleActiveTabReveal(): void {
@@ -391,6 +397,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   }
 
   async function openEntry(entry: RecentFileEntry): Promise<void> {
+    if (disposed) return;
     if (!entry.exists) {
       console.warn('[FileTabs] File does not exist:', entry.path);
       return;
@@ -398,16 +405,18 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     try {
       await deps.openFile(entry.path);
     } catch (error) {
+      if (disposed) return;
       console.error('[FileTabs] Failed to open file:', error);
     }
   }
 
   async function closeEntry(entry: RecentFileEntry): Promise<void> {
-    if (pendingClosePath) return;
+    if (disposed || pendingClosePath) return;
     pendingClosePath = entry.path;
     let activeSuccessor: string | null = null;
     const wasActive = entry.path === activePath;
     const requestedProject = projectPath;
+    const requestedGeneration = projectGeneration;
     try {
       if (wasActive) {
         const availablePaths = visualEntries()
@@ -416,7 +425,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
         activeSuccessor = chooseFileTabCloseSuccessor(availablePaths, entry.path);
       }
       const result = await deps.closeRecentFile(entry.path, openRevision, requestedProject, projectGeneration);
-      if (projectPath !== requestedProject) return;
+      if (disposed || projectPath !== requestedProject || projectGeneration !== requestedGeneration) return;
       if (isRecord(result) && Object.hasOwn(result, 'successor')) {
         activeSuccessor = typeof result.successor === 'string' ? result.successor : null;
       }
@@ -425,6 +434,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
         else deps.resetToNewFile();
       }
     } catch (error) {
+      if (disposed) return;
       console.error('[FileTabs] Failed to close recent file:', error);
       deps.onError?.(error instanceof Error ? error.message : String(error));
     } finally {
@@ -433,6 +443,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   }
 
   function render(): void {
+    if (disposed) return;
     const entries = visualEntries();
     closeContextMenu();
     deps.track.replaceChildren();
@@ -524,23 +535,26 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   }
 
   function refreshOpenState(state: unknown): void {
+    if (disposed) return;
     const next = normalizedOpenState(state);
-    if (next.projectPath === projectPath && next.revision < openRevision) return;
+    if (next.projectPath === projectPath && (next.projectGeneration < projectGeneration
+      || (next.projectGeneration === projectGeneration && next.revision < openRevision))) return;
     openRevision = next.revision;
     projectGeneration = next.projectGeneration;
     projectPath = next.projectPath;
     recents = next.recents;
     const order = mergeFileTabOrder(
       recents.map((entry) => entry.path),
-      storedOrder(projectPath),
+      storedOrder(projectPath, deps.orderScope),
     );
-    persistOrder(projectPath, order);
+    persistOrder(projectPath, order, deps.orderScope);
     render();
     projectActiveDraftState();
     scheduleActiveTabReveal();
   }
 
   function refreshClientForeground(state: unknown): void {
+    if (disposed) return;
     activePath = clientForegroundPath(state);
     render();
     projectActiveDraftState();
@@ -548,6 +562,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   }
 
   function refreshDecorations(payload: unknown): void {
+    if (disposed) return;
     const record = isRecord(payload) ? payload : {};
     if (
       typeof record.projectPath === 'string'
@@ -562,14 +577,16 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   }
 
   function installReorderAndScroll(): void {
-    deps.viewport.addEventListener('wheel', (event) => {
+    const wheel = (event: WheelEvent): void => {
       const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
         ? event.deltaX
         : event.deltaY;
       if (!delta) return;
       deps.viewport.scrollLeft += delta;
       event.preventDefault();
-    }, { passive: false });
+    };
+    deps.viewport.addEventListener('wheel', wheel, { passive: false });
+    cleanups.push(() => deps.viewport.removeEventListener('wheel', wheel));
 
     let candidate: HTMLElement | null = null;
     let pointerId = -1;
@@ -686,7 +703,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       reordering = false;
     };
 
-    deps.track.addEventListener('pointerdown', (event) => {
+    const pointerDown = (event: PointerEvent): void => {
       if (typeof event.button === 'number' && event.button !== 0) return;
       if (!(event.target instanceof Element)) return;
       if (event.target.closest('.fe-file-tab-close')) return;
@@ -699,9 +716,11 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       if (pointerType === 'touch') {
         longPressTimer = setTimeout(beginReorder, TOUCH_REORDER_LONG_PRESS_MS);
       }
-    });
+    };
+    deps.track.addEventListener('pointerdown', pointerDown);
+    cleanups.push(() => deps.track.removeEventListener('pointerdown', pointerDown));
 
-    document.addEventListener('pointermove', (event) => {
+    const pointerMove = (event: PointerEvent): void => {
       if (!candidate || event.pointerId !== pointerId) return;
       if (!reordering) {
         const distance = Math.hypot(event.clientX - startX, event.clientY - startY);
@@ -715,23 +734,29 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       event.preventDefault();
       updateEdgeScroll(event.clientX, event.clientY);
       reorderCandidateAtPoint(event.clientX, event.clientY);
-    }, { passive: false });
+    };
+    document.addEventListener('pointermove', pointerMove, { passive: false });
+    cleanups.push(() => document.removeEventListener('pointermove', pointerMove));
 
-    document.addEventListener('pointerup', (event) => {
+    const pointerEnd = (event: PointerEvent): void => {
       if (event.pointerId === pointerId) finishReorder();
-    });
-    document.addEventListener('pointercancel', (event) => {
-      if (event.pointerId === pointerId) finishReorder();
+    };
+    document.addEventListener('pointerup', pointerEnd);
+    document.addEventListener('pointercancel', pointerEnd);
+    cleanups.push(() => {
+      finishReorder();
+      document.removeEventListener('pointerup', pointerEnd);
+      document.removeEventListener('pointercancel', pointerEnd);
     });
   }
 
-  function installWindowHooks(): void {
-    if (installed) return;
+  function installWindowHooks(options: { stateEvents?: boolean } = {}): void {
+    if (disposed || installed) return;
     installed = true;
     installReorderAndScroll();
     let cycling = false;
-    window.addEventListener('code-te2:cycle-file-tab', (event) => {
-      if (!(event instanceof CustomEvent) || (event.detail !== -1 && event.detail !== 1) || cycling || pendingClosePath) return;
+    const cycle = (event: Event): void => {
+      if (disposed || deps.isActive?.() === false || !(event instanceof CustomEvent) || (event.detail !== -1 && event.detail !== 1) || cycling || pendingClosePath) return;
       const tabs = Array.from(deps.track.querySelectorAll<HTMLElement>('.fe-file-tab[data-exists="true"]'));
       if (tabs.length < 2) return;
       const index = tabs.findIndex(tab => tab.dataset.path === activePath);
@@ -740,23 +765,37 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       if (!path) return;
       cycling = true;
       void deps.openFile(path, { keyboard: true }).catch((error: unknown) => console.warn('[file_tabs] cycle failed', error)).finally(() => { cycling = false; });
-    });
-    window.addEventListener('code-te2:open-state-changed', (event) => {
+    };
+    const openState = (event: Event): void => {
       if (event instanceof CustomEvent) refreshOpenState(event.detail);
-    });
-    window.addEventListener('code-te2:active-file-changed', (event) => {
+    };
+    const foreground = (event: Event): void => {
       if (event instanceof CustomEvent) refreshClientForeground(event.detail);
-    });
-    window.addEventListener('code-te2:file-tabs-decorations-changed', (event) => {
+    };
+    const decorate = (event: Event): void => {
       if (event instanceof CustomEvent) refreshDecorations(event.detail);
+    };
+    window.addEventListener('code-te2:cycle-file-tab', cycle);
+    if (options.stateEvents !== false) {
+      window.addEventListener('code-te2:open-state-changed', openState);
+      window.addEventListener('code-te2:active-file-changed', foreground);
+      window.addEventListener('code-te2:file-tabs-decorations-changed', decorate);
+    }
+    window.addEventListener('pagehide', dispose, { once: true });
+    cleanups.push(() => {
+      window.removeEventListener('code-te2:cycle-file-tab', cycle);
+      window.removeEventListener('code-te2:open-state-changed', openState);
+      window.removeEventListener('code-te2:active-file-changed', foreground);
+      window.removeEventListener('code-te2:file-tabs-decorations-changed', decorate);
+      window.removeEventListener('pagehide', dispose);
     });
-    window.addEventListener('pagehide', closeContextMenu, { once: true });
   }
 
   function broadcastOpenState(state: unknown): void {
-    if (!state) return;
+    if (disposed || !state) return;
     const next = normalizedOpenState(state);
-    if (next.projectPath === projectPath && next.revision < openRevision) return;
+    if (next.projectPath === projectPath && (next.projectGeneration < projectGeneration
+      || (next.projectGeneration === projectGeneration && next.revision < openRevision))) return;
     window.__codeTe2EditorState = state;
     refreshOpenState(state);
     refreshClientForeground(state);
@@ -766,7 +805,18 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   return {
     refreshOpenState,
     refreshDecorations,
+    refreshClientForeground,
     installWindowHooks,
     broadcastOpenState,
+    dispose,
   };
+
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    cancelUiFrame(activeTabRevealFrame);
+    activeTabRevealFrame = null;
+    closeContextMenu();
+    cleanups.splice(0).forEach(cleanup => cleanup());
+  }
 }

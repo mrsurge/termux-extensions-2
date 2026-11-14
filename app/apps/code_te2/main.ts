@@ -32,6 +32,8 @@ import { installSimplePreferenceMenuActions } from './main_page/frontend/ui/menu
 import { installAdvancedMenuActions } from './main_page/frontend/ui/menu-actions-advanced.ts';
 import { installPrefsSync } from './main_page/frontend/ui/prefs-sync.ts';
 import { createFileTabsController } from './main_page/frontend/ui/file-tabs.ts';
+import { installFileTabStyles } from './main_page/frontend/ui/file-tab-styles.ts';
+import { isEditorInputOwner } from './monaco_editor/editor_input_owner.ts';
 import { createPreferencesController } from './main_page/frontend/ui/preferences.ts';
 import { createProjectSwitchController } from './main_page/frontend/ui/project-switch.ts';
 import { createCacheIndicatorController } from './main_page/frontend/ui/cache-indicator.ts';
@@ -1059,9 +1061,12 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     );
   }, { once: true });
 
+  installFileTabStyles();
   const fileTabsController = createFileTabsController({
     viewport: fileTabsViewport,
     track: fileTabsTrack,
+    isActive: () => isEditorInputOwner(editorFrameEl),
+    orderScope: `primary:${clientId}`,
     formatFileNameDisplay: (name: string) => formatFileNameDisplay(name),
     openFile: (path: string, options?: { keyboard: boolean }) => openFile(path, options?.keyboard ? { focus: true, placeCursor: true } : {}),
     openInSecondWindow: (

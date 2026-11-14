@@ -41,9 +41,8 @@ document/draft/autosave/WBA state machines or let a frontend own global admissio
   without known placement defaults to primary. This also applies after offline
   opens, initial connection and reconnect. Reconcile against current backend
   membership; stale stored placement must not reopen a globally closed document.
-- Explorer context-menu wording: change "Open in a second window" to
-  "Open in second window". Apply with the upcoming presentation UI work;
-  this note does not change the current label yet.
+- Explorer context-menu wording is already "Open in Second Window"; preserve
+  that implemented action on both existing Electron and mobile routes.
 - Represent placement with explicit primary/secondary flags (or equivalent
   typed enum/bitmask). Derive the local 0/1/2 presentation count; count alone
   cannot identify which area presents the file. Never sum counts across clients
@@ -75,14 +74,16 @@ document/draft/autosave/WBA state machines or let a frontend own global admissio
   Reuse concrete DTOs/codecs/RPC lanes and bounded presentation storage. Browser
   storage, if used for presentation hints, cannot own shared opened documents.
 
-Source findings: open_state_backend.py currently admits files into one shared
-recent_files membership; remove_sidecar_recent_file removes a document globally
-and updates affected client foregrounds. Existing client_foregrounds already
-separates foreground selection. host/secondary_content_state.py holds a bounded
-worker-local exact-client content descriptor, not a durable shared tab list.
-These are reuse points for the revised contract, not evidence that independent
-per-client area placement is already implemented. This is a state-contract
-change, not merely a second frontend tab bar.
+Current source: `open_state_backend.py` and `editor_open_state.py` already own
+the shared document set, per-main-page primary/secondary placement and fenced
+last-local close. `read_client_open_state(s)` projects only the authenticated
+renderer area's membership. Direct Explorer opening already selects Electron's
+native route or the mobile direct shell. The secondary working tab bar now
+reuses `createFileTabsController`, those projections and existing UI RPCs;
+it does not introduce another document state machine. Tab order is local
+presentation state scoped by project, main-page identity and area. Historical
+content remains separate. The user generally live-accepted the tab UI on
+2026-11-14; a separately reported presentation-state bug awaits details.
 
 ### S3. Unified container, menu/focus ownership and browser support
 
@@ -162,10 +163,11 @@ and desktop; extension panels do not require their own editor File menu.
 
 ### Validation and implementation gates
 
-S1 is complete and user-live-accepted; retain its desktop geometry regression
-coverage. Next approve the concrete S2 state contract/migration and close paths,
-then S3 lifecycle/container work followed by unified menu/focus integration, then
-S4 panel rehosting. Do not begin source implementation from this plan-only update.
+S1, S2 backend membership, direct mobile mounting, shared File-menu routing and
+the extra-key focus repair are implemented and user-live-accepted. The secondary
+working tab UI slice is implemented and generally user-live-accepted; a separate
+presentation-state bug awaits details. Ordinary desktop-browser support and S4 panel rehosting
+remain later work. Preserve the completed geometry/lifecycle/ownership gates.
 Add backend migration/open-close/placement/concurrency tests and strict
 frontend/WBA/Python gates as applicable. Live groups: Electron, desktop browser,
 mobile; multiple clients with differing placement and foregrounds; direct

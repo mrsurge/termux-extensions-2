@@ -1,6 +1,6 @@
 import { isUnknownArray } from '../../src/rpc/value-types.ts';
 import { bootInlineEditorHost, disposeInlineEditorHost } from '../../monaco_editor/inline_host.ts';
-import { codeTe2SocketQuery, type SocketClientIdentity } from '../../src/rpc/socketio-topology.ts';
+import { codeTe2SocketQuery, getCodeTe2SocketIdentity, type SocketClientIdentity } from '../../src/rpc/socketio-topology.ts';
 import { parseSecondaryHistoryContent } from './secondary-history-content.ts';
 import { bootHistoricalDiff, type HistoricalEditorView } from '../../monaco_editor/historical_monaco_boot.ts';
 import { SecondaryContentLifecycle } from './secondary-content-lifecycle.ts';
@@ -22,6 +22,9 @@ import {
   type SecondaryContentPresentation,
 } from './secondary-editor-state.ts';
 import { renderDiagnosticIssuePills } from './ui/diagnostic-issue-pills.ts';
+import { createFileTabsController } from './ui/file-tabs.ts';
+import { installFileTabStyles } from './ui/file-tab-styles.ts';
+import { isEditorInputOwner } from '../../monaco_editor/editor_input_owner.ts';
 import {
   MOBILE_EDITOR_FOCUS_EVENT,
   MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
@@ -108,7 +111,7 @@ export interface SecondaryEditorRuntimeOptions {
 
 export interface SecondaryEditorRuntimeHandle { dispose(): void }
 
-type HostState = SecondaryEditorHostState & { preferences?: unknown };
+type HostState = SecondaryEditorHostState & { preferences?: unknown; openState?: unknown; recents?: unknown };
 
 const STYLE = `
 .te2-secondary-editor {
@@ -178,6 +181,20 @@ const STYLE = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.te2-secondary-file-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+  -webkit-app-region: no-drag;
+}
+.te2-secondary-editor .fe-file-tab-close {
+  display: block;
+  height: 100%;
+  padding: 0;
+  border-left: 1px solid rgba(255,255,255,.08);
+  border-radius: 0;
+}
+.te2-secondary-editor [hidden] { display: none !important; }
 .te2-secondary-editor-issues {
   display: inline-flex !important;
   align-items: center;
@@ -268,6 +285,7 @@ const STYLE = `
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-body,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-menu-button,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-title,
+.te2-secondary-editor[data-mode='collapsed'] .te2-secondary-file-tabs,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-issues,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-collapse,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-detach {
@@ -475,6 +493,7 @@ export async function bootSecondaryEditorRuntime(
   }
 
   installStyle();
+  installFileTabStyles();
   // The framework injects the app template's stylesheet links and inline CSS
   // into this same container. Remove the primary visual surfaces without
   // detaching those assets: the reduced Monaco host still depends on their
@@ -488,6 +507,7 @@ export async function bootSecondaryEditorRuntime(
     <header class="te2-secondary-editor-header">
       <button class="te2-secondary-editor-menu-button" type="button" title="File actions" aria-label="File actions">☰</button>
       <span class="te2-secondary-editor-title" title="No file open">No file open</span>
+      <div class="fe-file-tabs te2-secondary-file-tabs"><div class="fe-file-tabs-track" role="tablist" aria-label="Second window files"></div></div>
       <button class="te2-secondary-editor-issues" type="button" title="Next issue" aria-label="Next issue" disabled></button>
       <button class="te2-secondary-editor-expand" type="button" title="Expand second window" aria-label="Expand second window">◧</button>
       <button class="te2-secondary-editor-collapse" type="button" title="Collapse second window" aria-label="Collapse second window">▯</button>
@@ -510,11 +530,13 @@ export async function bootSecondaryEditorRuntime(
 
   const editorFrame = root.querySelector<HTMLElement>('.te2-secondary-working-mount');
   const title = root.querySelector<HTMLElement>('.te2-secondary-editor-title');
+  const tabViewport = root.querySelector<HTMLElement>('.te2-secondary-file-tabs');
+  const tabTrack = root.querySelector<HTMLElement>('.fe-file-tabs-track');
   const status = root.querySelector<HTMLElement>('.te2-secondary-editor-status');
   const menu = root.querySelector<HTMLElement>('.te2-secondary-editor-menu');
   const menuButton = root.querySelector<HTMLButtonElement>('.te2-secondary-editor-menu-button');
   const issuesButton = root.querySelector<HTMLButtonElement>('.te2-secondary-editor-issues');
-  if (!editorFrame || !title || !status || !menu || !menuButton || !issuesButton) {
+  if (!editorFrame || !title || !tabViewport || !tabTrack || !status || !menu || !menuButton || !issuesButton) {
     throw new Error('Second editor shell did not initialize');
   }
   if (inline) menuButton.hidden = true;
@@ -524,6 +546,7 @@ export async function bootSecondaryEditorRuntime(
     );
   }
   const titleEl = title;
+  const tabViewportEl = tabViewport;
   const statusEl = status;
   const issuesButtonEl = issuesButton;
 
@@ -545,6 +568,34 @@ export async function bootSecondaryEditorRuntime(
   let commandsInFlight = 0;
   let reloadPending = false;
   let replacementPending = false;
+  const tabIdentity = options.rendererIdentity ?? getCodeTe2SocketIdentity();
+  const tabs = createFileTabsController({
+    viewport: tabViewport,
+    track: tabTrack,
+    orderScope: `secondary:${tabIdentity.mainPageClientInstanceId}`,
+    isActive: () => !contentLifecycle.historical && isEditorInputOwner(editorFrame),
+    formatFileNameDisplay: name => name,
+    openFile: async path => {
+      if (disposed || contentLifecycle.historical) return;
+      await connection.request(UI_IPC_RPC_METHODS.hostFileOpen,
+        { path, source: 'secondary_editor_tab', focus: true }, 8_000);
+      if (!disposed) await requestHostState();
+    },
+    closeRecentFile: async (path, revision, requestedProject, projectGeneration) => {
+      if (disposed || contentLifecycle.historical) throw new Error('Working tab is no longer available');
+      const result = await connection.request(UI_IPC_RPC_METHODS.hostRecentFileClose,
+        { path, revision, projectPath: requestedProject, projectGeneration }, 12_000);
+      if (!disposed) await requestHostState();
+      return result;
+    },
+    resetToNewFile: () => {
+      if (disposed) return;
+      setCurrentPath('');
+      void setMode('closed').catch((error: unknown) => host.toast(errorMessage(error)));
+    },
+    onError: message => host.toast(message),
+  });
+  tabs.installWindowHooks({ stateEvents: false });
   const reloadWhenSettled = (): void => {
     if (reloadPending && commandsInFlight === 0) {
       reloadPending = false;
@@ -561,6 +612,8 @@ export async function bootSecondaryEditorRuntime(
     mount: async (content, signal) => {
       historicalView = null;
       currentPath = '';
+      tabViewport.hidden = true;
+      titleEl.hidden = false;
       menu.hidden = true;
       for (const button of menu.querySelectorAll<HTMLButtonElement>('[data-action]')) {
         button.hidden = !button.dataset.action?.startsWith('history-');
@@ -597,6 +650,9 @@ export async function bootSecondaryEditorRuntime(
       issuesButtonEl.disabled = true;
     }
     currentPath = path;
+    tabViewportEl.hidden = false;
+    titleEl.hidden = true;
+    tabs.refreshClientForeground({ clientForeground: { path } });
     const label = path ? basename(path) : 'No file open';
     titleEl.textContent = label;
     titleEl.title = path || label;
@@ -606,6 +662,7 @@ export async function bootSecondaryEditorRuntime(
 
   async function applyHostState(state: HostState): Promise<void> {
     if (disposed) return;
+    if (state.openState !== undefined || state.recents !== undefined) tabs.refreshOpenState(state);
     if (state.preferences !== undefined) {
       historicalPreferences = state.preferences;
       historicalView?.updatePreferences(historicalPreferences);
@@ -815,6 +872,13 @@ export async function bootSecondaryEditorRuntime(
     if (disposed) return;
     if (method === UI_IPC_RPC_NOTIFICATIONS.extensionContributionsChanged) {
       historicalView?.updatePreferences(historicalPreferences, true);
+    } else if (method === UI_IPC_RPC_NOTIFICATIONS.openStateChanged) {
+      if (bootComplete && params.projectPath !== projectPath) return;
+      ++stateReadEpoch;
+      if (!bootComplete) pendingStateRefresh = true;
+      else tabs.refreshOpenState(params);
+    } else if (method === UI_IPC_RPC_NOTIFICATIONS.fileTabsDecorationsChanged) {
+      tabs.refreshDecorations(params);
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
       if (params.preferences !== undefined) {
         ++preferenceEpoch;
@@ -903,6 +967,7 @@ export async function bootSecondaryEditorRuntime(
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
+    tabs.dispose();
     ++stateReadEpoch;
     contentLifecycle.dispose();
     historicalView = null;

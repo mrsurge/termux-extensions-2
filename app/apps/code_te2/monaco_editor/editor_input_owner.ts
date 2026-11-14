@@ -8,6 +8,21 @@ interface InputOwners {
 }
 const windows = new WeakMap<Window, InputOwners>();
 
+const eligible = (candidate: InputParticipant): boolean => candidate.root.isConnected && !candidate.root.closest('[hidden]');
+
+/** Query the same owner used by keyboard/palette routing without another registration. */
+export function isEditorInputOwner(root: HTMLElement): boolean {
+  const win = root.ownerDocument.defaultView;
+  const owners = win ? windows.get(win) : undefined;
+  if (!owners) return false;
+  const live = [...owners.participants].filter(eligible);
+  const focused = live.find(candidate => root.ownerDocument.activeElement?.closest('[data-te2-working-editor-host]') === candidate.root)
+    ?? live.find(candidate => candidate.textFocused());
+  if (focused) owners.active = focused;
+  if (!owners.active || !live.includes(owners.active)) owners.active = live[0] ?? null;
+  return owners.active?.root === root;
+}
+
 /** Presentation ownership only: this never changes backend opened-document state. */
 export function registerEditorInputOwner(root: HTMLElement, textFocused: () => boolean) {
   const win = root.ownerDocument.defaultView;
@@ -24,7 +39,6 @@ export function registerEditorInputOwner(root: HTMLElement, textFocused: () => b
   const participant = { root, textFocused };
   owners.participants.add(participant);
   let disposed = false;
-  const eligible = (candidate: InputParticipant): boolean => candidate.root.isConnected && !candidate.root.closest('[hidden]');
   function activate(): void {
     if (!disposed && eligible(participant)) owners.active = participant;
   }
@@ -40,12 +54,7 @@ export function registerEditorInputOwner(root: HTMLElement, textFocused: () => b
     activate,
     isActive(): boolean {
       if (disposed || !eligible(participant)) return false;
-      const live = [...owners.participants].filter(eligible);
-      const focused = live.find(candidate => root.ownerDocument.activeElement?.closest('[data-te2-working-editor-host]') === candidate.root)
-        ?? live.find(candidate => candidate.textFocused());
-      if (focused) owners.active = focused;
-      if (!owners.active || !live.includes(owners.active)) owners.active = live[0] ?? null;
-      return owners.active === participant;
+      return isEditorInputOwner(root);
     },
     dispose(): void {
       if (disposed) return;
