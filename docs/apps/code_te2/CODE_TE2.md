@@ -4381,6 +4381,15 @@ constructing xterm, connecting `/terminal`, or creating a PTY. Terminal runtime
 initialization occurs only when the Terminal tab or an explicit terminal command
 is selected.
 
+Panel resize handles use one primary-pointer gesture with pointer capture and
+`touch-action: none`, not the legacy full-screen iframe shield or competing
+mouse/touch streams. Page-level capture is the fallback when element capture
+is unavailable. Only actual iframes temporarily receive `pointer-events: none`;
+their previous inline value/priority and page cursor/selection styles are restored
+on release, cancellation, lost capture, blur, hidden page or disposal. Reinitializing
+the manager disposes the old binding. Existing drawer clamps, layout persistence
+and Electron secondary-view resize start/move/end callbacks remain unchanged.
+
 ### Desktop shell behavior
 
 - Native Quit validates the current `/app/<app_id>` URL, posts only that app's quit endpoint, and returns to the desktop launcher without terminating Electron.

@@ -521,8 +521,28 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
 - [x] User generally live-accepted the new tab UI and requested commit/push
   (2026-11-14): everything working well. This does not claim separately observed
   coverage of every Electron/mobile restore/close/project-switch scenario.
-- [ ] Follow-up presentation-state bug reported by the user; details will follow
-  this checkpoint. Do not infer the symptom or treat acceptance as its resolution.
+- [x] Follow-up presentation-state report identified: legacy bottom-drawer resize
+  uses mouse/touch document handlers and a fullscreen iframe shield despite tiled
+  editors. Approved cleanup replaces the shared resize gesture with one primary
+  Pointer Events/capture path. No fullscreen shield is created; actual iframes
+  alone temporarily disable pointer events. Release/cancel/lost capture/blur/
+  hidden page/disposal restore original inline values/priorities and release the
+  gesture. Reinitialization disposes the previous manager. Existing sizing,
+  persistence and Electron secondary-view callbacks remain.
+- [ ] Live resize acceptance after asset refresh: bottom drawer on mobile/desktop,
+  dragging across primary/secondary Monaco, remaining iframe apps, other panel
+  handles and Electron native secondary presentation.
+  Focused gesture tests cover pointer identity, Monaco interception, iframe/style
+  restoration, collapsed/invalid handles, geometry limits, teardown, unsupported
+  capture and failed storage. Broader validation also exposed two unrelated
+  existing fixtures: `host_toolbar_chrome.test.mjs` expects the old secondary
+  grid row 2 / 5 instead of accepted 2 / 4; `startup_preparation.test.mjs`'s VM
+  context lacks `createLanguageBootstrapRequest`. These remain outside this fix.
+  Final focused gate: 32 resize/drawer/geometry/keyboard/direct-secondary tests
+  pass; frontend/WBA no-Any typechecks and asset build pass. The wider run was
+  42/44 before the additional window-release regression. Assets regenerated
+  include host and early-preparation bundles; no backend/native source changes,
+  shared runtime restart, Android publication or commit performed.
 - [ ] S3 ordinary desktop browser support and one responsive outer pane/tab
   container. Mobile direct working mounting/iframe removal is implemented above;
   that cutover is live-accepted. Preserve historical/extension isolation and

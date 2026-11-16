@@ -20,15 +20,6 @@ const LAYOUT_PREFERENCES_KEY = 'code_te2_layout_prefs';
 const LEGACY_LAYOUT_PREFERENCES_KEY = 'code_cm6_layout_prefs';
 const LAYOUT_PREFERENCES_MIGRATION_KEY = 'code_te2_layout_prefs_migrated_v1';
 
-function eventClientPoint(event: MouseEvent | TouchEvent): { clientX: number; clientY: number } {
-  const touch = 'touches' in event ? event.touches[0] : null;
-  const mouse = event as MouseEvent;
-  return {
-    clientX: touch ? touch.clientX : mouse.clientX,
-    clientY: touch ? touch.clientY : mouse.clientY,
-  };
-}
-
 function parseLayoutPreferences(raw: string | null): LayoutPreferences {
   const parsed: unknown = JSON.parse(raw || '{}');
   return parsed && typeof parsed === 'object' && !isUnknownArray(parsed)
@@ -162,170 +153,144 @@ function fitPersistedSideWidthsToRoot(): void {
   );
 }
 
-export function initResizeManager(): void {
-  const handles = document.querySelectorAll<HTMLElement>('.resize-handle');
-  
-  handles.forEach(handle => {
-    let isDragging = false;
-    let startPos = 0;
-    let startSize = 0;
-    let panel: ResizePanel = null;
-    let dragShield: HTMLDivElement | null = null;
+let disposeResizeManager: (() => void) | null = null;
 
-    const ensureDragShield = (cursor: string): HTMLDivElement => {
-      // Remove any stale shield (e.g., if a prior drag ended unexpectedly).
-      try {
-        const existing = document.getElementById('fe-resize-drag-shield');
-        if (existing) existing.remove();
-      } catch (_) {}
+interface ResizeDrag {
+  handle: HTMLElement;
+  pointerId: number;
+  panel: Exclude<ResizePanel, null>;
+  startPos: number;
+  startSize: number;
+  restoreInteraction(): void;
+}
 
-      const shield = document.createElement('div');
-      shield.id = 'fe-resize-drag-shield';
-      shield.style.position = 'fixed';
-      shield.style.left = '0';
-      shield.style.top = '0';
-      shield.style.right = '0';
-      shield.style.bottom = '0';
-      shield.style.background = 'transparent';
-      shield.style.cursor = cursor;
-      shield.style.zIndex = '2147483647';
-      shield.style.touchAction = 'none';
-      shield.style.userSelect = 'none';
-      // Ensure touchmove can be canceled to avoid scroll-jank.
-      shield.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-      document.body.appendChild(shield);
-      return shield;
-    };
+/** Preserve real iframe boundaries without covering the tiled editors. */
+function suspendResizeInteraction(panel: Exclude<ResizePanel, null>): () => void {
+  const saved: Array<{ element: HTMLElement; property: string; value: string; priority: string }> = [];
+  const set = (element: HTMLElement, property: string, value: string): void => {
+    saved.push({ element, property, value: element.style.getPropertyValue(property),
+      priority: element.style.getPropertyPriority(property) });
+    element.style.setProperty(property, value, 'important');
+  };
+  document.querySelectorAll<HTMLIFrameElement>('iframe').forEach(frame => set(frame, 'pointer-events', 'none'));
+  set(document.documentElement, 'user-select', 'none');
+  set(document.documentElement, 'cursor', panel === 'terminal' ? 'row-resize' : 'col-resize');
+  return () => {
+    saved.forEach(({ element, property, value, priority }) => {
+      if (value) element.style.setProperty(property, value, priority);
+      else element.style.removeProperty(property);
+    });
+  };
+}
 
-    const removeDragShield = (): void => {
-      if (!dragShield) return;
-      try {
-        dragShield.remove();
-      } catch (_) {}
-      dragShield = null;
-    };
-    
-    const onStart = (e: MouseEvent | TouchEvent): void => {
-      const { clientX, clientY } = eventClientPoint(e);
-      
-      const panelType: ResizePanel =
-        handle.dataset.panel === 'explorer' ||
-        handle.dataset.panel === 'agent' ||
-        handle.dataset.panel === 'secondary' ||
-        handle.dataset.panel === 'terminal'
-          ? handle.dataset.panel
-          : null;
-      const terminalDrawer = panelType === 'terminal' ? document.getElementById('terminal-drawer') : null;
-      const terminalCollapsed = !!(terminalDrawer && terminalDrawer.classList.contains('terminal-drawer--collapsed'));
-      isDragging = true;
-      panel = panelType;
+export function initResizeManager(): () => void {
+  disposeResizeManager?.();
+  const handles = Array.from(document.querySelectorAll<HTMLElement>('.resize-handle'));
+  let drag: ResizeDrag | null = null;
+  let disposed = false;
 
-      // While dragging, a transparent full-screen shield prevents iframes from
-      // hijacking the pointer stream (which causes "snap" resizing).
-      dragShield = ensureDragShield(panelType === 'terminal' ? 'row-resize' : 'col-resize');
-      dragShield.addEventListener('mouseup', onEnd);
-      dragShield.addEventListener('touchend', onEnd);
-      dragShield.addEventListener('touchcancel', onEnd);
-      
-      if (panelType === 'explorer' || panelType === 'agent' || panelType === 'secondary') {
-        startPos = clientX;
-        startSize = currentPanelWidth(panelType);
-      } else if (panelType === 'terminal') {
-        startPos = clientY;
-        if (terminalCollapsed) {
-          startSize = 2;
-        } else {
-          startSize = currentPanelWidth('terminal');
-        }
+  const finish = (): void => {
+    const current = drag;
+    if (!current) return;
+    drag = null;
+    current.handle.classList.remove('dragging');
+    try {
+      if (current.handle.hasPointerCapture?.(current.pointerId)) {
+        current.handle.releasePointerCapture(current.pointerId);
       }
-      
-      handle.classList.add('dragging');
-      if (panelType === 'secondary') {
-        window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-start', {
-          detail: { dockSize: startSize },
-        }));
-      }
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onEnd);
-      document.addEventListener('touchmove', onMove);
-      document.addEventListener('touchend', onEnd);
-      document.addEventListener('touchcancel', onEnd);
-      e.preventDefault();
-    };
-    
-    const onMove = (e: MouseEvent | TouchEvent): void => {
-      if (!isDragging) return;
-      
-      const { clientX, clientY } = eventClientPoint(e);
-      
-      if (panel === 'explorer') {
-        const delta = clientX - startPos;
-        const newWidth = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth('explorer'));
-        document.documentElement.style.setProperty('--explorer-width', `${newWidth}px`);
-      } else if (panel === 'agent') {
-        const delta = startPos - clientX;
-        const newWidth = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth('agent'));
-        document.documentElement.style.setProperty('--agent-width', `${newWidth}px`);
-      } else if (panel === 'secondary') {
-        const delta = startPos - clientX;
-        const newWidth = clamp(
-          startSize + delta,
-          SECONDARY_MIN_WIDTH,
-          maxPanelWidth('secondary'),
-        );
-        document.querySelector<HTMLElement>('.fe-root')?.style.setProperty(
-          '--secondary-editor-dock-size',
-          `${newWidth}px`,
-        );
-        window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize', {
-          detail: { dockSize: newWidth },
-        }));
-      } else if (panel === 'terminal') {
-        const terminalDrawer = document.getElementById('terminal-drawer');
-        if (terminalDrawer && terminalDrawer.classList.contains('terminal-drawer--collapsed')) {
-          e.preventDefault();
-          return;
-        }
-        const delta = startPos - clientY;
-        const mobileLayout = document.querySelector('.fe-root')
-          ?.classList.contains('layout-mobile') === true;
-        const newHeight = clampTerminalDrawerHeight(
-          startSize + delta,
-          150,
-          mobileLayout,
-          800,
-        );
-        document.documentElement.style.setProperty('--terminal-height', `${newHeight}px`);
-      }
-      
-      // Trigger resize for CodeMirror
-      window.dispatchEvent(new Event('resize'));
-      e.preventDefault();
-    };
-    
-    const onEnd = (): void => {
-      if (!isDragging) return;
-      isDragging = false;
-      handle.classList.remove('dragging');
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onEnd);
-      document.removeEventListener('touchmove', onMove);
-      document.removeEventListener('touchend', onEnd);
-      document.removeEventListener('touchcancel', onEnd);
-      removeDragShield();
+    } catch { /* Capture may already be lost when the window is deactivated. */ }
+    current.restoreInteraction();
+    if (current.panel === 'secondary') {
+      window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-end', {
+        detail: { dockSize: currentPanelWidth('secondary') },
+      }));
+    }
+    try { saveLayoutPreferences(); } catch {
+      // Optional layout storage must not leave input capture or iframe guards active.
+    }
+  };
 
-      if (panel === 'secondary') {
-        window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-end', {
-          detail: { dockSize: currentPanelWidth('secondary') },
-        }));
+  const onStart = (event: PointerEvent): void => {
+    if (disposed || drag || event.button !== 0 || event.isPrimary === false) return;
+    const handle = event.currentTarget;
+    if (!(handle instanceof HTMLElement)) return;
+    const panel = handle.dataset.panel;
+    if (panel !== 'explorer' && panel !== 'agent' && panel !== 'secondary' && panel !== 'terminal') return;
+    if (panel === 'terminal'
+        && document.getElementById('terminal-drawer')?.classList.contains('terminal-drawer--collapsed')) return;
+    const startSize = currentPanelWidth(panel);
+    drag = { handle, pointerId: event.pointerId, panel,
+      startPos: panel === 'terminal' ? event.clientY : event.clientX,
+      startSize, restoreInteraction: suspendResizeInteraction(panel) };
+    handle.classList.add('dragging');
+    try { handle.setPointerCapture(event.pointerId); } catch {
+      // Page-level capture and real-iframe guards retain the same pointer fallback.
+    }
+    if (panel === 'secondary') {
+      window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-start', {
+        detail: { dockSize: startSize },
+      }));
+    }
+    event.preventDefault();
+  };
+
+  const onMove = (event: PointerEvent): void => {
+    const current = drag;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const { panel, startPos, startSize } = current;
+    if (panel === 'explorer' || panel === 'agent') {
+      const delta = panel === 'explorer' ? event.clientX - startPos : startPos - event.clientX;
+      const width = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth(panel));
+      document.documentElement.style.setProperty(panel === 'explorer' ? '--explorer-width' : '--agent-width', `${width}px`);
+    } else if (panel === 'secondary') {
+      const width = clamp(startSize + startPos - event.clientX, SECONDARY_MIN_WIDTH, maxPanelWidth('secondary'));
+      document.querySelector<HTMLElement>('.fe-root')?.style.setProperty('--secondary-editor-dock-size', `${width}px`);
+      window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize', {
+        detail: { dockSize: width },
+      }));
+    } else {
+      if (document.getElementById('terminal-drawer')?.classList.contains('terminal-drawer--collapsed')) {
+        finish();
+        return;
       }
-      
-      saveLayoutPreferences();
-    };
-    
-    handle.addEventListener('mousedown', onStart);
-    handle.addEventListener('touchstart', onStart);
-  });
+      const mobileLayout = document.querySelector('.fe-root')?.classList.contains('layout-mobile') === true;
+      const height = clampTerminalDrawerHeight(startSize + startPos - event.clientY, 150, mobileLayout, 800);
+      document.documentElement.style.setProperty('--terminal-height', `${height}px`);
+    }
+    // Existing Monaco/terminal/native placement observers consume the resize event.
+    window.dispatchEvent(new Event('resize'));
+    event.preventDefault();
+  };
+
+  const onEnd = (event: PointerEvent): void => {
+    if (drag?.pointerId === event.pointerId) finish();
+  };
+  const onVisibility = (): void => { if (document.hidden) finish(); };
+  handles.forEach(handle => handle.addEventListener('pointerdown', onStart));
+  window.addEventListener('pointermove', onMove, { capture: true, passive: false });
+  window.addEventListener('pointerup', onEnd, true);
+  window.addEventListener('pointercancel', onEnd, true);
+  window.addEventListener('lostpointercapture', onEnd, true);
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('blur', finish);
+  window.addEventListener('pagehide', dispose, { once: true });
+
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    finish();
+    handles.forEach(handle => handle.removeEventListener('pointerdown', onStart));
+    window.removeEventListener('pointermove', onMove, true);
+    window.removeEventListener('pointerup', onEnd, true);
+    window.removeEventListener('pointercancel', onEnd, true);
+    window.removeEventListener('lostpointercapture', onEnd, true);
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('blur', finish);
+    window.removeEventListener('pagehide', dispose);
+    if (disposeResizeManager === dispose) disposeResizeManager = null;
+  }
+  disposeResizeManager = dispose;
+  return dispose;
 }
 
 function saveLayoutPreferences(): void {
