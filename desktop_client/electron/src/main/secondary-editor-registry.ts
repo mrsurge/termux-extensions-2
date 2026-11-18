@@ -82,6 +82,9 @@ export class SecondaryEditorRegistry {
   #projectPath = "";
   #presentation: ElectronEditorSurfacePresentation | null = null;
   #ready = false;
+  #directDock = false;
+  #historicalDock = false;
+  #dockReady = false;
   #pendingOpenPath = "";
   #pendingHistoryTicket = "";
   #loadGeneration = 0;
@@ -163,6 +166,7 @@ export class SecondaryEditorRegistry {
     rawProjectPath: unknown,
     rawPath: unknown,
     rawHistoryTicket?: unknown,
+    directDock = false,
   ): Promise<ElectronEditorSurfacePresentation> {
     const projectPath = normalizedProjectPath(rawProjectPath);
     if (rawHistoryTicket !== undefined && (typeof rawHistoryTicket !== "string" || !/^[0-9a-f]{48}$/.test(rawHistoryTicket))) {
@@ -170,7 +174,7 @@ export class SecondaryEditorRegistry {
     }
     const ticket = typeof rawHistoryTicket === "string" ? rawHistoryTicket : "";
     const path = ticket ? "" : normalizedFilePath(rawPath);
-    await this.syncProject(projectPath);
+    await this.syncProject(projectPath, directDock);
     if (!this.#presentation) throw new Error("Secondary editor state is unavailable");
     if (this.#presentation.mode === "closed") {
       await this.#setPresentation({ ...this.#presentation, mode: "docked" });
@@ -186,12 +190,17 @@ export class SecondaryEditorRegistry {
 
   async syncProject(
     rawProjectPath: unknown,
+    directDock = false,
   ): Promise<ElectronEditorSurfacePresentation> {
     const projectPath = normalizedProjectPath(rawProjectPath);
-    if (projectPath === this.#projectPath && this.#presentation) {
+    if (projectPath === this.#projectPath && this.#presentation && this.#directDock === directDock) {
+      this.#sendState();
       return this.#copyPresentation();
     }
     this.#disposeView();
+    this.#directDock = directDock;
+    this.#historicalDock = false;
+    this.#dockReady = false;
     this.#projectPath = projectPath;
     this.#pendingOpenPath = "";
     this.#pendingHistoryTicket = "";
@@ -228,6 +237,10 @@ export class SecondaryEditorRegistry {
           ? window.isMaximized()
           : this.#presentation.maximized,
     });
+    if (mode === "detached" || mode === "closed") this.#dockReady = false;
+    if (mode === "closed") this.#historicalDock = false;
+    if (this.#directDock && !this.#historicalDock && mode !== "detached" && this.#view) this.#disposeView();
+    if (mode === "detached") this.#sendState();
     if (mode === "closed") {
       this.#sendState();
       this.#options.layoutPrimary();
@@ -242,6 +255,25 @@ export class SecondaryEditorRegistry {
     this.#sendState();
     this.#options.layoutPrimary();
     return this.#copyPresentation();
+  }
+
+  async setHistoricalDock(historical: boolean): Promise<void> {
+    if (!this.#directDock || this.#historicalDock === historical || this.#presentation?.mode === "closed") return;
+    this.#historicalDock = historical;
+    if (this.#presentation?.mode === "detached") return;
+    this.#dockReady = false;
+    if (!historical) this.#disposeView();
+    this.#sendState();
+    await this.#ensureView();
+    this.#applyPresentation();
+  }
+
+  dockedReady(): boolean {
+    if (!this.#directDock || this.#historicalDock || !this.#presentation || !["docked", "collapsed"].includes(this.#presentation.mode)) return false;
+    this.#dockReady = true;
+    this.#sendState();
+    this.#sendPendingOpen();
+    return true;
   }
 
   handleReady(contents: WebContents): boolean {
@@ -312,6 +344,7 @@ export class SecondaryEditorRegistry {
   }
 
   async #ensureView(): Promise<void> {
+    if (this.#directDock && !this.#historicalDock && this.#presentation?.mode !== "detached") return;
     if (this.#view && !this.#view.webContents.isDestroyed()) return;
     const generation = ++this.#loadGeneration;
     const view = new WebContentsView({
@@ -548,6 +581,7 @@ export class SecondaryEditorRegistry {
     if (!this.#presentation) return;
     const command: ElectronSecondEditorCommand = {
       type: "state",
+      nativeDock: this.#historicalDock,
       projectPath: this.#projectPath,
       presentation: this.#copyPresentation(),
     };
@@ -559,7 +593,9 @@ export class SecondaryEditorRegistry {
 
   #sendPendingOpen(): void {
     const contents = this.#view?.webContents;
-    if (!this.#ready || !contents || contents.isDestroyed() || (!this.#pendingOpenPath && !this.#pendingHistoryTicket)) return;
+    const docked = this.#directDock && !this.#historicalDock && this.#presentation?.mode !== "detached";
+    if (!(this.#pendingOpenPath || this.#pendingHistoryTicket)) return;
+    if (docked ? !this.#dockReady : (!this.#ready || !contents || contents.isDestroyed())) return;
     const command: ElectronSecondEditorCommand = this.#pendingHistoryTicket ? {
       type: "history", projectPath: this.#projectPath, ticket: this.#pendingHistoryTicket,
     } : {
@@ -569,7 +605,8 @@ export class SecondaryEditorRegistry {
     };
     this.#pendingOpenPath = "";
     this.#pendingHistoryTicket = "";
-    contents.send("te2-desktop:second-editor-command", command);
+    if (docked) this.#options.publishPresentation(command);
+    else contents?.send("te2-desktop:second-editor-command", command);
   }
 
   #disposeView(): void {

@@ -36,6 +36,8 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "set_second_editor_dock_size",
   "set_second_editor_mode",
   "second_editor_ready",
+  "docked_editor_ready",
+  "set_docked_editor_history",
   "set_projection_probe_enabled",
   "inspect_projection_probe",
 ] as const;
@@ -154,6 +156,7 @@ export type ElectronSecondEditorCommand =
     }
   | {
       type: "state";
+      nativeDock?: boolean;
       projectPath: string;
       presentation: ElectronEditorSurfacePresentation;
     };
@@ -297,9 +300,11 @@ export type ElectronAppViewBridge = {
     projectPath: string,
     path: string,
     historyTicket?: string,
+    directDock?: boolean,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
   syncSecondEditorProject(
     projectPath: string,
+    directDock?: boolean,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
   placeSecondEditorSurface(
     bounds: ElectronEditorSurfaceBounds,
@@ -312,6 +317,8 @@ export type ElectronAppViewBridge = {
     mode: ElectronEditorSurfaceMode,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
   secondEditorReady(): Promise<{ ok: true }>;
+  dockedEditorReady(): Promise<{ ok: true }>;
+  setDockedEditorHistory(historical: boolean): Promise<{ ok: true }>;
   setProjectionProbeEnabled(
     enabled: boolean,
     clear?: boolean,

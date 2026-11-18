@@ -4236,11 +4236,12 @@ existing mount input owner, so only the active area responds. Controller
 disposal removes global/document listeners, reorder timers/scroll locks and
 context menus. Historical content hides the working strip instead of becoming
 a working-file tab. Ordinary desktop-browser enablement remains separate work;
-Electron retains its native presentation and mobile uses the direct shell below.
+Electron and mobile both mount the docked working shell directly in the host page.
 
-Electron main owns one retained framework-partition `WebContentsView`. Dock,
-Collapse, Detach, and Attach reparent that exact renderer between the main
-window and a frameless `BrowserWindow` without navigation. Close disposes the
+Electron creates a framework-partition `WebContentsView` for a detached working
+editor in a frameless `BrowserWindow`. Attach remounts the docked working shell
+with the same secondary client identity. Historical comparisons use an isolated
+native renderer even when docked. Close disposes the
 renderer only after the existing fenced backend area-close succeeds; collapse
 and detach do not close documents. Closing one tab uses the existing local
 presentation/global-final-close transaction instead. The reduced renderer
@@ -4250,7 +4251,8 @@ authenticated UI IPC, Editor, and WBA identities; Editor-originated Save, Focus,
 and Blur notifications target only that client's presentation room.
 
 When embedded, the primary Code TE2 page reserves a grid column below the
-shared toolbar and between the primary editor and Sidebar. A DOM placeholder
+shared toolbar and between the primary editor and Sidebar. For historical
+comparisons and clients using the older native dock, a DOM placeholder
 reports CSS-pixel bounds and visibility through the exact-view preload;
 Electron applies the primary app-view zoom and places the retained native view
 over it while leaving the primary app view full-sized. The primary tab strip's
@@ -4362,7 +4364,7 @@ and disposes its UI RPC client. Working-runtime cleanup disconnects only its
 created Editor/WBA namespace socket instances after transport/provider/model
 cleanup, never a shared manager or another editor's sockets. Late client-library
 loads, notifications and callbacks cannot resurrect the disposed presentation.
-Electron retains its native WebContentsView/detach path and presentation bridge.
+Electron's direct shell hands detached presentations to the native registry.
 
 The portable reduced header consumes the auxiliary client's exact diagnostics
 count projection and renders the same error/warning pills as the primary

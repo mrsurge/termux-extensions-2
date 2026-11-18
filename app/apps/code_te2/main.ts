@@ -70,7 +70,7 @@ import {
   codeTe2ClientRoleFromLocation,
   resolveCodeTe2ClientIdentity,
 } from './main_page/frontend/client-identity.ts';
-import { bootSecondaryEditorRuntime } from './main_page/frontend/secondary-editor-runtime.ts';
+import { bootSecondaryEditorRuntime, createPresentationBridge, type SecondaryCommand } from './main_page/frontend/secondary-editor-runtime.ts';
 import { createMobileSecondaryEditorController } from './main_page/frontend/mobile-secondary-editor.ts';
 import { configureCodeTe2SocketIdentity } from './src/rpc/socketio-topology.ts';
 import { initResizeManager } from './main_page/frontend/host-resize-manager.ts';
@@ -138,13 +138,16 @@ interface SidebarShortcutsLike {
 }
 
 interface ElectronSecondEditorBridge {
+  dockedEditorReady?: () => Promise<{ ok: true }>;
   openSecondEditor?: (
     projectPath: string,
     path: string,
     historyTicket?: string,
+    directDock?: boolean,
   ) => Promise<{ ok: true; presentation: ElectronSecondEditorPresentation }>;
   syncSecondEditorProject?: (
     projectPath: string,
+    directDock?: boolean,
   ) => Promise<{ ok: true; presentation: ElectronSecondEditorPresentation }>;
   placeSecondEditorSurface?: (
     bounds: { x: number; y: number; width: number; height: number },
@@ -169,6 +172,7 @@ interface ElectronSecondEditorPresentation {
 
 type ElectronSecondEditorCommand = {
   type: 'state';
+  nativeDock?: boolean;
   projectPath: string;
   presentation: ElectronSecondEditorPresentation;
 } | {
@@ -811,7 +815,59 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     maximized: false,
   };
   let secondaryPlacementFrame = 0;
-  let secondaryEditorResizing = false;
+  let dockController: AbortController | null = null;
+  let dockProject = '';
+  let dispatchDockCommand: ((command: SecondaryCommand) => void) | null = null;
+  let dockState: Extract<SecondaryCommand, { type: 'state' }> | null = null;
+
+  function stopDock(): void {
+    dockController?.abort();
+    dockController = null;
+    dispatchDockCommand = null;
+    secondaryEditorHost.replaceChildren();
+    secondaryEditorHost.setAttribute('aria-hidden', 'true');
+  }
+
+  function reconcileDock(command: Extract<SecondaryCommand, { type: 'state' }>): void {
+    const ready = electronSecondEditor?.dockedEditorReady;
+    if (!ready) return;
+    dockState = command;
+    if (!secondaryEditorEmbedded() || command.nativeDock) { stopDock(); return; }
+    if (dockController && dockProject === command.projectPath) {
+      dispatchDockCommand?.(command);
+      return;
+    }
+    stopDock();
+    dockProject = command.projectPath;
+    const controller = new AbortController();
+    dockController = controller;
+    secondaryEditorHost.removeAttribute('aria-hidden');
+    void resolveCodeTe2ClientIdentity({ role: 'secondary' }).then(identity => {
+      controller.signal.throwIfAborted();
+      return bootSecondaryEditorRuntime(secondaryEditorHost, host, {
+        signal: controller.signal,
+        rendererIdentity: { ...identity, clientRole: 'secondary' },
+        presentationBridge: {
+          ...createPresentationBridge(),
+          ready: async () => { controller.signal.throwIfAborted(); await ready(); },
+          onCommand(listener) {
+            dispatchDockCommand = listener;
+            if (dockState) listener(dockState);
+            return () => { if (dispatchDockCommand === listener) dispatchDockCommand = null; };
+          },
+        },
+        reloadPresentation() {
+          if (controller.signal.aborted || !dockState) return;
+          stopDock();
+          reconcileDock(dockState);
+        },
+      });
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      stopDock();
+      host.toast(`Second editor failed: ${String(error)}`);
+    });
+  }
 
   function secondaryEditorEmbedded(): boolean {
     return secondaryEditorPresentation.mode === 'docked'
@@ -822,7 +878,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     visibleOverride?: boolean,
     immediate = false,
   ): void {
-    if (typeof electronSecondEditor?.placeSecondEditorSurface !== 'function') return;
+    if ((electronSecondEditor?.dockedEditorReady && !dockState?.nativeDock)
+        || typeof electronSecondEditor?.placeSecondEditorSurface !== 'function') return;
     if (secondaryPlacementFrame) window.cancelAnimationFrame(secondaryPlacementFrame);
     const publish = () => {
       secondaryPlacementFrame = 0;
@@ -838,7 +895,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         : 0;
       const visible = visibleOverride ?? (
         secondaryEditorEmbedded()
-        && !secondaryEditorResizing
         && root.classList.contains('layout-desktop')
         && document.visibilityState !== 'hidden'
         && rect.width > 0
@@ -902,10 +958,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     });
   }
   const handleSecondaryPlacementChange = () => publishSecondaryEditorPlacement();
-  const handleSecondaryResizeStart = () => {
-    secondaryEditorResizing = true;
-    publishSecondaryEditorPlacement(false, true);
-  };
   const handleSecondaryResizeEnd = (event: Event) => {
     const detail = event instanceof CustomEvent && event.detail && typeof event.detail === 'object'
       ? event.detail as { dockSize?: unknown }
@@ -923,19 +975,21 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       } catch (error) {
         host.toast(`Second window resize failed: ${(error as Error)?.message || String(error)}`);
       } finally {
-        secondaryEditorResizing = false;
         publishSecondaryEditorPlacement();
       }
     })();
   };
   window.addEventListener('resize', handleSecondaryPlacementChange);
-  window.addEventListener('code-te2:secondary-editor-resize-start', handleSecondaryResizeStart);
   window.addEventListener('code-te2:secondary-editor-resize-end', handleSecondaryResizeEnd);
   document.addEventListener('visibilitychange', handleSecondaryPlacementChange);
   const unsubscribeSecondEditorCommands = electronSecondEditor?.onSecondEditorCommand?.(
     (command) => {
       if (command.type === 'state') {
+        dockState = command;
         applySecondaryEditorPresentation(command.presentation);
+        reconcileDock(command);
+      } else {
+        dispatchDockCommand?.(command);
       }
     },
   );
@@ -954,8 +1008,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     secondaryPlacementResizeObserver?.disconnect();
     secondaryPlacementMutationObserver?.disconnect();
     unsubscribeSecondEditorCommands?.();
+    stopDock();
     window.removeEventListener('resize', handleSecondaryPlacementChange);
-    window.removeEventListener('code-te2:secondary-editor-resize-start', handleSecondaryResizeStart);
     window.removeEventListener('code-te2:secondary-editor-resize-end', handleSecondaryResizeEnd);
     window.removeEventListener('code-te2:adapter-state', handleSecondaryAdapterState);
     document.removeEventListener('visibilitychange', handleSecondaryPlacementChange);
@@ -977,7 +1031,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     ) return;
     secondaryProjectSyncing = projectPath;
     try {
-      const result = await electronSecondEditor.syncSecondEditorProject(projectPath);
+      const result = await electronSecondEditor.syncSecondEditorProject(projectPath, !!electronSecondEditor.dockedEditorReady);
       lastSecondaryProjectSync = projectPath;
       if (pendingSecondaryProjectSync === projectPath) {
         pendingSecondaryProjectSync = '';
@@ -1021,6 +1075,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
           cachedProjectRoot,
           targetPath,
           historyTicket,
+          !!electronSecondEditor.dockedEditorReady,
         );
         applySecondaryEditorPresentation(result.presentation);
       } else {

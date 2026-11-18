@@ -202,6 +202,7 @@ interface MonacoRuntimeEditorLike {
   addCommand?(keybinding: number, handler: () => void): void;
   setModel?(model: MonacoRuntimeModelLike | null): void;
   getPosition?(): MonacoRuntimePositionLike | null;
+  setPosition?(position: { lineNumber: number; column: number }): void;
   getOption?(option: unknown): string | number | null;
   updateOptions?(options: Record<string, unknown>): void;
   saveViewState?(): unknown;
@@ -455,6 +456,19 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   let lastGitBaselines: Record<string, unknown> | null = null;
   const _workerLogOnce: Record<string, boolean> = Object.create(null);
   let currentPath: string | null = null;
+  const handoffKey = 'te2:secondary-view-handoff:' + rendererContext.identity.clientInstanceId;
+  const secondaryElectron = rendererContext.identity.clientRole === 'secondary' && 'te2Electron' in window;
+  if (secondaryElectron) {
+    const capture = () => {
+      const control = diffEditor?.getModifiedEditor?.() ?? editor;
+      const position = control?.getPosition?.();
+      if (!currentPath || !position) return;
+      localStorage.setItem(handoffKey, JSON.stringify({ path: currentPath, ...position,
+        top: control?.getScrollTop?.() ?? 0 }));
+    };
+    options.mount.root.addEventListener('code-te2:secondary-view-handoff', capture);
+    lifetime.addCleanup(() => options.mount.root.removeEventListener('code-te2:secondary-view-handoff', capture));
+  }
   let cachedPrefs: CachedPrefsLike | null = null;
   const keyboardRuntime = installEditorKeyboardRuntime({
     root: options.mount.root,
@@ -2377,7 +2391,21 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
       openTransactionDeps,
       payload as Parameters<typeof runEditorOpenTransaction>[1],
       isCurrent,
-    );
+    ).then(() => {
+      if (!secondaryElectron || lifetime.isDisposed() || isCurrent?.() === false) return;
+      const raw = localStorage.getItem(handoffKey);
+      if (!raw) return;
+      const saved: unknown = JSON.parse(raw);
+      if (!saved || typeof saved !== 'object' || !('path' in saved) || saved.path !== currentPath
+          || !('lineNumber' in saved) || typeof saved.lineNumber !== 'number'
+          || !('column' in saved) || typeof saved.column !== 'number'
+          || !('top' in saved) || typeof saved.top !== 'number') return;
+      const control = diffEditor?.getModifiedEditor?.() ?? editor;
+      if (!control?.getModel?.()) return;
+      localStorage.removeItem(handoffKey);
+      control.setPosition?.({ lineNumber: saved.lineNumber, column: saved.column });
+      control.setScrollTop?.(saved.top);
+    });
   }
 
   async function connectEditorSocket(): Promise<void> {

@@ -371,6 +371,7 @@ async function handleAppViewControl(
       "wait_for_app_prerequisites",
       "set_second_editor_mode",
       "second_editor_ready",
+      "set_docked_editor_history",
     ].includes(command)
   ) {
     throw new Error(`Secondary editor may not invoke ${command}`);
@@ -411,7 +412,7 @@ async function handleAppViewControl(
   if (command === "read_client_identity") {
     return {
       mainPageClientInstanceId: electronClientIdentities.primaryClientInstanceId,
-      clientInstanceId: role === "secondary"
+      clientInstanceId: role === "secondary" || (payload && typeof payload === "object" && "role" in payload && payload.role === "secondary")
         ? electronClientIdentities.secondaryClientInstanceId
         : electronClientIdentities.primaryClientInstanceId,
     };
@@ -437,6 +438,7 @@ async function handleAppViewControl(
       request.projectPath,
       request.path,
       request.historyTicket,
+      request.directDock === true,
     );
     return { ok: true, presentation };
   }
@@ -449,6 +451,7 @@ async function handleAppViewControl(
     }
     const presentation = await secondaryEditorRegistry.syncProject(
       (payload as Record<string, unknown>).projectPath,
+      (payload as Record<string, unknown>).directDock === true,
     );
     return { ok: true, presentation };
   }
@@ -490,6 +493,20 @@ async function handleAppViewControl(
     if (role !== "secondary" || !secondaryEditorRegistry?.handleReady(event.sender)) {
       throw new Error("Rejected secondary editor ready signal");
     }
+    return { ok: true };
+  }
+  if (command === "docked_editor_ready") {
+    if (role !== "primary" || !secondaryEditorRegistry?.dockedReady()) {
+      throw new Error("Rejected docked editor ready signal");
+    }
+    return { ok: true };
+  }
+  if (command === "set_docked_editor_history") {
+    if (!secondaryEditorRegistry || !payload || typeof payload !== "object" || !("historical" in payload)
+        || typeof payload.historical !== "boolean" || payload.historical !== (role === "primary")) {
+      throw new Error("Invalid historical presentation handoff");
+    }
+    await secondaryEditorRegistry.setHistoricalDock(payload.historical);
     return { ok: true };
   }
   if (command === "set_projection_probe_enabled") {

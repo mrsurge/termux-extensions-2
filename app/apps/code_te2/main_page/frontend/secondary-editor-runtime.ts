@@ -57,7 +57,7 @@ export type SecondaryCommand =
   | { type: 'close' }
   | { type: 'history'; projectPath: string; ticket: string; requestId?: string }
   | { type: 'open'; projectPath: string; path: string; requestId?: string }
-  | { type: 'state'; projectPath: string; presentation: SecondaryPresentation }
+  | { type: 'state'; projectPath: string; presentation: SecondaryPresentation; nativeDock?: boolean }
   | {
     type: 'inputState';
     owner: MobileEditorRole;
@@ -71,6 +71,7 @@ export type SecondaryCommand =
   };
 
 interface SecondaryElectronBridge {
+  setDockedEditorHistory?(historical: boolean): Promise<{ ok: true }>;
   secondEditorReady(): Promise<{ ok: true }>;
   setSecondEditorMode(
     mode: SecondaryMode,
@@ -185,6 +186,12 @@ const STYLE = `
   flex: 1 1 auto;
   min-width: 0;
   border-bottom: 0;
+}
+.te2-secondary-editor[data-mode='detached'] .te2-secondary-file-tabs {
+  margin-inline-end: 32px;
+  -webkit-app-region: drag;
+}
+.te2-secondary-editor[data-mode='detached'] .fe-file-tab {
   -webkit-app-region: no-drag;
 }
 .te2-secondary-editor .fe-file-tab-close {
@@ -300,7 +307,7 @@ function runtimeWindow(): SecondaryRuntimeWindow {
   return window as SecondaryRuntimeWindow;
 }
 
-function createPresentationBridge(): SecondaryPresentationBridge {
+export function createPresentationBridge(): SecondaryPresentationBridge {
   const electron = runtimeWindow().te2Electron;
   if (electron) {
     return {
@@ -540,7 +547,7 @@ export async function bootSecondaryEditorRuntime(
     throw new Error('Second editor shell did not initialize');
   }
   if (inline) menuButton.hidden = true;
-  if (presentationBridge.kind === 'mobile') {
+  if (inline || presentationBridge.kind === 'mobile') {
     inputBridgeCleanups.push(
       bindMobileEditorFocusCapture(editorFrame, window, 'secondary'),
     );
@@ -674,9 +681,18 @@ export async function bootSecondaryEditorRuntime(
       presentationBridge.publishContent({ kind: 'historicalDiff',
         label: basename(historical.modified.path || historical.original.path || ''), commitId: historical.commitId });
       replacementPending = true;
+      if (presentationBridge.kind === 'electron') {
+        await runtimeWindow().te2Electron?.setDockedEditorHistory?.(true);
+        return;
+      }
       reloadPending = true;
       reloadWhenSettled();
       return;
+    }
+    if (!inline && presentationBridge.kind === 'electron' && state.secondaryContent == null
+        && contentLifecycle.historical) {
+      await runtimeWindow().te2Electron?.setDockedEditorHistory?.(false);
+      if (disposed) return;
     }
     const result = await contentLifecycle.apply(state.secondaryContent);
     if (result === 'working') setCurrentPath(secondaryEditorActivePath(state));
@@ -780,6 +796,10 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function setMode(mode: SecondaryMode): Promise<void> {
+    if (presentationBridge.kind === 'electron' && !contentLifecycle.historical &&
+        (mode === 'detached' || (mode === 'docked' && currentMode === 'detached'))) {
+      editorFrame?.dispatchEvent(new Event('code-te2:secondary-view-handoff'));
+    }
     const result = await presentationBridge.setMode(mode);
     currentMode = result.mode;
     root.dataset.mode = currentMode;

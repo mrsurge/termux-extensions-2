@@ -19,7 +19,7 @@ const GECKO_IDENTITY_RESPONSE = "te2.clientIdentity.response";
 const ID_PATTERN = /^client_[a-z0-9]{12,64}$/;
 
 interface ElectronIdentityBridge {
-  readClientIdentity?: () => Promise<{ clientInstanceId: string; mainPageClientInstanceId?: string }>;
+  readClientIdentity?: (role?: CodeTe2ClientRole) => Promise<{ clientInstanceId: string; mainPageClientInstanceId?: string }>;
   resetClientIdentity?: () => Promise<{ clientInstanceId: string }>;
 }
 
@@ -141,7 +141,7 @@ async function nativeClientInstanceId(
     const result =
       reset && typeof electron.resetClientIdentity === "function"
         ? await electron.resetClientIdentity()
-        : await electron.readClientIdentity();
+        : await electron.readClientIdentity(role);
     return {
       clientInstanceId: validatedClientInstanceId(result.clientInstanceId),
       ...('mainPageClientInstanceId' in result && typeof result.mainPageClientInstanceId === 'string'

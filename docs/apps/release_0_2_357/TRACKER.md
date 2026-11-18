@@ -553,6 +553,7 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
 - [x] S3 primary/secondary extra-key focus handoff fixed and live-accepted above;
   do not reopen it as an iframe-removal prerequisite. Preserve its regressions.
 - [ ] S4 extension-created secondary panels as tabs and sidebar transfer;
+  support moving a live panel between sidebar and second pane on desktop and mobile.
   preserve surface identity, live state, messages, readiness, focus/visibility,
   retained contexts, disposal, native reparenting and project/WBA generation.
 - [ ] Later-slice strict type/build/tests and grouped live acceptance on

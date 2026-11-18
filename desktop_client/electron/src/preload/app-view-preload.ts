@@ -66,8 +66,8 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   home(): Promise<{ ok: true }> {
     return invokeElectron("home");
   },
-  readClientIdentity(): Promise<{ clientInstanceId: string; mainPageClientInstanceId: string }> {
-    return invokeElectron("read_client_identity");
+  readClientIdentity(role?: "primary" | "secondary"): Promise<{ clientInstanceId: string; mainPageClientInstanceId: string }> {
+    return invokeElectron("read_client_identity", { role });
   },
   resetClientIdentity(): Promise<{ clientInstanceId: string }> {
     return invokeElectron("reset_client_identity");
@@ -167,13 +167,15 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
     projectPath: string,
     path: string,
     historyTicket?: string,
+    directDock = false,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
-    return invokeElectron("open_second_editor", { projectPath, path, historyTicket });
+    return invokeElectron("open_second_editor", { projectPath, path, historyTicket, directDock });
   },
   syncSecondEditorProject(
     projectPath: string,
+    directDock = false,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
-    return invokeElectron("sync_second_editor_project", { projectPath });
+    return invokeElectron("sync_second_editor_project", { projectPath, directDock });
   },
   placeSecondEditorSurface(
     bounds: ElectronEditorSurfaceBounds,
@@ -193,6 +195,12 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   },
   secondEditorReady(): Promise<{ ok: true }> {
     return invokeElectron("second_editor_ready");
+  },
+  dockedEditorReady(): Promise<{ ok: true }> {
+    return invokeElectron("docked_editor_ready");
+  },
+  setDockedEditorHistory(historical: boolean): Promise<{ ok: true }> {
+    return invokeElectron("set_docked_editor_history", { historical });
   },
   setProjectionProbeEnabled(
     enabled: boolean,
