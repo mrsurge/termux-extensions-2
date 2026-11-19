@@ -96,7 +96,7 @@ async function fixture({ waitSnapshot = false, native = false } = {}) {
   }
   win.document.body.innerHTML=`<div class="fe-root layout-mobile"><div class="fe-editor-container"><div id="editor-frame"></div></div>
     <div class="drawer-tabs"><button class="drawer-tab active" data-tab="terminal"></button><button id="second"></button></div>
-    <div id="second-container"></div></div>`;
+    <div id="second-container"></div><div id="desktop-host"></div></div>`;
   const root=win.document.querySelector('.fe-root'),container=win.document.getElementById('second-container'),tab=win.document.getElementById('second');
   tab.addEventListener('click',()=>tab.classList.add('active'));
   const primary=win.document.getElementById('editor-frame');
@@ -117,7 +117,7 @@ async function fixture({ waitSnapshot = false, native = false } = {}) {
       await settle(()=>container.querySelector('.fe-file-tab.active')?.dataset.path===path);
     }};
   }else{
-    controller=api.createMobileSecondaryEditorController({root,container,tab,toast:message=>toasts.push(message)});
+    controller=api.createMobileSecondaryEditorController({root,container,desktopHost:win.document.getElementById('desktop-host'),tab,toast:message=>toasts.push(message)});
     controller.attachDrawer({open(){},close(){}});
   }
   return {api,win,root,container,tab,primary,controller,toasts,settle,finishSnapshot,nativeListeners,nativeModes,
@@ -125,6 +125,24 @@ async function fixture({ waitSnapshot = false, native = false } = {}) {
       for(const[key,value]of saved){if(value===undefined)delete globalThis[key];else Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});}
     }};
 }
+
+test('responsive drawer and wide pane retain the same working editor and tabs',async()=>{
+  const f=await fixture();try{
+    await f.controller.open('/project','/project/a.ts');
+    const editor=f.container.querySelector('.te2-secondary-working-mount');
+    assert.ok(editor);
+    f.root.classList.replace('layout-mobile','layout-desktop');
+    await f.settle(()=>f.container.parentElement.id==='desktop-host');
+    f.controller.hide(); // switching terminal tabs in the wide layout
+    assert.equal(f.container.hidden,false);
+    await f.controller.open('/project','/project/b.ts');
+    f.root.classList.replace('layout-desktop','layout-mobile');
+    await f.settle(()=>f.container.parentElement===f.root);
+    assert.equal(f.container.querySelector('.te2-secondary-working-mount'),editor);
+    assert.equal(f.container.querySelector('.fe-file-tab.active')?.dataset.path,'/project/b.ts');
+    assert.equal(f.container.hidden,false);
+  }finally{await f.close();}
+});
 
 test('secondary working tabs select through their own lane and close with backend fences',async t=>{
   const expectedErrors=t.mock.method(console,'error',()=>{});

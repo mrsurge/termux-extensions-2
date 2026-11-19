@@ -29,10 +29,6 @@ import type {
   SyntheticKeyModifiers,
 } from '../../src/mobile-input/terminal-special-key-bridge.ts';
 
-interface NavigatorWithUaData extends Navigator {
-  userAgentData?: { mobile?: boolean };
-}
-
 interface ElectronMarkerWindow extends Window {
   te2Electron?: unknown;
 }
@@ -45,6 +41,7 @@ interface MobileSecondaryEditorDrawer {
 interface MobileSecondaryEditorOptions {
   root: HTMLElement;
   container: HTMLElement;
+  desktopHost: HTMLElement;
   tab: HTMLButtonElement | null;
   toast(message: string): void;
 }
@@ -82,7 +79,7 @@ export interface MobileSecondaryEditorController {
 }
 
 export function supportsMobileSecondEditor(
-  navigatorValue: Navigator = navigator,
+  _navigatorValue: Navigator = navigator,
   windowValue: Window = window,
 ): boolean {
   if ((windowValue as ElectronMarkerWindow).te2Electron) return false;
@@ -91,11 +88,7 @@ export function supportsMobileSecondEditor(
     const renderer = (params.get('te2_renderer') || 'gecko').trim().toLowerCase();
     return renderer === 'gecko' || renderer === 'cefrium';
   }
-  const uaData = (navigatorValue as NavigatorWithUaData).userAgentData;
-  if (typeof uaData?.mobile === 'boolean') return uaData.mobile;
-  return /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini/i.test(
-    navigatorValue.userAgent || '',
-  );
+  return true;
 }
 
 function secondaryFrameUrl(): string {
@@ -111,6 +104,8 @@ export function createMobileSecondaryEditorController(
   options: MobileSecondaryEditorOptions,
 ): MobileSecondaryEditorController {
   const supported = supportsMobileSecondEditor();
+  const drawerParent = options.container.parentElement;
+  const drawerNext = options.container.nextElementSibling;
   let frame: HTMLIFrameElement | null = null;
   let directRoot: HTMLElement | null = null;
   let directRuntime: SecondaryEditorRuntimeHandle | null = null;
@@ -175,7 +170,15 @@ export function createMobileSecondaryEditorController(
       populated,
     });
     const selected = available && options.tab?.classList.contains('active') === true;
-    const visible = available && selected;
+    const wide = supported && options.root.classList.contains('layout-desktop');
+    const docked = wide && populated && !dismissed;
+    if (supported) {
+      if (options.root.classList.contains('te2-secondary-editor-docked') !== docked) {
+        options.root.classList.toggle('te2-secondary-editor-docked', docked);
+      }
+      options.desktopHost.setAttribute('aria-hidden', String(!docked));
+    }
+    const visible = docked || (available && selected);
     options.container.hidden = !visible;
     if (frame) frame.hidden = !visible;
     if (!visible && currentMobileEditorOwner(window) === 'secondary') {
@@ -192,6 +195,7 @@ export function createMobileSecondaryEditorController(
   }
 
   function closeDrawer(): void {
+    if (!isMobileLayout()) return;
     void Promise.resolve(drawer?.close()).catch((error: unknown) => {
       console.warn('[second_editor] mobile drawer close failed', error);
     });
@@ -451,6 +455,7 @@ export function createMobileSecondaryEditorController(
   }
 
   function hide(): void {
+    if (supported && !isMobileLayout()) { updateVisibility(); return; }
     options.container.hidden = true;
     if (frame) frame.hidden = true;
     if (currentMobileEditorOwner(window) === 'secondary') {
@@ -460,8 +465,35 @@ export function createMobileSecondaryEditorController(
 
   function reconcileLayout(): void {
     if (destroyed) return;
+    if (supported && drawerParent) {
+      const wide = options.root.classList.contains('layout-desktop');
+      const parent: HTMLElement & { moveBefore?(node: Node, before: Node | null): void } =
+        wide ? options.desktopHost : drawerParent;
+      if (options.container.parentElement !== parent) {
+        const before = wide ? null : drawerNext;
+        if (typeof parent.moveBefore === 'function') parent.moveBefore(options.container, before);
+        else {
+          // Reparenting with insertBefore reloads an iframe. Re-establish its
+          // readiness handshake; direct Monaco keeps its existing DOM and model.
+          const recreate = !!frame;
+          const focused = document.activeElement;
+          const restoreFocus = focused instanceof HTMLElement && options.container.contains(focused);
+          if (recreate) destroyFrame('Second Window changed layout', true);
+          parent.insertBefore(options.container, before);
+          if (restoreFocus && focused.isConnected) focused.focus({ preventScroll: true });
+          if (recreate) void ensureFrame().catch(onPresentationError);
+        }
+        if (wide && options.tab?.classList.contains('active')) {
+          options.tab.parentElement?.querySelector<HTMLElement>('.drawer-tab[data-tab="terminal"]')?.click();
+        } else if (!wide && populated && !dismissed) {
+          updateVisibility();
+          options.tab?.click();
+          void Promise.resolve(drawer?.open()).catch(onPresentationError);
+        }
+      }
+    }
     updateVisibility();
-    if (supported && isMobileLayout() && !frame && !directRoot && !dismissed) {
+    if (supported && (isMobileLayout() || options.root.classList.contains('layout-desktop')) && !frame && !directRoot && !dismissed) {
       void ensureFrame().catch((error: unknown) => {
         if (!destroyed) options.toast(error instanceof Error ? error.message : String(error));
       });
@@ -519,9 +551,6 @@ export function createMobileSecondaryEditorController(
     hide,
     async open(projectPath, path, historyTicket) {
       if (!supported) throw new Error('Second Window is unavailable in this client');
-      if (!isMobileLayout()) {
-        throw new Error('Second Window is available in the mobile layout');
-      }
       dismissed = false;
       await ensureFrame();
       const requestId = `mobile_secondary_${Date.now().toString(36)}_${(++openSequence).toString(36)}`;
@@ -533,8 +562,10 @@ export function createMobileSecondaryEditorController(
       applyPopulation(true);
       dismissed = false;
       updateVisibility();
-      await Promise.resolve(drawer?.open());
-      options.tab?.click();
+      if (isMobileLayout()) {
+        await Promise.resolve(drawer?.open());
+        options.tab?.click();
+      }
       show();
     },
     destroy() {

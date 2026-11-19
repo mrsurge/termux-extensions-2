@@ -4235,7 +4235,8 @@ and global final-close remain backend-owned. Tab-cycle routing queries the
 existing mount input owner, so only the active area responds. Controller
 disposal removes global/document listeners, reorder timers/scroll locks and
 context menus. Historical content hides the working strip instead of becoming
-a working-file tab. Ordinary desktop-browser enablement remains separate work;
+a working-file tab. Ordinary browsers move one working mount between the drawer
+and desktop grid as the host layout changes.
 Electron and mobile both mount the docked working shell directly in the host page.
 
 Electron creates a framework-partition `WebContentsView` for a detached working

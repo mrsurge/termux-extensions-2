@@ -75,7 +75,7 @@ test("mobile second editor follows client capability rather than viewport width"
   assert.equal(supportsMobileSecondEditor(
     desktopNavigator,
     { location: new URL("http://127.0.0.1/app/code_te2") },
-  ), false);
+  ), true);
   assert.equal(supportsMobileSecondEditor(
     desktopNavigator,
     {

@@ -27,7 +27,6 @@ export function initDrawerAndShortcuts(deps: Dependencies) {
     const terminalHeader = document.querySelector<HTMLElement>('.terminal-header');
     const terminalContainer = document.getElementById('terminal-container');
     const consoleContainer = document.getElementById('console-container');
-    const secondEditorContainer = document.getElementById('second-editor-container');
     const extensionLogContainer = document.getElementById('extension-log-container');
     const extensionLogHeader = document.getElementById('extension-log-header');
     const codeInspectorContainer = document.getElementById('code-inspector-container');
@@ -53,7 +52,6 @@ export function initDrawerAndShortcuts(deps: Dependencies) {
       if (terminalHeader) terminalHeader.style.display = 'none';
       if (terminalContainer) terminalContainer.style.display = 'none';
       if (consoleContainer) consoleContainer.style.display = 'none';
-      if (secondEditorContainer) secondEditorContainer.hidden = true;
       if (extensionLogContainer) extensionLogContainer.style.display = 'none';
       if (extensionLogHeader) extensionLogHeader.style.display = 'none';
       if (codeInspectorContainer) codeInspectorContainer.style.display = 'none';

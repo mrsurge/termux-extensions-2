@@ -543,8 +543,11 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   42/44 before the additional window-release regression. Assets regenerated
   include host and early-preparation bundles; no backend/native source changes,
   shared runtime restart, Android publication or commit performed.
-- [ ] S3 ordinary desktop browser support and one responsive outer pane/tab
-  container. Mobile direct working mounting/iframe removal is implemented above;
+- [x] S3 ordinary browsers share one responsive second-editor container. The
+  working mount moves between the narrow drawer and wide desktop grid with its
+  tabs. The user verified state persistence across a full browser refresh and
+  confirmed the pane switches correctly at the layout breakpoint.
+  Mobile direct working mounting/iframe removal is implemented above;
   that cutover is live-accepted. Preserve historical/extension isolation and
   native Electron overlay/detach behavior.
 - [x] S3 shared File-menu target capture/action routing implemented and

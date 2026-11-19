@@ -415,6 +415,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
   const mobileSecondEditor = createMobileSecondaryEditorController({
     root,
+    desktopHost: secondaryEditorHost,
     container: requireEl('#second-editor-container'),
     tab: document.querySelector<HTMLButtonElement>('#drawer-tab-second-window'),
     toast: (message) => host.toast(message),
