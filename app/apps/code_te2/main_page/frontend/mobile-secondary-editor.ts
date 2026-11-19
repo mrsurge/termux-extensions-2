@@ -121,6 +121,20 @@ export function createMobileSecondaryEditorController(
   let drawer: MobileSecondaryEditorDrawer | null = null;
   let populated = false;
   let dismissed = false;
+  let desktopCollapsed = false;
+  const restore = document.createElement('button');
+  restore.type = 'button';
+  restore.className = 'te2-secondary-pane-restore';
+  restore.textContent = '◧';
+  restore.title = 'Restore second window';
+  restore.setAttribute('aria-label', restore.title);
+  restore.hidden = true;
+  if (supported) options.desktopHost.append(restore);
+  restore.addEventListener('click', () => {
+    desktopCollapsed = false;
+    updateVisibility();
+    options.container.querySelector<HTMLButtonElement>('.te2-secondary-editor-collapse')?.focus();
+  });
   let openSequence = 0;
   const shortcut = document.createElement('button');
   shortcut.type = 'button';
@@ -171,12 +185,18 @@ export function createMobileSecondaryEditorController(
     });
     const selected = available && options.tab?.classList.contains('active') === true;
     const wide = supported && options.root.classList.contains('layout-desktop');
-    const docked = wide && populated && !dismissed;
+    const present = wide && populated && !dismissed;
+    const docked = present && !desktopCollapsed;
+    const collapsed = present && desktopCollapsed;
     if (supported) {
       if (options.root.classList.contains('te2-secondary-editor-docked') !== docked) {
         options.root.classList.toggle('te2-secondary-editor-docked', docked);
       }
-      options.desktopHost.setAttribute('aria-hidden', String(!docked));
+      if (options.root.classList.contains('te2-secondary-editor-collapsed') !== collapsed) {
+        options.root.classList.toggle('te2-secondary-editor-collapsed', collapsed);
+      }
+      restore.hidden = !collapsed;
+      options.desktopHost.setAttribute('aria-hidden', String(!present));
     }
     const visible = docked || (available && selected);
     options.container.hidden = !visible;
@@ -240,6 +260,7 @@ export function createMobileSecondaryEditorController(
     const wasSelected = options.tab?.classList.contains('active') === true;
     populated = hasContent;
     if (!populated) {
+      desktopCollapsed = false;
       dismissed = false;
       selectFallbackTab();
       hide();
@@ -415,7 +436,12 @@ export function createMobileSecondaryEditorController(
       }
     } else if (data.type === 'mode' && data.mode === 'collapsed') {
       setMobileEditorOwner(window, 'primary');
-      closeDrawer();
+      if (isMobileLayout()) closeDrawer();
+      else {
+        desktopCollapsed = true;
+        updateVisibility();
+        restore.focus();
+      }
     } else if (data.type === 'mode' && data.mode === 'closed') {
       setMobileEditorOwner(window, 'primary');
       dismissed = true;
@@ -551,6 +577,7 @@ export function createMobileSecondaryEditorController(
     hide,
     async open(projectPath, path, historyTicket) {
       if (!supported) throw new Error('Second Window is unavailable in this client');
+      desktopCollapsed = false;
       dismissed = false;
       await ensureFrame();
       const requestId = `mobile_secondary_${Date.now().toString(36)}_${(++openSequence).toString(36)}`;
@@ -586,6 +613,7 @@ export function createMobileSecondaryEditorController(
       setMobileEditorOwner(window, 'primary');
       destroyFrame('Second Window editor was destroyed');
       shortcut.remove();
+      restore.remove();
       dismissed = false;
     },
   };

@@ -1106,7 +1106,8 @@
     background: var(--bg, #0b0f1a);
   }
   .te2-secondary-editor-host > #second-editor-container { height: 100%; }
-  .te2-secondary-editor-host .te2-secondary-editor[data-presentation="mobile"] .te2-secondary-editor-collapse { display: none; }
+  .te2-secondary-editor-host > .te2-secondary-pane-restore { display: grid; margin: 4px auto; width: 32px; height: 32px; }
+  .te2-secondary-editor-host > .te2-secondary-pane-restore[hidden] { display: none; }
   /* Make vConsole panel fill the container instead of using fixed positioning */
   #console-container #__vconsole {
     position: relative !important;

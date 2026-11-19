@@ -154,7 +154,8 @@ const STYLE = `
 .te2-secondary-editor-menu {
   -webkit-app-region: no-drag;
 }
-.te2-secondary-editor button {
+.te2-secondary-editor button,
+.te2-secondary-pane-restore {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -168,7 +169,9 @@ const STYLE = `
   font: inherit;
 }
 .te2-secondary-editor button:hover,
-.te2-secondary-editor button:focus-visible {
+.te2-secondary-editor button:focus-visible,
+.te2-secondary-pane-restore:hover,
+.te2-secondary-pane-restore:focus-visible {
   border-color: #3d444d;
   background: #21262d;
   outline: none;

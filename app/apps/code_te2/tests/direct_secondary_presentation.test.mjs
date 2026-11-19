@@ -135,7 +135,19 @@ test('responsive drawer and wide pane retain the same working editor and tabs',a
     await f.settle(()=>f.container.parentElement.id==='desktop-host');
     f.controller.hide(); // switching terminal tabs in the wide layout
     assert.equal(f.container.hidden,false);
+    const collapse = f.container.querySelector('.te2-secondary-editor-collapse');
+    const restore = f.root.querySelector('.te2-secondary-pane-restore');
+    collapse.click();
+    assert.equal(f.container.hidden,true);
+    assert.equal(restore.hidden,false);
+    assert.ok(f.root.classList.contains('te2-secondary-editor-collapsed'));
+    restore.click();
+    assert.equal(f.container.hidden,false);
+    assert.equal(f.container.querySelector('.te2-secondary-working-mount'),editor);
+    collapse.click();
     await f.controller.open('/project','/project/b.ts');
+    assert.equal(restore.hidden,true);
+    collapse.click();
     f.root.classList.replace('layout-desktop','layout-mobile');
     await f.settle(()=>f.container.parentElement===f.root);
     assert.equal(f.container.querySelector('.te2-secondary-working-mount'),editor);
