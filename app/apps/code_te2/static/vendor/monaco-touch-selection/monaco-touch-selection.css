@@ -221,3 +221,33 @@ html.hc-light, html.hc-light body {
   height: 1.2rem;
   margin: 0;
 }
+.monaco-touch-selection-lens {
+    position: absolute;
+    z-index: 100;
+    width: min(148px, 96%);
+    height: 54px;
+    box-sizing: border-box;
+    overflow: hidden;
+    pointer-events: none;
+    user-select: none;
+    border: 1px solid var(--vscode-editorWidget-border, #888);
+    border-radius: 14px;
+    background: var(--vscode-editor-background, Canvas);
+    color: var(--vscode-editor-foreground, CanvasText);
+    box-shadow: 0 3px 10px #0005;
+}
+.monaco-touch-selection-lens[hidden] { display: none; }
+.monaco-touch-selection-sample {
+    position: absolute;
+    left: 50%; top: 50%;
+    white-space: pre;
+    width: max-content;
+    transform-origin: left center;
+}
+.monaco-touch-selection-lens::after {
+    content: '';
+    position: absolute;
+    top: 15%; bottom: 15%; left: 50%;
+    width: 2px;
+    background: var(--vscode-editorCursor-foreground, currentColor);
+}
