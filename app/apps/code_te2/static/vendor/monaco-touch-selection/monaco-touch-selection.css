@@ -222,8 +222,8 @@ html.hc-light, html.hc-light body {
   margin: 0;
 }
 .monaco-touch-selection-lens {
-    position: absolute;
-    z-index: 100;
+    position: fixed;
+    z-index: var(--monaco-editor_touch-selector-menu_z-index, 350);
     width: min(148px, 96%);
     height: 54px;
     box-sizing: border-box;
