@@ -38,10 +38,8 @@ const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const OPEN_TOUCH_MENU_EVENT = 'monaco-touch-selection:open-menu';
 const CTRL_DOUBLE_TAP_MS = 350;
 
-interface MobileNavigatorLike {
-  userAgent?: string;
-  userAgentData?: { mobile?: boolean };
-}
+import { isMobileUserAgent } from '../src/mobile-input/mobile-user-agent.ts';
+export { isMobileUserAgent };
 
 interface MobileSpecialKeyEditorAction {
   run?(): unknown;
@@ -86,12 +84,6 @@ export interface MobileEditorInputBinding {
   getVibrationDurationMs?: () => number;
 }
 
-export function isMobileUserAgent(navigatorLike: MobileNavigatorLike): boolean {
-  if (navigatorLike.userAgentData?.mobile === true) return true;
-  return /\b(?:Android|Mobile|iPhone|iPad|iPod)\b/i.test(
-    navigatorLike.userAgent || '',
-  );
-}
 
 function getEditorInput(editor: MobileSpecialKeyEditor): HTMLTextAreaElement | null {
   const editorDom = editor.getDomNode?.();

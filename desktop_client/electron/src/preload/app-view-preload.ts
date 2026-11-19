@@ -16,6 +16,8 @@ import {
   type ElectronEditorSurfaceMode,
   type ElectronEditorSurfacePresentation,
   type ElectronSecondEditorCommand,
+  type SecondaryPanelSnapshot,
+  type SecondaryPanelBridge,
 } from "../shared/app-view-contracts";
 import type { AssetUpdateResult } from "../shared/contracts";
 
@@ -198,6 +200,18 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   },
   dockedEditorReady(): Promise<{ ok: true }> {
     return invokeElectron("docked_editor_ready");
+  },
+  secondaryPanelSnapshot(): Promise<SecondaryPanelSnapshot> { return invokeElectron("secondary_panel_snapshot"); },
+  secondaryPanelAction(...[action, surfaceId, presentationId]: Parameters<SecondaryPanelBridge["secondaryPanelAction"]>): Promise<void> {
+    return invokeElectron("secondary_panel_action", { action, surfaceId, presentationId });
+  },
+  placeSecondaryPanel(surfaceId: string, presentationId: string, bounds: ElectronSidebarSurfaceBounds): Promise<void> {
+    return invokeElectron("secondary_panel_placement", { surfaceId, presentationId, bounds });
+  },
+  onSecondaryPanels(listener: (state: SecondaryPanelSnapshot) => void) {
+    const handler = (_event: Electron.IpcRendererEvent, state: SecondaryPanelSnapshot) => listener(state);
+    ipcRenderer.on("te2-desktop:secondary-panels", handler);
+    return () => ipcRenderer.off("te2-desktop:secondary-panels", handler);
   },
   setDockedEditorHistory(historical: boolean): Promise<{ ok: true }> {
     return invokeElectron("set_docked_editor_history", { historical });

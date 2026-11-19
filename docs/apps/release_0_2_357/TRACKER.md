@@ -556,6 +556,11 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
 - [x] S3 primary/secondary extra-key focus handoff fixed and live-accepted above;
   do not reopen it as an iframe-removal prerequisite. Preserve its regressions.
 - [ ] S4 extension-created secondary panels as tabs and sidebar transfer;
+  Desktop Electron implementation and automated checks cover retaining the native
+  extension view across sidebar, second-pane and detached placement. Electron's
+  docked pane moves into the bottom drawer at the portrait breakpoint. The user
+  live-accepted the Electron panel transfer and responsive presentation. Mobile native integration is
+  deferred to the Electron port.
   support moving a live panel between sidebar and second pane on desktop and mobile.
   preserve surface identity, live state, messages, readiness, focus/visibility,
   retained contexts, disposal, native reparenting and project/WBA generation.

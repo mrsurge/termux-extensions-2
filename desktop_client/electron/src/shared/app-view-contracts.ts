@@ -25,6 +25,9 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "write_sidebar_presentation_state",
   "open_sidebar_menu",
   "place_sidebar_surface",
+  "secondary_panel_action",
+  "secondary_panel_placement",
+  "secondary_panel_snapshot",
   "detach_sidebar_surface",
   "focus_sidebar_surface",
   "refresh_sidebar_surface",
@@ -163,6 +166,9 @@ export type ElectronSecondEditorCommand =
 
 export const ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION = 2 as const;
 
+import type { SecondaryPanelBridge } from "../../../../app/apps/code_te2/main_page/frontend/secondary-panel-contracts";
+export type { SecondaryPanelBridge, SecondaryPanelSnapshot } from "../../../../app/apps/code_te2/main_page/frontend/secondary-panel-contracts";
+
 export type ElectronSidebarSurfaceRenderer =
   | "url"
   | "persistent-extension";
@@ -247,7 +253,7 @@ export type ElectronDetachedSurfaceBridge = {
   ): () => void;
 };
 
-export type ElectronAppViewBridge = {
+export type ElectronAppViewBridge = SecondaryPanelBridge & {
   readonly identity: typeof ELECTRON_APP_VIEW_IDENTITY;
   inspect(): Promise<ElectronAppViewInspection>;
   reload(): Promise<{ ok: true }>;

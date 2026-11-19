@@ -338,6 +338,14 @@
   .layout-mobile .terminal-drawer:not(.fullscreen) {
     max-height: 397px;
   }
+  .layout-mobile.desktop-user-agent:has(.terminal-drawer.open:not(.fullscreen):not(.terminal-drawer--collapsed)) {
+    grid-template-rows: auto auto minmax(0, 1fr) minmax(0, max-content) auto auto;
+  }
+  .layout-mobile.desktop-user-agent .terminal-drawer.open:not(.fullscreen):not(.terminal-drawer--collapsed) {
+    max-height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+  }
 
   .layout-mobile:has(.terminal-drawer.fullscreen) {
     grid-template-rows: auto auto 0 minmax(0, 1fr) auto auto;

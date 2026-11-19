@@ -22,6 +22,7 @@ import {
 type EditorParent = "none" | "main" | "detached";
 
 export interface SecondaryEditorRegistryOptions {
+  releasePanelOwners?(): void;
   getAppPath(): string;
   getMainWindow(): BrowserWindow | null;
   getAppViewBounds(): Electron.Rectangle;
@@ -96,6 +97,23 @@ export class SecondaryEditorRegistry {
 
   constructor(options: SecondaryEditorRegistryOptions) {
     this.#options = options;
+  }
+
+  get nativePanelHost(): boolean { return !!this.#view; }
+  panelHostBounds(): Electron.Rectangle { return this.#view?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }; }
+  publishPanels(state: import("../shared/app-view-contracts").SecondaryPanelSnapshot): void {
+    this.#view?.webContents.send("te2-desktop:secondary-panels", state);
+  }
+  async revealPanelHost(): Promise<void> {
+    if (!this.#presentation) throw new Error("Open a project before transferring an extension panel");
+    if (this.#presentation.mode === "closed" || this.#presentation.mode === "collapsed") await this.setMode("docked");
+    else {
+      this.#sendState();
+      if (this.#presentation.mode === "detached" && this.#window && !this.#window.isDestroyed()) {
+        if (this.#window.isMinimized()) this.#window.restore();
+        this.#window.focus();
+      }
+    }
   }
 
   ownsContents(contents: WebContents): boolean {
@@ -545,6 +563,7 @@ export class SecondaryEditorRegistry {
   #closeDetachedWindow(): void {
     const window = this.#window;
     if (!window || window.isDestroyed()) return;
+    this.#options.releasePanelOwners?.();
     this.#window = null;
     this.#closingWindowInternally = true;
     try {
@@ -610,6 +629,7 @@ export class SecondaryEditorRegistry {
   }
 
   #disposeView(): void {
+    this.#options.releasePanelOwners?.();
     this.#disposing = true;
     this.#loadGeneration += 1;
     this.#ready = false;

@@ -70,7 +70,9 @@ export type SecondaryCommand =
     modifiers: SyntheticKeyModifiers;
   };
 
-interface SecondaryElectronBridge {
+import { installSecondaryPanelTabs } from './secondary-panel-tabs.ts';
+import type { SecondaryPanelBridge } from './secondary-panel-contracts';
+interface SecondaryElectronBridge extends SecondaryPanelBridge {
   setDockedEditorHistory?(historical: boolean): Promise<{ ok: true }>;
   secondEditorReady(): Promise<{ ok: true }>;
   setSecondEditorMode(
@@ -185,6 +187,9 @@ const STYLE = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.te2-secondary-panel-tabs { display: flex; min-width: 0; max-width: 65%; overflow-x: auto; }
+.te2-secondary-panel-tabs button { white-space: nowrap; }
+.te2-secondary-panel-tabs [aria-selected='true'] { border-bottom-color: #58a6ff; }
 .te2-secondary-file-tabs {
   flex: 1 1 auto;
   min-width: 0;
@@ -556,6 +561,10 @@ export async function bootSecondaryEditorRuntime(
     );
   }
   const titleEl = title;
+  const nativeBridge = runtimeWindow().te2Electron;
+  const panels = presentationBridge.kind === 'electron' && nativeBridge?.onSecondaryPanels
+    ? installSecondaryPanelTabs(root, nativeBridge, message => host.toast(message)) : null;
+  if (panels) inputBridgeCleanups.push(() => panels.dispose());
   const tabViewportEl = tabViewport;
   const statusEl = status;
   const issuesButtonEl = issuesButton;
@@ -586,6 +595,7 @@ export async function bootSecondaryEditorRuntime(
     isActive: () => !contentLifecycle.historical && isEditorInputOwner(editorFrame),
     formatFileNameDisplay: name => name,
     openFile: async path => {
+      panels?.files();
       if (disposed || contentLifecycle.historical) return;
       await connection.request(UI_IPC_RPC_METHODS.hostFileOpen,
         { path, source: 'secondary_editor_tab', focus: true }, 8_000);
@@ -601,7 +611,7 @@ export async function bootSecondaryEditorRuntime(
     resetToNewFile: () => {
       if (disposed) return;
       setCurrentPath('');
-      void setMode('closed').catch((error: unknown) => host.toast(errorMessage(error)));
+      if (!panels?.populated()) void setMode('closed').catch((error: unknown) => host.toast(errorMessage(error)));
     },
     onError: message => host.toast(message),
   });
@@ -873,6 +883,7 @@ export async function bootSecondaryEditorRuntime(
     if (command.projectPath !== projectPath) {
       throw new Error('Second editor project changed before the file could open');
     }
+    panels?.files();
     if (command.type === 'history') {
       await connection.request(UI_IPC_RPC_METHODS.hostHistoryOpen, { ticket: command.ticket }, 8_000);
       // Acknowledge before snapshot application schedules this realm's reload.
@@ -930,7 +941,7 @@ export async function bootSecondaryEditorRuntime(
         clientForeground: { path: nextPath },
         secondaryContent: params.secondaryContent,
       }).then(() => {
-        if (shouldClosePresentation && !closeInFlight) void setMode('closed');
+        if (shouldClosePresentation && !closeInFlight && !panels?.populated()) void setMode('closed');
       }).catch((error: unknown) => setStatus(`Content unavailable: ${errorMessage(error)}`));
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
       setStatus('Switching project…');

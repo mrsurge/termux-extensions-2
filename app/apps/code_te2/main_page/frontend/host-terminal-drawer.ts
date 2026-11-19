@@ -11,7 +11,7 @@ import {
   SOCKET_IO_PATHS,
   fileEditorSocketQuery,
 } from '../../src/rpc/socketio-topology.ts';
-import { clampTerminalDrawerHeight } from './ui/drawer-sizing.ts';
+import { resizedDrawerHeight } from './ui/drawer-sizing.ts';
 import {
   bindTerminalSpecialKeyTarget,
   publishTerminalSpecialKeyFocus,
@@ -1464,12 +1464,9 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       if (!isResizing) return;
       
       const deltaY = startY - e.clientY;
-      const mobileLayout = document.querySelector('.fe-root')
-        ?.classList.contains('layout-mobile') === true;
-      const newHeight = clampTerminalDrawerHeight(
+      const newHeight = resizedDrawerHeight(
         startHeight + deltaY,
         100,
-        mobileLayout,
         window.innerHeight - 40,
       );
       

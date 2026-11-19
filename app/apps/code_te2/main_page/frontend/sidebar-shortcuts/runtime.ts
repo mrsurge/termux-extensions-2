@@ -196,6 +196,9 @@ interface ElectronSidebarSurfaceEvent {
 }
 
 interface ElectronSidebarSurfaceBridge {
+  secondaryPanelAction?(action: 'transfer' | 'return', surfaceId: string, presentationId: string): Promise<void>;
+  secondaryPanelSnapshot?(): Promise<{ panels: {surfaceId: string}[] }>;
+  onSecondaryPanels?(listener: (state: { panels: { surfaceId: string }[]; returnedSurfaceId?: string }) => void): () => void;
   placeSidebarSurface(
     descriptor: ElectronSidebarSurfaceDescriptor,
     bounds: ElectronSidebarSurfaceBounds,
@@ -397,6 +400,7 @@ export function initSidebarShortcuts(
   let _presentationProjectGeneration = 0;
   let _pendingPresentationSlots: SidebarAppDockSlot[] | null = null;
   let _detachedPresentationIds = new Map<string, string>();
+  let _secondaryPanels = new Set<string>();
   const _qualifiedPresentations = new Map<string, SidebarWindowIdentity>();
   const _presentationRegistrations = new Map<string, Promise<void>>();
   let _detachPromises = new Map<string, Promise<boolean>>();
@@ -1212,6 +1216,7 @@ export function initSidebarShortcuts(
     active: SidebarShortcut | null,
   ): SidebarShortcut | null {
     const eligible = shortcuts.filter((sc) =>
+      !_secondaryPanels.has(_surfaceIdForShortcut(sc)) &&
       !_isDetachedShortcut(sc) &&
       _presentationModeForHost(_normStr(sc.host_id)) !== "hidden",
     );
@@ -2576,6 +2581,17 @@ export function initSidebarShortcuts(
     const runProfile = asRecord(
       shortcut.run_profile_surface || shortcut.runProfileSurface,
     );
+    if (action === "panel-transfer" || action === "panel-return") {
+      const bridge = _electronSurfaceBridge();
+      const entry = _electronNativeSurfaceMap.get(shortcut.key);
+      if (!entry || !bridge?.secondaryPanelAction) throw new Error("Extension panel is unavailable");
+      if (!entry.loaded && !await _placeElectronNativeSurface(shortcut, entry, false)) return;
+      await bridge.secondaryPanelAction(action === "panel-transfer" ? "transfer" : "return",
+        _surfaceIdForShortcut(shortcut), entry.presentationId);
+      if (action === "panel-transfer") window.dispatchEvent(new Event('code-te2:reveal-secondary-drawer'));
+      _scheduleElectronNativeSurfacePlacement();
+      return;
+    }
     if (action === "surface") {
       const bridge = _electronSurfaceBridge();
       if (!hostId || !bridge) return;
@@ -2684,6 +2700,13 @@ export function initSidebarShortcuts(
     const extensionSurface = _extensionWebviewSurface(sc);
     const surfaceKind = _normStr(extensionSurface.surfaceKind) || "view";
     const items: ElectronSidebarMenuItem[] = [{ type: "label", label }];
+    const panelBridge = _electronSurfaceBridge();
+    if (surfaceKind === "panel" && _usesElectronPersistentSurface(shortcut) && !_isDetachedShortcut(shortcut)
+        && panelBridge?.secondaryPanelSnapshot) {
+      const transferred = (await panelBridge.secondaryPanelSnapshot()).panels.some(p => p.surfaceId === _surfaceIdForShortcut(shortcut));
+      items.push({ type: "item", id: transferred ? "panel-return" : "panel-transfer",
+        label: transferred ? "Return to sidebar" : "Move to second window", enabled: true });
+    }
     const separator = () => items.push({ type: "separator" });
     if (hostId) {
       separator();
@@ -3584,6 +3607,10 @@ export function initSidebarShortcuts(
         const closesOwnMenu = _headerIconMenuOwns(_normStr(sc.key));
         _closeHeaderIconMenu();
         if (closesOwnMenu) return;
+        if (_secondaryPanels.has(_surfaceIdForShortcut(sc))) {
+          void _runHeaderIconMenuAction(sc, "panel-transfer").catch((error: unknown) => toast(String(error)));
+          return;
+        }
         const targetId = sc.id || sc.url || sc.key;
         if (!targetId) return;
         _setClientActiveShortcut(targetId, {
@@ -5474,6 +5501,27 @@ export function initSidebarShortcuts(
     }
     const electronBridge = _electronSurfaceBridge();
     if (electronBridge && !_electronSurfaceEventsUnsubscribe) {
+      if (electronBridge.onSecondaryPanels && electronBridge.secondaryPanelSnapshot) {
+        let revision = 0;
+        const update = (state: { panels: { surfaceId: string }[]; returnedSurfaceId?: string }) => {
+          revision++;
+          const next = new Set(state.panels.map(p => p.surfaceId));
+          if (next.size === _secondaryPanels.size && [...next].every(id => _secondaryPanels.has(id))) return;
+          _secondaryPanels = next;
+          if (_hydrated && state.returnedSurfaceId) {
+            const sc = _collectVisibleShortcuts(_latestUiPrefs || {}).find(s => _surfaceIdForShortcut(s) === state.returnedSurfaceId);
+            if (sc) {
+              _setClientActiveShortcut(sc.id || sc.url || sc.key, { emit: true, source: "secondary_panel_return",
+                updateLastUsed: true, revealHidden: true });
+              openDrawer?.();
+            }
+          }
+          if (_hydrated) void _syncIframesAndActivate(_latestUiPrefs || {}, null, null);
+        };
+        const off = electronBridge.onSecondaryPanels(update);
+        window.addEventListener('beforeunload', off, { once: true });
+        void electronBridge.secondaryPanelSnapshot().then(state => { if (!revision) update(state); }).catch(console.warn);
+      }
       _electronSurfaceEventsUnsubscribe = electronBridge.onSidebarSurfaceEvent(
         _handleElectronSurfaceEvent,
       );

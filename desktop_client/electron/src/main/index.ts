@@ -371,6 +371,7 @@ async function handleAppViewControl(
       "wait_for_app_prerequisites",
       "set_second_editor_mode",
       "second_editor_ready",
+      "secondary_panel_snapshot", "secondary_panel_placement", "secondary_panel_action",
       "set_docked_editor_history",
     ].includes(command)
   ) {
@@ -485,6 +486,10 @@ async function handleAppViewControl(
     const mode = String((payload as Record<string, unknown>).mode || "") as ElectronEditorSurfaceMode;
     if (!["closed", "docked", "collapsed", "detached"].includes(mode)) {
       throw new Error("Secondary editor mode is invalid");
+    }
+    detachedSurfaceRegistry?.releasePanelOwners();
+    if (mode === "closed" && detachedSurfaceRegistry) {
+      for (const p of detachedSurfaceRegistry.panelSnapshot().panels) detachedSurfaceRegistry.panelAction("return", p.surfaceId, p.presentationId);
     }
     const presentation = await secondaryEditorRegistry.setMode(mode);
     return { ok: true, presentation };
@@ -643,6 +648,40 @@ async function handleAppViewControl(
       request.bounds,
       request.visible,
     );
+  }
+  if (command === "secondary_panel_snapshot") return detachedSurfaceRegistry?.panelSnapshot() ?? { panels: [], active: "" };
+  if (command === "secondary_panel_action") {
+    if (!detachedSurfaceRegistry || !secondaryEditorRegistry || !payload || typeof payload !== "object" || !("action" in payload))
+      throw new Error("Secondary panel host unavailable");
+    const action = payload.action;
+    if (action === "files") { detachedSurfaceRegistry.selectFiles(); return; }
+    if (action !== "select" && action !== "return" && !(action === "transfer" && role === "primary"))
+      throw new Error("Invalid secondary panel action");
+    const ref = validateElectronSidebarSurfaceReference(payload);
+    if (action === "transfer") await secondaryEditorRegistry.revealPanelHost();
+    detachedSurfaceRegistry.panelAction(action, ref.surfaceId, ref.presentationId || "", true);
+    return;
+  }
+  if (command === "secondary_panel_placement") {
+    if (!secondaryEditorRegistry || !detachedSurfaceRegistry || !payload || typeof payload !== "object" ||
+        !("bounds" in payload) || !payload.bounds || typeof payload.bounds !== "object") throw new Error("Invalid panel bounds");
+    if (secondaryEditorRegistry.nativePanelHost !== (role === "secondary")) return;
+    const ref = validateElectronSidebarSurfaceReference(payload);
+    const b = payload.bounds;
+    if (!("x" in b && "y" in b && "width" in b && "height" in b) ||
+        typeof b.x !== "number" || typeof b.y !== "number" || typeof b.width !== "number" || typeof b.height !== "number" ||
+        ![b.x,b.y,b.width,b.height].every(Number.isFinite)) throw new Error("Invalid panel coordinates");
+    const owner = role === "secondary" ? secondaryEditorRegistry.ownerWindow(event.sender) : mainWindow;
+    if (!owner) return;
+    const base = role === "secondary" ? secondaryEditorRegistry.panelHostBounds() : appViewBounds();
+    const zoom = event.sender.getZoomFactor();
+    const x = Math.max(0, Math.min(base.width, Math.round(b.x * zoom)));
+    const y = Math.max(0, Math.min(base.height, Math.round(b.y * zoom)));
+    detachedSurfaceRegistry.placePanel(ref.surfaceId, ref.presentationId || "", {
+      x: base.x+x, y: base.y+y, width: Math.max(0, Math.min(base.width-x, Math.round(b.width*zoom))),
+      height: Math.max(0, Math.min(base.height-y, Math.round(b.height*zoom))),
+    }, owner);
+    return;
   }
   if (command === "detach_sidebar_surface") {
     const request = validateElectronSidebarSurfaceDetachRequest(payload);
@@ -1271,6 +1310,7 @@ async function main(): Promise<void> {
 
   mainWindow = createMainWindow();
   secondaryEditorRegistry = new SecondaryEditorRegistry({
+    releasePanelOwners: () => detachedSurfaceRegistry?.releasePanelOwners(),
     getAppPath: () => app.getAppPath(),
     getMainWindow: () => mainWindow,
     getAppViewBounds: appViewBounds,
@@ -1296,6 +1336,10 @@ async function main(): Promise<void> {
     layoutPrimary: resizeAppView,
   });
   detachedSurfaceRegistry = new DetachedSidebarSurfaceRegistry({
+    panelsChanged: state => {
+      appView?.webContents.send("te2-desktop:secondary-panels", state);
+      secondaryEditorRegistry?.publishPanels(state);
+    },
     getAppPath: () => app.getAppPath(),
     getAppContents: () => appView?.webContents || null,
     getMainWindow: () => mainWindow,

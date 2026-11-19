@@ -119,6 +119,29 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
   await registry.place({ ...embedded, presentationId: "p4" }, bounds, true);
   embeddedContents.emit("focus");
   assert.equal(app.sent.length, 1, "replaced content cannot claim foreground");
+  const panelWindow = new Window();
+  let attaches = 0;
+  let releases = 0;
+  panelWindow.contentView.addChildView = () => { attaches++; };
+  panelWindow.contentView.removeChildView = () => { releases++; };
+  const count = View.all.length;
+  registry.panelAction("transfer", "embedded", "p4");
+  assert.equal(registry.panelSnapshot().active, "embedded");
+  const place = () => registry.placePanel("embedded", "p4", bounds, panelWindow as unknown as Electron.BrowserWindow);
+  place();
+  await registry.place({ ...embedded, presentationId: "p4" }, bounds, true);
+  place();
+  assert.equal(attaches, 1);
+  assert.equal(releases, 0);
+  registry.selectFiles();
+  assert.equal(registry.panelSnapshot().active, "");
+  registry.panelAction("select", "embedded", "p4");
+  place();
+  registry.releasePanelOwners();
+  assert.equal(releases, 1);
+  registry.panelAction("return", "embedded", "p4");
+  assert.equal(registry.panelSnapshot().panels.length, 0);
+  assert.equal(View.all.length, count, "transfer retained the original extension page");
 });
 
 test("detached chrome exposes the minimize action, not main window control", () => {

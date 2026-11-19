@@ -138,6 +138,7 @@ interface SidebarShortcutsLike {
 }
 
 interface ElectronSecondEditorBridge {
+  setSecondEditorMode?(mode: ElectronSecondEditorMode): Promise<{ ok: true; presentation: ElectronSecondEditorPresentation }>;
   dockedEditorReady?: () => Promise<{ ok: true }>;
   openSecondEditor?: (
     projectPath: string,
@@ -413,10 +414,13 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     root,
     sidebarDrawerEl,
   });
+  const electronSecondEditor = (window as ElectronSecondEditorWindow).te2Electron;
+  const secondContainer = requireEl('#second-editor-container');
   const mobileSecondEditor = createMobileSecondaryEditorController({
     root,
     desktopHost: secondaryEditorHost,
-    container: requireEl('#second-editor-container'),
+    container: secondContainer,
+    electronMode: electronSecondEditor?.dockedEditorReady ? electronSecondEditor.setSecondEditorMode : undefined,
     tab: document.querySelector<HTMLButtonElement>('#drawer-tab-second-window'),
     toast: (message) => host.toast(message),
   });
@@ -800,7 +804,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     apply: (payload: unknown) => preferencesController.applyPreferencesChangedPayload(payload),
   });
 
-  const electronSecondEditor = (window as ElectronSecondEditorWindow).te2Electron;
   document.documentElement.dataset.te2SecondEditor = (
     typeof electronSecondEditor?.openSecondEditor === 'function'
     || mobileSecondEditor.supported
@@ -820,13 +823,18 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   let dockProject = '';
   let dispatchDockCommand: ((command: SecondaryCommand) => void) | null = null;
   let dockState: Extract<SecondaryCommand, { type: 'state' }> | null = null;
+  function syncDockMode(): void {
+    if (!dockState) return;
+    const collapsedDrawer = dockState.presentation.mode === 'collapsed' && root.classList.contains('layout-mobile');
+    dispatchDockCommand?.(collapsedDrawer
+      ? { ...dockState, presentation: { ...dockState.presentation, mode: 'docked' } } : dockState);
+  }
 
   function stopDock(): void {
     dockController?.abort();
     dockController = null;
     dispatchDockCommand = null;
-    secondaryEditorHost.replaceChildren();
-    secondaryEditorHost.setAttribute('aria-hidden', 'true');
+    if (electronSecondEditor?.dockedEditorReady) secondContainer.replaceChildren();
   }
 
   function reconcileDock(command: Extract<SecondaryCommand, { type: 'state' }>): void {
@@ -835,25 +843,31 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     dockState = command;
     if (!secondaryEditorEmbedded() || command.nativeDock) { stopDock(); return; }
     if (dockController && dockProject === command.projectPath) {
-      dispatchDockCommand?.(command);
+      syncDockMode();
       return;
     }
     stopDock();
     dockProject = command.projectPath;
     const controller = new AbortController();
     dockController = controller;
-    secondaryEditorHost.removeAttribute('aria-hidden');
     void resolveCodeTe2ClientIdentity({ role: 'secondary' }).then(identity => {
       controller.signal.throwIfAborted();
-      return bootSecondaryEditorRuntime(secondaryEditorHost, host, {
+      return bootSecondaryEditorRuntime(secondContainer, host, {
         signal: controller.signal,
         rendererIdentity: { ...identity, clientRole: 'secondary' },
         presentationBridge: {
           ...createPresentationBridge(),
+          async setMode(mode) {
+            if (mode === 'collapsed' && root.classList.contains('layout-mobile')) {
+              mobileSecondEditor.collapseDrawer();
+              return { ...secondaryEditorPresentation, mode: 'docked' };
+            }
+            return (await electronSecondEditor.setSecondEditorMode!(mode)).presentation;
+          },
           ready: async () => { controller.signal.throwIfAborted(); await ready(); },
           onCommand(listener) {
             dispatchDockCommand = listener;
-            if (dockState) listener(dockState);
+            syncDockMode();
             return () => { if (dispatchDockCommand === listener) dispatchDockCommand = null; };
           },
         },
@@ -884,7 +898,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     if (secondaryPlacementFrame) window.cancelAnimationFrame(secondaryPlacementFrame);
     const publish = () => {
       secondaryPlacementFrame = 0;
-      const rect = secondaryEditorHost.getBoundingClientRect();
+      const rect = (electronSecondEditor.dockedEditorReady ? secondContainer : secondaryEditorHost).getBoundingClientRect();
       const sidebarResizeHandle = root.querySelector<HTMLElement>('.resize-handle--agent');
       const sidebarResizeRect = sidebarResizeHandle?.getBoundingClientRect();
       const sidebarResizeOverlap = sidebarResizeRect && sidebarResizeRect.width > 0
@@ -896,7 +910,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         : 0;
       const visible = visibleOverride ?? (
         secondaryEditorEmbedded()
-        && root.classList.contains('layout-desktop')
+        && (root.classList.contains('layout-desktop') || (!!electronSecondEditor.dockedEditorReady &&
+            !!secondContainer.closest('.terminal-drawer.open') && !secondContainer.hidden))
         && document.visibilityState !== 'hidden'
         && rect.width > 0
         && rect.height > 0
@@ -924,14 +939,11 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     presentation: ElectronSecondEditorPresentation,
   ): void {
     secondaryEditorPresentation = presentation;
-    root.classList.toggle(
-      'te2-secondary-editor-docked',
-      presentation.mode === 'docked',
-    );
-    root.classList.toggle(
-      'te2-secondary-editor-collapsed',
-      presentation.mode === 'collapsed',
-    );
+    mobileSecondEditor.nativePresentation(presentation.mode);
+    if (!electronSecondEditor?.dockedEditorReady) {
+      root.classList.toggle('te2-secondary-editor-docked', presentation.mode === 'docked');
+      root.classList.toggle('te2-secondary-editor-collapsed', presentation.mode === 'collapsed');
+    }
     root.style.setProperty(
       '--secondary-editor-dock-size',
       `${Math.max(320, Math.min(1200, Number(presentation.dockSize) || 480))}px`,
@@ -944,13 +956,17 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     : null;
   secondaryPlacementResizeObserver?.observe(root);
   secondaryPlacementResizeObserver?.observe(secondaryEditorHost);
+  secondaryPlacementResizeObserver?.observe(secondContainer);
   const secondaryPlacementMutationObserver = typeof MutationObserver === 'function'
-    ? new MutationObserver(() => publishSecondaryEditorPlacement())
+    ? new MutationObserver(() => { syncDockMode(); publishSecondaryEditorPlacement(); })
     : null;
   secondaryPlacementMutationObserver?.observe(root, {
     attributes: true,
     attributeFilter: ['class', 'style'],
   });
+  secondaryPlacementMutationObserver?.observe(secondContainer, { attributes: true, attributeFilter: ['hidden'] });
+  const bottomDrawer = root.querySelector('#terminal-drawer');
+  if (bottomDrawer) secondaryPlacementMutationObserver?.observe(bottomDrawer, { attributes: true, attributeFilter: ['class'] });
   const secondarySidebarDrawer = root.querySelector('#agent-drawer');
   if (secondarySidebarDrawer) {
     secondaryPlacementMutationObserver?.observe(secondarySidebarDrawer, {
@@ -1003,12 +1019,15 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       void syncSecondEditorProject(pendingSecondaryProjectSync);
     }
   };
+  const revealSecondaryDrawer = () => mobileSecondEditor.nativePresentation(secondaryEditorPresentation.mode, true);
+  window.addEventListener('code-te2:reveal-secondary-drawer', revealSecondaryDrawer);
   window.addEventListener('code-te2:adapter-state', handleSecondaryAdapterState);
   window.addEventListener('pagehide', () => {
     if (secondaryPlacementFrame) window.cancelAnimationFrame(secondaryPlacementFrame);
     secondaryPlacementResizeObserver?.disconnect();
     secondaryPlacementMutationObserver?.disconnect();
     unsubscribeSecondEditorCommands?.();
+    window.removeEventListener('code-te2:reveal-secondary-drawer', revealSecondaryDrawer);
     stopDock();
     window.removeEventListener('resize', handleSecondaryPlacementChange);
     window.removeEventListener('code-te2:secondary-editor-resize-end', handleSecondaryResizeEnd);
@@ -1079,6 +1098,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
           !!electronSecondEditor.dockedEditorReady,
         );
         applySecondaryEditorPresentation(result.presentation);
+        mobileSecondEditor.nativePresentation(result.presentation.mode, true);
       } else {
         await mobileSecondEditor.open(cachedProjectRoot, targetPath, historyTicket);
       }

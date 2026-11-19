@@ -42,6 +42,7 @@ interface MobileSecondaryEditorOptions {
   root: HTMLElement;
   container: HTMLElement;
   desktopHost: HTMLElement;
+  electronMode?(mode: 'docked' | 'collapsed'): Promise<unknown>;
   tab: HTMLButtonElement | null;
   toast(message: string): void;
 }
@@ -71,6 +72,8 @@ type SecondaryCommand = SecondaryOpenCommand | SecondaryInputCommand
 
 export interface MobileSecondaryEditorController {
   readonly supported: boolean;
+  nativePresentation(mode: 'docked' | 'collapsed' | 'closed' | 'detached', reveal?: boolean): void;
+  collapseDrawer(): void;
   attachDrawer(drawer: MobileSecondaryEditorDrawer): void;
   show(): void;
   hide(): void;
@@ -103,7 +106,7 @@ function secondaryFrameUrl(): string {
 export function createMobileSecondaryEditorController(
   options: MobileSecondaryEditorOptions,
 ): MobileSecondaryEditorController {
-  const supported = supportsMobileSecondEditor();
+  const supported = supportsMobileSecondEditor() || !!options.electronMode;
   const drawerParent = options.container.parentElement;
   const drawerNext = options.container.nextElementSibling;
   let frame: HTMLIFrameElement | null = null;
@@ -131,6 +134,10 @@ export function createMobileSecondaryEditorController(
   restore.hidden = true;
   if (supported) options.desktopHost.append(restore);
   restore.addEventListener('click', () => {
+    if (options.electronMode) {
+      void options.electronMode('docked').catch((error: unknown) => options.toast(String(error)));
+      return;
+    }
     desktopCollapsed = false;
     updateVisibility();
     options.container.querySelector<HTMLButtonElement>('.te2-secondary-editor-collapse')?.focus();
@@ -519,7 +526,7 @@ export function createMobileSecondaryEditorController(
       }
     }
     updateVisibility();
-    if (supported && (isMobileLayout() || options.root.classList.contains('layout-desktop')) && !frame && !directRoot && !dismissed) {
+    if (supported && !options.electronMode && (isMobileLayout() || options.root.classList.contains('layout-desktop')) && !frame && !directRoot && !dismissed) {
       void ensureFrame().catch((error: unknown) => {
         if (!destroyed) options.toast(error instanceof Error ? error.message : String(error));
       });
@@ -570,6 +577,20 @@ export function createMobileSecondaryEditorController(
 
   return {
     supported,
+    collapseDrawer: closeDrawer,
+    nativePresentation(mode, reveal = false) {
+      if (!options.electronMode) return;
+      const wasPopulated = populated;
+      populated = mode === 'docked' || mode === 'collapsed';
+      desktopCollapsed = mode === 'collapsed';
+      updateVisibility();
+      if (isMobileLayout() && populated && (reveal || !wasPopulated)) {
+        options.tab?.click();
+        void Promise.resolve(drawer?.open()).catch((error: unknown) => options.toast(String(error)));
+      } else if (!populated && options.tab?.classList.contains('active')) {
+        options.tab.parentElement?.querySelector<HTMLElement>('.drawer-tab[data-tab="terminal"]')?.click();
+      }
+    },
     attachDrawer(nextDrawer) {
       drawer = nextDrawer;
     },

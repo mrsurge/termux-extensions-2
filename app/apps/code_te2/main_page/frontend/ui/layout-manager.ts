@@ -1,10 +1,12 @@
 // @ts-check
+import { isMobileUserAgent } from '../../../src/mobile-input/mobile-user-agent.ts';
 
 export function initResponsiveLayout() {
   const initialRoot = document.querySelector('.fe-root');
   if (!(initialRoot instanceof HTMLElement) || initialRoot.dataset.te2ResponsiveBound === '1') return;
   // Shared DOM marker also deduplicates the separately bundled preparer/host.
   initialRoot.dataset.te2ResponsiveBound = '1';
+  initialRoot.classList.toggle('desktop-user-agent', !isMobileUserAgent(window.navigator));
   const update = () => {
     const isDesktop = window.matchMedia('(min-width: 768px) and (orientation: landscape)').matches;
     const root = document.querySelector('.fe-root');

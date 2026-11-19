@@ -12,6 +12,7 @@ import type {
   ElectronSidebarSurfaceBounds,
   ElectronSidebarSurfaceDescriptor,
   ElectronSidebarSurfaceEvent,
+  SecondaryPanelSnapshot,
 } from "../shared/app-view-contracts";
 
 const SURFACE_HEADER_HEIGHT = 42;
@@ -29,9 +30,12 @@ interface SidebarSurfaceEntry {
   notifyOnClose: boolean;
   disposing: boolean;
   loadPromise: Promise<void> | null;
+  transferred?: boolean;
+  panelOwner?: BrowserWindow;
 }
 
 export interface DetachedSidebarSurfaceRegistryOptions {
+  panelsChanged?(state: SecondaryPanelSnapshot): void;
   getAppPath(): string;
   getAppContents(): WebContents | null;
   getMainWindow(): BrowserWindow | null;
@@ -71,6 +75,61 @@ function emptyBounds(): ElectronSidebarSurfaceBounds {
 export class DetachedSidebarSurfaceRegistry {
   readonly #entries = new Map<string, SidebarSurfaceEntry>();
   readonly #options: DetachedSidebarSurfaceRegistryOptions;
+  #activePanel = "";
+
+  panelSnapshot(): SecondaryPanelSnapshot {
+    return { active: this.#activePanel, panels: [...this.#entries.values()].filter(e => e.transferred)
+      .map(({ descriptor: { surfaceId, presentationId, label } }) => ({ surfaceId, presentationId, label })) };
+  }
+
+  selectFiles(): void {
+    if (!this.#activePanel) return;
+    this.#entries.get(this.#activePanel)?.view.setVisible(false);
+    this.#activePanel = "";
+    this.#options.panelsChanged?.(this.panelSnapshot());
+  }
+
+  panelAction(action: "transfer" | "return" | "select", id: string, presentationId: string, revealReturn = false): void {
+    const entry = this.#matchingEntry(id, presentationId);
+    if (!entry?.persistent || entry.window || !presentationId || (action !== "transfer" && !entry.transferred))
+      throw new Error("Extension panel presentation is no longer available");
+    if (action === "return") {
+      this.#releasePanelOwner(entry);
+      entry.transferred = false;
+      if (this.#activePanel === id) this.#activePanel = "";
+      this.#attachToMain(entry, false);
+      this.#layoutEntry(entry);
+    } else {
+      this.#entries.get(this.#activePanel)?.view.setVisible(false);
+      this.#removeFromParent(entry);
+      entry.transferred = true;
+      this.#activePanel = id;
+    }
+    this.#options.panelsChanged?.({ ...this.panelSnapshot(),
+      ...(action === "return" && revealReturn ? { returnedSurfaceId: id } : {}) });
+  }
+
+  #releasePanelOwner(entry: SidebarSurfaceEntry): void {
+    entry.view.setVisible(false);
+    if (entry.panelOwner && !entry.panelOwner.isDestroyed()) entry.panelOwner.contentView.removeChildView(entry.view);
+    entry.panelOwner = undefined;
+  }
+
+  releasePanelOwners(): void {
+    for (const entry of this.#entries.values()) if (entry.panelOwner) this.#releasePanelOwner(entry);
+  }
+
+  placePanel(id: string, presentationId: string, bounds: Electron.Rectangle, owner: BrowserWindow): void {
+    const entry = this.#matchingEntry(id, presentationId);
+    if (!entry?.transferred || this.#activePanel !== id) return;
+    if (entry.panelOwner !== owner) {
+      this.#releasePanelOwner(entry);
+      owner.contentView.addChildView(entry.view);
+      entry.panelOwner = owner;
+    }
+    entry.view.setBounds(bounds);
+    entry.view.setVisible(bounds.width > 0 && bounds.height > 0);
+  }
 
   constructor(options: DetachedSidebarSurfaceRegistryOptions) {
     this.#options = options;
@@ -103,6 +162,7 @@ export class DetachedSidebarSurfaceRegistry {
     }
     entry.embeddedBounds = { ...bounds };
     entry.embeddedVisible = visible;
+    if (entry.transferred) return { ok: true, presentationId: descriptor.presentationId };
     if (!entry.window) this.#attachToMain(entry, false);
     this.#layoutEntry(entry);
     await entry.loadPromise;
@@ -131,6 +191,7 @@ export class DetachedSidebarSurfaceRegistry {
       }
       entry.descriptor = descriptor;
       await entry.loadPromise;
+      if (entry.transferred) this.panelAction("return", descriptor.surfaceId, descriptor.presentationId);
       entry.loadPromise = null;
       await this.#detachEntry(entry, focus);
       return { ok: true, presentationId: descriptor.presentationId };
@@ -165,6 +226,7 @@ export class DetachedSidebarSurfaceRegistry {
 
   suspendEmbedded(): void {
     for (const entry of this.#entries.values()) {
+      if (entry.panelOwner === this.#options.getMainWindow()) this.#releasePanelOwner(entry);
       if (!entry.persistent || entry.parent !== "main") continue;
       entry.embeddedVisible = false;
       if (!entry.view.webContents.isDestroyed()) entry.view.setVisible(false);
@@ -308,7 +370,7 @@ export class DetachedSidebarSurfaceRegistry {
     });
     this.#options.installContextMenu(
       view.webContents,
-      () => entry.window || this.#options.getMainWindow(),
+      () => entry.panelOwner || entry.window || this.#options.getMainWindow(),
     );
     view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     view.webContents.on("dom-ready", () => {
@@ -536,6 +598,11 @@ export class DetachedSidebarSurfaceRegistry {
     entry.disposing = true;
     const isCurrent = this.#entries.get(entry.descriptor.surfaceId) === entry;
     if (isCurrent) this.#entries.delete(entry.descriptor.surfaceId);
+    if (entry.transferred) {
+      this.#releasePanelOwner(entry);
+      if (this.#activePanel === entry.descriptor.surfaceId) this.#activePanel = "";
+      this.#options.panelsChanged?.(this.panelSnapshot());
+    }
     this.#removeFromParent(entry);
     const window = entry.window;
     entry.window = null;

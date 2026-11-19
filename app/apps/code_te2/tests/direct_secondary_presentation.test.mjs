@@ -5,10 +5,11 @@ import { Window } from 'happy-dom';
 
 // Real controller + secondary shell + mobile key routing; network and Monaco
 // construction are boundary doubles so no shared running server is touched.
-async function fixture({ waitSnapshot = false, native = false } = {}) {
+async function fixture({ waitSnapshot = false, native = false, electronLayout = false } = {}) {
   const result = await build({ stdin: { contents: `
     export * from './main_page/frontend/mobile-secondary-editor.ts';
     export { bootSecondaryEditorRuntime } from './main_page/frontend/secondary-editor-runtime.ts';
+    export { installSecondaryPanelTabs } from './main_page/frontend/secondary-panel-tabs.ts';
     export * from './monaco_editor/inline_host.ts';
     export * from './src/mobile-input/editor-special-key-bridge.ts';
     export { testState, connections, gates } from './main_page/frontend/connections/ui-ipc-rpc.ts';
@@ -117,7 +118,8 @@ async function fixture({ waitSnapshot = false, native = false } = {}) {
       await settle(()=>container.querySelector('.fe-file-tab.active')?.dataset.path===path);
     }};
   }else{
-    controller=api.createMobileSecondaryEditorController({root,container,desktopHost:win.document.getElementById('desktop-host'),tab,toast:message=>toasts.push(message)});
+    controller=api.createMobileSecondaryEditorController({root,container,desktopHost:win.document.getElementById('desktop-host'),tab,toast:message=>toasts.push(message),
+      electronMode:electronLayout ? async mode=>nativeModes.push(mode) : undefined});
     controller.attachDrawer({open(){},close(){}});
   }
   return {api,win,root,container,tab,primary,controller,toasts,settle,finishSnapshot,nativeListeners,nativeModes,
@@ -125,6 +127,63 @@ async function fixture({ waitSnapshot = false, native = false } = {}) {
       for(const[key,value]of saved){if(value===undefined)delete globalThis[key];else Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});}
     }};
 }
+
+test('Electron moves its externally owned content between the grid and portrait drawer',async()=>{
+  const f=await fixture({electronLayout:true});try{
+    const mount=f.win.document.createElement('section');
+    f.container.append(mount);
+    f.controller.nativePresentation('docked',true);
+    assert.equal(f.tab.hidden,false);
+    f.root.classList.replace('layout-mobile','layout-desktop');
+    await f.settle(()=>f.container.parentElement.id==='desktop-host');
+    assert.equal(f.container.firstElementChild,mount);
+    f.root.classList.replace('layout-desktop','layout-mobile');
+    await f.settle(()=>f.container.parentElement===f.root);
+    assert.equal(f.container.hidden,false);
+    assert.equal(f.container.firstElementChild,mount);
+    f.controller.nativePresentation('detached');
+    assert.equal(f.tab.hidden,true);
+    assert.equal(f.container.hidden,true);
+  }finally{await f.close();}
+});
+
+test('extension tab actions target the same native presentation and selecting files hides its surface',async()=>{
+  const f=await fixture();try{
+    await f.controller.open('/project','/project/a.ts');
+    const root=f.container.querySelector('.te2-secondary-editor');
+    const body=root.querySelector('.te2-secondary-editor-body');
+    const [panel]=[{surfaceId:'preview',presentationId:'native:preview',label:'Markdown Preview'}];
+    let publish;
+    const actions=[], placements=[];
+    const globals=['ResizeObserver','requestAnimationFrame','cancelAnimationFrame'];
+    const saved=globals.map(key=>Object.getOwnPropertyDescriptor(globalThis,key));
+    for(const key of globals) Object.defineProperty(globalThis,key,{configurable:true,value:key==='ResizeObserver'?
+      f.win.ResizeObserver:f.win[key].bind(f.win)});
+    f.win.document.elementFromPoint=()=>body;
+    body.getBoundingClientRect=()=>({x:20,y:30,width:300,height:400});
+    let runtime;
+    try{
+      runtime=f.api.installSecondaryPanelTabs(root,{
+        secondaryPanelSnapshot:async()=>({panels:[],active:''}),
+        onSecondaryPanels(fn){publish=fn;return()=>{publish=null;};},
+        async secondaryPanelAction(...args){actions.push(args);},
+        async placeSecondaryPanel(...args){placements.push(args);}
+      },message=>assert.fail(message));
+      publish({panels:[panel],active:panel.surfaceId});
+      await f.settle(()=>placements.length>0);
+      assert.deepEqual(placements.at(-1),['preview','native:preview',{x:20,y:30,width:300,height:400}]);
+      root.querySelector('.te2-secondary-panel-tabs [role="tab"]').click();
+      root.querySelector('.te2-secondary-panel-tabs [title="Editor"]').click();
+      root.querySelector('.te2-secondary-panel-tabs [title="Return to sidebar"]').click();
+      assert.deepEqual(actions,[['select','preview','native:preview'],['files'],['return','preview','native:preview']]);
+      publish({panels:[],active:''});
+      assert.equal(root.querySelector('.te2-secondary-panel-tabs').hidden,true);
+    }finally{
+      runtime?.dispose();
+      globals.forEach((key,i)=>{if(saved[i])Object.defineProperty(globalThis,key,saved[i]);else delete globalThis[key];});
+    }
+  }finally{await f.close();}
+});
 
 test('responsive drawer and wide pane retain the same working editor and tabs',async()=>{
   const f=await fixture();try{

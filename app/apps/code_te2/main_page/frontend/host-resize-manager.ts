@@ -1,7 +1,7 @@
 import { isUnknownArray } from '../../src/rpc/value-types.ts';
 // Host resize manager - handle main-page panel resizing with drag handles.
 
-import { clampTerminalDrawerHeight } from './ui/drawer-sizing.ts';
+import { resizedDrawerHeight } from './ui/drawer-sizing.ts';
 
 type ResizePanel = 'explorer' | 'agent' | 'secondary' | 'terminal' | null;
 
@@ -79,7 +79,7 @@ function currentPanelWidth(panel: Exclude<ResizePanel, null>): number {
   if (panel === 'secondary') {
     return measuredSecondaryWidth() || secondaryDockWidth() || SECONDARY_MIN_WIDTH;
   }
-  return cssPixelProperty('--terminal-height') || 340;
+  return document.getElementById('terminal-drawer')?.getBoundingClientRect().height || cssPixelProperty('--terminal-height') || 340;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -253,8 +253,7 @@ export function initResizeManager(): () => void {
         finish();
         return;
       }
-      const mobileLayout = document.querySelector('.fe-root')?.classList.contains('layout-mobile') === true;
-      const height = clampTerminalDrawerHeight(startSize + startPos - event.clientY, 150, mobileLayout, 800);
+      const height = resizedDrawerHeight(startSize + startPos - event.clientY, 150, 800);
       document.documentElement.style.setProperty('--terminal-height', `${height}px`);
     }
     // Existing Monaco/terminal/native placement observers consume the resize event.
