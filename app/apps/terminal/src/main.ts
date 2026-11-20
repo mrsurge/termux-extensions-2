@@ -3,6 +3,7 @@ import { bindTerminalContextMenu } from '../../../libs/terminal_runtime/terminal
 import { bindTerminalCursor } from '../../../libs/terminal_runtime/terminal_cursor';
 import { shiftTerminalText } from '../../../libs/terminal_runtime/terminal_shift';
 import { bindTerminalShiftButton } from '../../../libs/terminal_runtime/terminal_shift_button';
+import { bindSoftkeyHaptics } from '../../../libs/terminal_runtime/softkey-haptics';
 import { decode as decodeMessagePack, encode as encodeMessagePack } from '@msgpack/msgpack';
 import {
   getConsoleBridgeStatus,
@@ -1750,6 +1751,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.keyAlt.addEventListener('pointerdown', softKey(toggleAlt), { passive: false });
   ui.keyPageDown.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.pageDown)), { passive: false });
   const disposeRepeatingKeys = [
+    bindSoftkeyHaptics(ui.keys),
     bindRepeatingTerminalKey(ui.keyUp, TERMINAL_KEYS.up),
     bindRepeatingTerminalKey(ui.keyLeft, TERMINAL_KEYS.left),
     bindRepeatingTerminalKey(ui.keyDown, TERMINAL_KEYS.down),

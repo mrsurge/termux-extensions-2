@@ -5,6 +5,7 @@ import { bindTerminalContextMenu } from '../../libs/terminal_runtime/terminal_co
 import { bindTerminalCursor } from '../../libs/terminal_runtime/terminal_cursor';
 import { shiftTerminalText } from '../../libs/terminal_runtime/terminal_shift';
 import { bindTerminalShiftButton } from '../../libs/terminal_runtime/terminal_shift_button';
+import { bindSoftkeyHaptics } from '../../libs/terminal_runtime/softkey-haptics';
 
 interface Disposable { dispose(): void; cancelGesture?(): void }
 interface Terminal {
@@ -458,7 +459,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     keyToggle.classList.toggle('toggle', mobileKeys);
     keyToggle.title = 'Hide special keys';
   }
-  const disposeRepeatingKeys: (() => void)[] = [];
+  const disposeRepeatingKeys: (() => void)[] = [bindSoftkeyHaptics(keys)];
   // Keep the exact Terminal app ordering: two rows of seven.
   for (const name of ['escape', 'shift', 'dash', 'home', 'up', 'end', 'pageUp', 'tab', 'ctrl', 'alt', 'left', 'down', 'right', 'pageDown']) {
     const button = document.createElement('button'); button.type = 'button'; button.tabIndex = -1; button.className = 'kbtn';

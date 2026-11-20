@@ -27,17 +27,8 @@ interface MentionRequestDeps {
   updateDebug(extra?: string): void;
 }
 
-const GO_TO_DEFINITION_ICON = [
-  '<span class="icon" aria-hidden="true">',
-  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none"',
-  ' xmlns="http://www.w3.org/2000/svg">',
-  '<path d="M19 5v6h-6" stroke="#4ec97a" stroke-width="2"',
-  ' stroke-linecap="round" stroke-linejoin="round"/>',
-  '<path d="M18.5 10.5C16.8 7.8 13.8 6 10.5 6',
-  ' 6.4 6 3 9.1 3 13s3.4 7 7.5 7H13" stroke="#4ec97a"',
-  ' stroke-width="2" stroke-linecap="round"/>',
-  '</svg></span>',
-].join('');
+import { touchMenuIcon } from './touch_menu_icon.ts';
+const GO_TO_DEFINITION_ICON = touchMenuIcon('M19 5v6h-6 M18.5 10.5C16.8 7.8 13.8 6 10.5 6 6.4 6 3 9.1 3 13s3.4 7 7.5 7H13');
 
 function buildMentionPayload(
   editorInstance: MonacoRuntimeEditorLike | null,
@@ -113,7 +104,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
           ? ({ openMenu }) => [
               {
                 name: 'tab left',
-                innerHTML: '<span class="icon" aria-hidden="true">\u21e4</span>',
+                innerHTML: touchMenuIcon('M4 5v14 M20 12H8 m5-5-5 5 5 5'),
                 action: () => {
                   dispatchMobileEditorKey(target, {
                     key: 'Tab',
@@ -126,7 +117,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
               },
               {
                 name: 'tab right',
-                innerHTML: '<span class="icon" aria-hidden="true">\u21e5</span>',
+                innerHTML: touchMenuIcon('M20 5v14 M4 12h12 m-5-5 5 5-5 5'),
                 action: () => {
                   dispatchMobileEditorKey(target, {
                     key: 'Tab',
@@ -152,7 +143,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
                 : []),
               {
                 name: 'call hierarchy',
-                innerHTML: '<span class="icon" aria-hidden="true">☎️</span>',
+                innerHTML: touchMenuIcon('M9 3h6v5H9z M12 8v4 M5 16v-4h14v4 M2 16h6v5H2z M16 16h6v5h-6z'),
                 action: () => {
                   closeMenu();
                   deps.inspectCode?.('callHierarchy');
@@ -160,7 +151,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
               },
               {
                 name: 'document symbols',
-                innerHTML: '<span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><path d="M6 9v11M6 14h7M6 20h7"/><rect x="13" y="11" width="8" height="5" rx="1"/><rect x="13" y="18" width="8" height="4" rx="1"/></svg></span>',
+                innerHTML: touchMenuIcon('M3 3h6v6H3z M6 9v11 M6 14h7 M6 20h7 M13 11h8v5h-8z M13 18h8v4h-8z'),
                 action: () => {
                   closeMenu();
                   deps.inspectCode?.('symbols');
@@ -168,7 +159,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
               },
               {
                 name: 'find all references',
-                innerHTML: '<span class="icon" aria-hidden="true">📑</span>',
+                innerHTML: touchMenuIcon('M8 4H4v16h12v-3 M9 2h11v14H9z M12 6h5 M12 10h5'),
                 action: () => {
                   closeMenu();
                   deps.inspectCode?.('references');
@@ -176,7 +167,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
               },
               {
                 name: 'find all implementations',
-                innerHTML: '<span class="icon" aria-hidden="true">🎯</span>',
+                innerHTML: touchMenuIcon('M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16z M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8z M12 12l9-9'),
                 action: () => {
                   closeMenu();
                   deps.inspectCode?.('implementations');

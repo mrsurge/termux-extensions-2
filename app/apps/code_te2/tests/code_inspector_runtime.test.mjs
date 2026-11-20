@@ -750,5 +750,5 @@ test("uses no-focus result jumps and tail-preserving path markup", async () => {
   assert.match(template, /id="code-inspector-direction"[^>]*hidden/);
   assert.match(source, /directionButton\.hidden = mode !== 'callHierarchy'/);
   assert.match(touchMenuSource, /name:\s*'go to definition'/);
-  assert.match(touchMenuSource, /stroke="#4ec97a"/);
+  assert.match(touchMenuSource, /GO_TO_DEFINITION_ICON = touchMenuIcon\(/);
 });

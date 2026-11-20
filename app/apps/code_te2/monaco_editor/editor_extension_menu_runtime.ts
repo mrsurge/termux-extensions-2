@@ -84,12 +84,11 @@ function actionLabel(action: ExtensionMenuAction): string {
   return action.category ? `${action.category}: ${action.title}` : action.title;
 }
 
-function buildContextLauncherIcon(documentRef: Document): HTMLElement {
-  const root = documentRef.createElement("span");
-  root.className = "icon fe-extension-context-icon";
-  root.setAttribute("aria-hidden", "true");
-  root.textContent = "🧩";
-  return root;
+import { touchMenuIcon } from './touch_menu_icon.ts';
+function buildContextLauncherIcon(documentRef: Document): Element {
+  const template = documentRef.createElement("template");
+  template.innerHTML = touchMenuIcon('M3 8h5a3 3 0 1 1 5 0h5v5a3 3 0 1 1 0 5v3h-5a3 3 0 1 0-5 0H3v-5a3 3 0 1 0 0-5z');
+  return template.content.firstElementChild!;
 }
 
 export function createEditorExtensionMenuRuntime(
@@ -277,7 +276,7 @@ export function createEditorExtensionMenuRuntime(
   }
 
   async function openContextMenu(
-    anchor: HTMLElement,
+    anchor: Element,
     closeTouchMenu?: () => void,
   ): Promise<void> {
     const currentContext = context();
