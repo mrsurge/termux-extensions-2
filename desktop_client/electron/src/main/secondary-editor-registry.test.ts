@@ -9,6 +9,9 @@ test("working pane docks directly, detaches to one native view and returns to th
   const commands: ElectronSecondEditorCommand[] = [];
   const native: ElectronSecondEditorCommand[] = [];
   let views = 0;
+  let maximized = false;
+  let minimized = false;
+  let sender: Electron.WebContents | undefined;
   let disposed = 0;
   let detached: EventEmitter | undefined;
   class View {
@@ -24,7 +27,10 @@ test("working pane docks directly, detaches to one native view and returns to th
   class Window extends EventEmitter {
     constructor() { super(); detached = this; }
     contentView = { addChildView() {}, removeChildView() {} };
-    isDestroyed() { return false; } isMaximized() { return false; }
+    isDestroyed() { return false; } isMaximized() { return maximized; }
+    isFullScreen() { return false; }
+    maximize() { maximized = true; } unmaximize() { maximized = false; }
+    minimize() { minimized = true; }
     setMenu() {} show() {} focus() {} close() {}
     getContentSize() { return [800, 600]; } getBounds() { return bounds; }
   }
@@ -50,7 +56,7 @@ test("working pane docks directly, detaches to one native view and returns to th
     getMainWindow: () => main as unknown as Electron.BrowserWindow,
     getAppPath: () => ".", getAppViewBounds: () => bounds, getAppZoomFactor: () => 1,
     getConfiguredFrameworkOrigin: () => "http://localhost", getRelayOrigin: () => "http://localhost",
-    getZoomFactor: () => 1, frameworkPartition: "test", registerContents() {}, unregisterContents() {},
+    getZoomFactor: () => 1, frameworkPartition: "test", registerContents(contents) { sender = contents; }, unregisterContents() {},
     installContextMenu() {}, async installScrollbars() {}, async installAppChrome() {}, closeDialogs() {},
     publishPresentation: cmd => commands.push(cmd), layoutPrimary() {},
   });
@@ -60,11 +66,19 @@ test("working pane docks directly, detaches to one native view and returns to th
   assert.equal(registry.dockedReady(), true);
   assert.equal(commands.at(-1)?.type, "open");
   await registry.setMode("detached");
+  assert.ok(sender);
+  assert.equal(registry.controlDetached(sender, "toggle_maximize_second_window"), true);
+  assert.equal(maximized, true);
+  assert.equal(registry.controlDetached(sender, "toggle_maximize_second_window"), true);
+  assert.equal(maximized, false);
+  assert.equal(registry.controlDetached(sender, "minimize_second_window"), true);
+  assert.equal(minimized, true);
   assert.equal(views, 1);
   assert.equal(registry.dockedReady(), false);
   detached?.emit("close", { preventDefault() {} });
   assert.equal(native.at(-1)?.type, "close");
   await registry.setMode("docked");
+  assert.equal(registry.controlDetached(sender, "minimize_second_window"), false);
   assert.equal(disposed, 1);
   assert.equal(views, 1);
   assert.equal(registry.dockedReady(), true);

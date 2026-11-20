@@ -116,6 +116,16 @@ export class SecondaryEditorRegistry {
     }
   }
 
+  controlDetached(contents: WebContents, action: "minimize_second_window" | "toggle_maximize_second_window"): boolean {
+    const window = this.#window;
+    if (!this.ownsContents(contents) || this.#parent !== "detached" || !window || window.isDestroyed()) return false;
+    if (action === "minimize_second_window") window.minimize();
+    else if (window.isFullScreen()) window.setFullScreen(false);
+    else if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+    return true;
+  }
+
   ownsContents(contents: WebContents): boolean {
     return Boolean(this.#view && this.#view.webContents === contents);
   }

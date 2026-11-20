@@ -65,6 +65,13 @@ function SurfaceHeader(props: { descriptor: ElectronSidebarSurfaceDescriptor }):
           −
         </button>
         <button
+          className="surface-button"
+          type="button"
+          aria-label="Maximize or restore detached window"
+          title="Maximize or restore window"
+          onClick={() => act("toggle_maximize")}
+        >□</button>
+        <button
           className="surface-button close"
           type="button"
           aria-label="Attach and close detached window"

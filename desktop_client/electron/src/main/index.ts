@@ -370,6 +370,7 @@ async function handleAppViewControl(
       "read_client_identity",
       "wait_for_app_prerequisites",
       "set_second_editor_mode",
+      "minimize_second_window", "toggle_maximize_second_window",
       "second_editor_ready",
       "secondary_panel_snapshot", "secondary_panel_placement", "secondary_panel_action",
       "set_docked_editor_history",
@@ -493,6 +494,12 @@ async function handleAppViewControl(
     }
     const presentation = await secondaryEditorRegistry.setMode(mode);
     return { ok: true, presentation };
+  }
+  if (command === "minimize_second_window" || command === "toggle_maximize_second_window") {
+    if (role !== "secondary" || !secondaryEditorRegistry?.controlDetached(event.sender, command)) {
+      throw new Error("Second window is not detached");
+    }
+    return { ok: true };
   }
   if (command === "second_editor_ready") {
     if (role !== "secondary" || !secondaryEditorRegistry?.handleReady(event.sender)) {

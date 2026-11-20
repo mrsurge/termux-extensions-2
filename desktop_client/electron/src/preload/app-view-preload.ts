@@ -195,6 +195,9 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
     return invokeElectron("set_second_editor_mode", { mode });
   },
+  controlDetachedSecondWindow(action: "minimize" | "toggle_maximize"): Promise<{ ok: true }> {
+    return invokeElectron(action === "minimize" ? "minimize_second_window" : "toggle_maximize_second_window");
+  },
   secondEditorReady(): Promise<{ ok: true }> {
     return invokeElectron("second_editor_ready");
   },

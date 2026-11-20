@@ -38,6 +38,8 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "place_second_editor_surface",
   "set_second_editor_dock_size",
   "set_second_editor_mode",
+  "minimize_second_window",
+  "toggle_maximize_second_window",
   "second_editor_ready",
   "docked_editor_ready",
   "set_docked_editor_history",
@@ -218,6 +220,7 @@ export type ElectronSidebarMenuRequest = {
 export type ElectronSidebarSurfaceAction =
   | "attach"
   | "minimize"
+  | "toggle_maximize"
   | "console"
   | "devtools"
   | "refresh"
@@ -322,6 +325,7 @@ export type ElectronAppViewBridge = SecondaryPanelBridge & {
   setSecondEditorMode(
     mode: ElectronEditorSurfaceMode,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
+  controlDetachedSecondWindow(action: "minimize" | "toggle_maximize"): Promise<{ ok: true }>;
   secondEditorReady(): Promise<{ ok: true }>;
   dockedEditorReady(): Promise<{ ok: true }>;
   setDockedEditorHistory(historical: boolean): Promise<{ ok: true }>;

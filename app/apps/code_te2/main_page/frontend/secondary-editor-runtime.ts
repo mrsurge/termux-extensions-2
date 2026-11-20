@@ -74,6 +74,7 @@ import { installSecondaryPanelTabs } from './secondary-panel-tabs.ts';
 import type { SecondaryPanelBridge } from './secondary-panel-contracts';
 interface SecondaryElectronBridge extends SecondaryPanelBridge {
   setDockedEditorHistory?(historical: boolean): Promise<{ ok: true }>;
+  controlDetachedSecondWindow?(action: "minimize" | "toggle_maximize"): Promise<{ ok: true }>;
   secondEditorReady(): Promise<{ ok: true }>;
   setSecondEditorMode(
     mode: SecondaryMode,
@@ -527,6 +528,8 @@ export async function bootSecondaryEditorRuntime(
       <button class="te2-secondary-editor-expand" type="button" title="Expand second window" aria-label="Expand second window">◧</button>
       <button class="te2-secondary-editor-collapse" type="button" title="Collapse second window" aria-label="Collapse second window">▯</button>
       <button class="te2-secondary-editor-detach" type="button" title="Detach second window" aria-label="Detach second window">↗</button>
+      <button data-native-window="minimize" hidden type="button" title="Minimize second window" aria-label="Minimize second window">−</button>
+      <button data-native-window="toggle_maximize" hidden type="button" title="Maximize or restore second window" aria-label="Maximize or restore second window">□</button>
       <button class="te2-secondary-editor-close" type="button" title="Close second window" aria-label="Close second window">×</button>
       <div class="te2-secondary-editor-menu" hidden>
         <button type="button" data-action="save">Save</button>
@@ -870,6 +873,9 @@ export async function bootSecondaryEditorRuntime(
       projectPath = command.projectPath;
       currentMode = command.presentation.mode;
       root.dataset.mode = currentMode;
+      for (const button of root.querySelectorAll<HTMLButtonElement>('[data-native-window]')) {
+        button.hidden = currentMode !== 'detached' || !runtimeWindow().te2Electron?.controlDetachedSecondWindow;
+      }
       const detach = root.querySelector<HTMLButtonElement>('.te2-secondary-editor-detach');
       if (detach) {
         detach.textContent = currentMode === 'detached' ? '↙' : '↗';
@@ -1058,6 +1064,11 @@ export async function bootSecondaryEditorRuntime(
   root.querySelector('.te2-secondary-editor-expand')?.addEventListener('click', () => {
     void setMode('docked');
   });
+  for (const action of ['minimize', 'toggle_maximize'] as const) {
+    root.querySelector(`[data-native-window="${action}"]`)?.addEventListener('click', () => {
+      void runtimeWindow().te2Electron?.controlDetachedSecondWindow?.(action).catch((error: unknown) => host.toast(errorMessage(error)));
+    });
+  }
   root.querySelector('.te2-secondary-editor-detach')?.addEventListener('click', () => {
     void setMode(currentMode === 'detached' ? 'docked' : 'detached');
   });

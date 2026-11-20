@@ -295,10 +295,13 @@ export class DetachedSidebarSurfaceRegistry {
   ): boolean {
     const entry = this.#entryForShellContents(contents);
     if (!entry) return false;
-    if (action === "minimize") {
+    if (action === "minimize" || action === "toggle_maximize") {
       const window = entry.window;
       if (!window || window.isDestroyed() || entry.parent !== "detached") return false;
-      window.minimize();
+      if (action === "minimize") window.minimize();
+      else if (window.isFullScreen()) window.setFullScreen(false);
+      else if (window.isMaximized()) window.unmaximize();
+      else window.maximize();
       return true;
     }
     if (action === "attach") {

@@ -812,6 +812,8 @@ deferred shell-execution section is carried from .356, not the entire old plan.
   open UX for app files/ZIPs, not reimplementing second-root discovery/lifecycle.
 - [ ] Audit login-shell environment and prompt setup; approve/fix the specific
   inheritance issue and test real shell/Python/PATH identity on Termux/Linux.
+  Keep the terminal worker in TE2’s venv; the interactive shell it spawns should
+  use the user’s login environment unless the user explicitly activates a venv.
 - [ ] Audit and approve terminal profile modal schema, persistence/defaults and
   backend-owned application across supported terminal surfaces; implement/test.
 - [ ] Audit current run-profile substitution/dispatch, define supported field
