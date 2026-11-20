@@ -81,7 +81,6 @@ const windowBindings = new WeakMap<Window, Map<MobileEditorRole, MobileSpecialKe
 export interface MobileEditorInputBinding {
   role?: MobileEditorRole;
   host?: HTMLElement;
-  getVibrationDurationMs?: () => number;
 }
 
 
@@ -653,8 +652,8 @@ export function bindMobileEditorSpecialKeys(
   win.addEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
 
   const cleanups = [
-    bindExtraKeyHaptics(panel, binding.getVibrationDurationMs),
-    bindExtraKeyHaptics(overlay, binding.getVibrationDurationMs),
+    bindExtraKeyHaptics(panel),
+    bindExtraKeyHaptics(overlay),
     bindQuickInputKeys(editor, doc, () => state.shiftArmed, () => {
       state.consumeOneShot();
       if (role === 'secondary') publishMobileEditorModifiersConsumed(win, role);

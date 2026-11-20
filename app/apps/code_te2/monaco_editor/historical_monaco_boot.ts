@@ -6,6 +6,7 @@ import { mountHistoricalDiffView, type HistoricalDiffView } from './historical_d
 import { historicalAppearance, createHistoricalThemeApplier } from './historical_appearance.ts';
 import { ensureHistoricalTouchAssets } from './inline_host.ts';
 import { isMobileUserAgent } from './editor_mobile_special_keys_utils.ts';
+import { getHandleFeedback } from '../src/mobile-input/handle-feedback.ts';
 
 export interface HistoricalEditorView extends HistoricalDiffView {
   updatePreferences(preferences: unknown, refreshContributions?: boolean): void;
@@ -84,7 +85,7 @@ export async function bootHistoricalDiff(
       attachTouch: mobile ? (control) => {
         const helper = window['monaco-touch-selection']?.editorTouchSelectionHelp;
         if (!helper) throw new Error('Historical touch selection unavailable');
-        helper(control, { mobile: true, historicalReadOnly: true });
+        helper(control, { mobile: true, historicalReadOnly: true, getHandleFeedback });
       } : undefined,
       languageForPath(path) {
         const basename = path.split('/').pop() || '';

@@ -10,7 +10,7 @@ const bundle = await build({ stdin: { contents: `
 `, resolveDir: process.cwd() }, bundle: true, write: false, format: 'esm', platform: 'browser' });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
-function fixture(interceptMonacoCapture = false, getVibrationDurationMs) {
+function fixture(interceptMonacoCapture = false) {
   const win = new Window({ url: 'http://localhost/app/code_te2' });
   Object.defineProperty(win.navigator, 'userAgent', { value: 'Android Mobile' });
   const vibrations = [];
@@ -40,7 +40,7 @@ function fixture(interceptMonacoCapture = false, getVibrationDurationMs) {
     }
     const editor = { getDomNode: () => editorDom, focus: () => input.focus(),
       getAction: id => ({ run() { actions.push([role, id]); } }) };
-    const binding = api.bindMobileEditorSpecialKeys(editor, win, () => saves.push(role), { role, host, getVibrationDurationMs });
+    const binding = api.bindMobileEditorSpecialKeys(editor, win, () => saves.push(role), { role, host });
     return { host, input, editor, binding };
   };
   const primary = make('primary'), secondary = make('secondary');
@@ -122,7 +122,7 @@ test('same-page secondary forwards terminal keys once and returns to the focused
     f.win.dispatchEvent(new f.win.CustomEvent(api.TERMINAL_SPECIAL_KEY_FOCUS_EVENT, { detail: { active: true } }));
     f.tap(f.button('Right'));
     assert.deepEqual(terminalKeys, ['ArrowRight']); assert.equal(f.keys.length, 0);
-    assert.deepEqual(f.vibrations, [100]);
+    assert.deepEqual(f.vibrations, [1]);
     f.win.dispatchEvent(new f.win.CustomEvent(api.TERMINAL_SPECIAL_KEY_FOCUS_EVENT, { detail: { active: false } }));
     f.primary.input.focus(); f.tap(f.button('Right'));
     assert.equal(f.keys.at(-1)[0], 'primary');
@@ -163,28 +163,28 @@ test('extra keys vibrate once per press, not per hold repeat or renderer', async
     await new Promise(resolve => setTimeout(resolve, 520));
     button.dispatchEvent(new f.win.Event('pointerup', { bubbles: true, cancelable: true }));
     assert.ok(f.keys.length > 1, 'the hold must actually repeat');
-    assert.deepEqual(f.vibrations, [100]);
+    assert.deepEqual(f.vibrations, [1]);
     assert.ok(f.keys.every(key => key[0] === 'secondary'));
     f.primary.input.focus();
     f.tap(f.button('Control'));
-    assert.deepEqual(f.vibrations, [100, 100]);
+    assert.deepEqual(f.vibrations, [1, 1]);
     f.tap(f.primary.host.parentElement.querySelector('.te2-mobile-special-key-trigger'));
-    assert.deepEqual(f.vibrations, [100, 100, 100]);
+    assert.deepEqual(f.vibrations, [1, 1, 1]);
     f.primary.binding.dispose();
     f.tap(button);
     assert.equal(f.vibrations.length, 3, 'disposed row must not retain haptic listeners');
   } finally { f.dispose(); }
 });
 
-test('haptic duration supports a live override, zero disables, and failures preserve input', () => {
-  let duration = 35;
-  const f = fixture(false, () => duration);
+test('shared touch haptics switch overrides legacy duration and failures preserve input', () => {
+  const f = fixture();
   try {
     f.primary.input.focus();
+    f.win.localStorage.setItem('te2.codeTe2.selectionVibrationMs', '0');
     f.tap(f.button('Right'));
-    duration = 0; f.tap(f.button('Right'));
-    duration = Number.NaN; f.tap(f.button('Right'));
-    assert.deepEqual(f.vibrations, [35, 100]);
+    f.win.localStorage.setItem('te2.codeTe2.touchHaptics', 'false'); f.tap(f.button('Right'));
+    f.win.localStorage.setItem('te2.codeTe2.touchHaptics', 'true'); f.tap(f.button('Right'));
+    assert.deepEqual(f.vibrations, [1, 1]);
     Object.defineProperty(f.win.navigator, 'vibrate', { value: undefined, configurable: true });
     f.tap(f.button('Right'));
     Object.defineProperty(f.win.navigator, 'vibrate', { value() { throw new Error('denied'); }, configurable: true });

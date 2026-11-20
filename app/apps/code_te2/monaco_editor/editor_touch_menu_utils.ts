@@ -90,6 +90,7 @@ export function sendMentionRequest(deps: MentionRequestDeps): void {
   }
 }
 
+import { getHandleFeedback } from '../src/mobile-input/handle-feedback.ts';
 const mentionBoundDoms = typeof WeakSet !== 'undefined' ? new WeakSet<HTMLElement>() : null;
 
 export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): void {
@@ -107,6 +108,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
       const mobile = isMobileUserAgent(window.navigator);
       lib.editorTouchSelectionHelp(target, {
         mobile,
+        getHandleFeedback,
         leadingTools: mobile
           ? ({ openMenu }) => [
               {

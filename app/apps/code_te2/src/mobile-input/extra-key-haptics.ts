@@ -1,9 +1,8 @@
-export const DEFAULT_EXTRA_KEY_VIBRATION_MS = 100;
+import { touchHapticsEnabled, TOUCH_HAPTIC_MS } from './handle-feedback.ts';
 
 /** One optional pulse per press, independent of key routing and hold repeats. */
 export function bindExtraKeyHaptics(
   root: HTMLElement,
-  getDurationMs: () => number = () => DEFAULT_EXTRA_KEY_VIBRATION_MS,
 ): () => void {
   const win = root.ownerDocument.defaultView;
   const press = (event: PointerEvent): void => {
@@ -13,10 +12,7 @@ export function bindExtraKeyHaptics(
     const button = target.closest('button');
     if (!button || !root.contains(button) || button.disabled) return;
     try {
-      const configured = getDurationMs();
-      const duration = Number.isFinite(configured)
-        ? Math.max(0, Math.round(configured)) : DEFAULT_EXTRA_KEY_VIBRATION_MS;
-      if (duration > 0) win.navigator.vibrate?.(duration);
+      if (touchHapticsEnabled()) win.navigator.vibrate?.(TOUCH_HAPTIC_MS);
     } catch {
       // Unsupported/denied haptics must never interfere with input or focus.
     }

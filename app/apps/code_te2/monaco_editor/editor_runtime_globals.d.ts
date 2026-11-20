@@ -167,13 +167,14 @@ interface MonacoSocketIoLike {
 interface MonacoTouchSelectionGlobal {
   editorTouchSelectionHelp?(
     editor: import('../../../static/vendor/monaco-editor-core/esm/vs/editor/editor.api').editor.IStandaloneCodeEditor,
-    options: { mobile: boolean; historicalReadOnly: true },
+    options: { mobile: boolean; historicalReadOnly: true; getHandleFeedback?: typeof import('../src/mobile-input/handle-feedback').getHandleFeedback },
   ): void;
   editorTouchSelectionHelp?(
     editor: MonacoRuntimeEditorLike,
     options?: {
       mobile?: boolean;
       historicalReadOnly?: boolean;
+      getHandleFeedback?: typeof import('../src/mobile-input/handle-feedback').getHandleFeedback;
       leadingTools?: (options: {
         editor: MonacoRuntimeEditorLike;
         selectorMenu: HTMLDivElement;
