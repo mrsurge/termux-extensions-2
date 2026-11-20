@@ -8,6 +8,10 @@
 <link rel="stylesheet" href="/static/vendor/codicons/codicon.css" />
 <link rel="preload" href="/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
 <style>
+  .editor-input-setting { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px; }
+  #editor-touch-selection-settings .editor-input-setting { margin-top:8px; }
+  .editor-input-setting > strong { flex:1; min-width:0; font-weight:600; }
+  .editor-input-setting > [data-touch-setting] { width:150px; }
   @font-face {
     font-family: 'JetBrains Mono Nerd';
     src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2');
@@ -2700,18 +2704,17 @@
 
       <div class="fe-dd-separator" style="margin: 12px 0;"></div>
 
-      <div style="display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px;">
+      <div class="editor-input-setting">
         <span style="flex:1; min-width:0;">
           <span style="display:block; font-weight:600;">Cursor style</span>
           <span style="display:block; font-size:12px; opacity:0.7; margin-top:2px;">Choose the editor caret shape.</span>
         </span>
         <div id="editor-settings-cursor-style" style="width:150px;"></div>
       </div>
-      <fieldset id="editor-touch-selection-settings" hidden>
-        <legend>Touch input</legend>
-        <label><input type="checkbox" name="selection-magnifier"> Magnify text while dragging a handle</label>
-        <label style="display:block;margin-top:8px"><input type="checkbox" name="touch-haptics"> Haptics for selection and extra keys</label>
-      </fieldset>
+      <div id="editor-touch-selection-settings" hidden>
+        <div class="editor-input-setting"><strong>Selection magnifier</strong><div data-touch-setting="lens"></div></div>
+        <div class="editor-input-setting"><strong>Selection and extra-key haptics</strong><div data-touch-setting="haptics"></div></div>
+      </div>
       <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; margin-top:8px;">
         <span style="flex:1; min-width:0;">
           <span style="display:block; font-weight:600;">Terminal destination</span>

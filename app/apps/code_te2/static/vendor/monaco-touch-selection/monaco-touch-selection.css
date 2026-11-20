@@ -244,10 +244,23 @@ html.hc-light, html.hc-light body {
     width: max-content;
     transform-origin: left center;
 }
-.monaco-touch-selection-lens::after {
-    content: '';
+.monaco-touch-lens-selection, .monaco-touch-lens-caret {
     position: absolute;
-    top: 15%; bottom: 15%; left: 50%;
-    width: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+.monaco-touch-lens-caret {
+    left: 50%;
+    overflow: hidden;
+    box-sizing: border-box;
     background: var(--vscode-editorCursor-foreground, currentColor);
+}
+.monaco-touch-lens-caret[data-shape="block-outline"] {
+    background: transparent;
+    border: 1px solid var(--vscode-editorCursor-foreground, currentColor);
+}
+.monaco-touch-lens-caret .monaco-touch-selection-sample { left: 0; }
+.monaco-touch-lens-caret .monaco-touch-selection-sample,
+.monaco-touch-lens-caret .monaco-touch-selection-sample span {
+    color: var(--vscode-editorCursor-background, var(--vscode-editor-background, Canvas)) !important;
 }

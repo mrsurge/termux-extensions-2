@@ -9,6 +9,7 @@ import { createSettingsConfigModalController } from './settings-config-modal.ts'
 import { createSettingsInstallController } from './settings-install.ts';
 import { createSettingsThemesController } from './settings-themes.ts';
 import { createSettingsModalsController } from './settings-modals.ts';
+import { createCustomSelectControl } from './declarative-modal.ts';
 import { isMobileUserAgent } from '../../../src/mobile-input/mobile-user-agent.ts';
 import { getHandleFeedback, setSelectionMagnifier, setTouchHaptics } from '../../../src/mobile-input/handle-feedback.ts';
 
@@ -68,22 +69,29 @@ export function createSettingsBootstrap(deps: Dependencies) {
 
   const requestThemeCatalog: RequestThemeCatalog = deps.requestThemeCatalog;
   const touchSettings = deps.els.settingsModal.querySelector<HTMLElement>('#editor-touch-selection-settings');
-  const lens = touchSettings?.querySelector<HTMLInputElement>('[name="selection-magnifier"]');
-  const vibration = touchSettings?.querySelector<HTMLInputElement>('[name="touch-haptics"]');
+  function touchSelect(selector: string, label: string, save: (enabled: boolean) => void) {
+    const slot = touchSettings?.querySelector<HTMLElement>(selector);
+    if (!slot || !isMobileUserAgent(window.navigator)) return null;
+    const control = createCustomSelectControl({ document: slot.ownerDocument, ariaLabel: label,
+      value: 'on', options: [{value:'on', label:'On'}, {value:'off', label:'Off'}],
+      onChange(value) {
+        try { save(value === 'on'); }
+        catch (error) { deps.toast(error instanceof Error ? error.message : 'Could not save touch settings'); }
+        refreshHandleSettings();
+      },
+    });
+    slot.replaceChildren(control.element);
+    return control;
+  }
+  const lens = touchSelect('[data-touch-setting="lens"]', 'Selection magnifier', setSelectionMagnifier);
+  const vibration = touchSelect('[data-touch-setting="haptics"]', 'Selection and extra-key haptics', setTouchHaptics);
   function refreshHandleSettings() {
     if (!touchSettings || !lens || !vibration || !isMobileUserAgent(window.navigator)) return;
     const feedback = getHandleFeedback();
-    lens.checked = feedback.magnifier;
-    vibration.checked = feedback.vibrationMs > 0;
+    lens.setValue(feedback.magnifier ? 'on' : 'off');
+    vibration.setValue(feedback.vibrationMs > 0 ? 'on' : 'off');
     touchSettings.hidden = false;
   }
-  touchSettings?.addEventListener('change', event => {
-    try {
-      if (event.target === lens && lens) setSelectionMagnifier(lens.checked);
-      if (event.target === vibration && vibration) setTouchHaptics(vibration.checked);
-    } catch (error) { deps.toast(error instanceof Error ? error.message : 'Could not save touch settings'); }
-    refreshHandleSettings();
-  });
 
   const settingsRefreshController = createSettingsRefreshController({
     requestThemeCatalog,
