@@ -78,6 +78,7 @@ function normalizedSize(value: unknown): DialogSize | null {
 export class DesktopDialogHost {
   private readonly options: DialogHostOptions;
   private window: BrowserWindow | null = null;
+  private fittedWidth: number | null = null;
   private readyPromise: Promise<void> | null = null;
   private readyResolve: (() => void) | null = null;
   private readyReject: ((error: Error) => void) | null = null;
@@ -317,6 +318,7 @@ export class DesktopDialogHost {
       },
     });
     this.window = window;
+    this.fittedWidth = null;
     window.setMenu(null);
     window.webContents.on("dom-ready", () => {
       void installChromiumScrollbars(window.webContents, "dialog");
@@ -434,6 +436,12 @@ export class DesktopDialogHost {
         workArea.y + workArea.height - height,
       ),
     );
+    // Fractional native scaling can round a content measurement and a
+    // BrowserWindow bound to adjacent DIPs. Feeding that difference back
+    // into setBounds on every observation can grow the window indefinitely.
+    const current = window.getBounds();
+    if (this.fittedWidth === width && Math.abs(current.height - height) <= 1) return;
+    this.fittedWidth = width;
     window.setBounds({ x, y, width, height });
   }
 

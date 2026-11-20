@@ -17,7 +17,7 @@ function mirrorDocumentStyles(sourceDocument, targetDocument) {
   )) {
     prior.remove();
   }
-  for (const source of sourceDocument.querySelectorAll('style, link[rel="stylesheet"]')) {
+  for (const source of sourceDocument.querySelectorAll('style, link[rel="stylesheet"], meta[name="viewport" i]')) {
     const copy = source.cloneNode(true);
     copy.dataset.teModalSurfaceMirror = "true";
     if (copy.tagName === "LINK") {
