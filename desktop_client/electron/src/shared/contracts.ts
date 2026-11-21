@@ -133,6 +133,7 @@ export type AppNavigation = {
 export type DesktopSteerAction = "home";
 
 export type DesktopBridge = {
+  reportHeaderHeight(height: number): void;
   notifyReady(): void;
   request(method: NativeRequestMethod, params?: Record<string, unknown>): Promise<unknown>;
   onAppNavigation(callback: (navigation: AppNavigation) => void): () => void;

@@ -22,6 +22,12 @@ declare global {
 }
 
 const bridge = window.te2Desktop;
+const shellHeader = document.getElementById("desktop-header");
+if (shellHeader && bridge?.reportHeaderHeight) {
+  const reportHeight = () => bridge.reportHeaderHeight(shellHeader.getBoundingClientRect().height);
+  new ResizeObserver(reportHeight).observe(shellHeader);
+  reportHeight();
+}
 const devToolsButton = document.querySelector("#devtools") as HTMLButtonElement;
 const launcherView = document.querySelector("#launcher-view") as HTMLIFrameElement;
 const pageTitle = document.querySelector("#page-title") as HTMLElement;

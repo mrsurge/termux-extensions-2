@@ -38,8 +38,22 @@ button:disabled { color: #616970; }
 body:not([data-app-open="true"]) .app-only { display: none; }
 
 @media (max-width: 880px) {
-  .desktop-header { grid-template-columns: auto minmax(80px, 1fr) auto; }
+  .desktop-header { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .header-group, .window-controls { padding-inline: 2px; gap: 0; }
+  .header-title { padding-inline: 2px; gap: 2px; }
+  .header-group:not(.app-actions) button, .window-controls button { min-width: 26px; padding-inline: 4px; }
   .header-title .asset-version { display: none; }
   .framework-offline { max-width: 170px; }
-  .app-actions { position: absolute; top: var(--header-height); right: 0; border: 1px solid var(--border); background: var(--surface); }
+}
+.action-icon { display: none; }
+@media (max-width: 719px) {
+  .action-label { display: none; }
+  .action-icon { display: inline-block; vertical-align: middle; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+}
+/* Below this, the compact button groups leave no useful title/drag area. */
+@media (max-width: 459px) {
+  :root { --header-height: 76px; }
+  .desktop-header { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 37px 38px; }
+  .app-actions { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; }
+  .window-controls { grid-column: 3; grid-row: 1; }
 }

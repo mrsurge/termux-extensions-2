@@ -10,6 +10,9 @@ import type {
 import { unwrapNativeRequestResult } from "../shared/native-request-contracts";
 
 const bridge: DesktopBridge = {
+  reportHeaderHeight(height) {
+    ipcRenderer.send("te2-desktop:shell-header-height", height);
+  },
   notifyReady() {
     ipcRenderer.send("te2-desktop:shell-ready");
   },

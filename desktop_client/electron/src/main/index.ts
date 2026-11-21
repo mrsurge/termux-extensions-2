@@ -93,7 +93,7 @@ import { settleNativeRequest } from "../shared/native-request-contracts";
 
 const SHELL_SCHEME = "te2-desktop";
 const SHELL_HOST = "shell";
-const HEADER_HEIGHT = 46;
+let shellHeaderHeight = 46;
 const APP_NATIVE_STYLE =
   "html > body > .app-shell > .app-toolbar{display:none!important}";
 const FRAMEWORK_ROUTE =
@@ -280,7 +280,16 @@ function sendNavigation(contents: WebContents): void {
 
 function appViewBounds(): Electron.Rectangle {
   const [width, height] = mainWindow?.getContentSize() || [0, 0];
-  return { x: 0, y: HEADER_HEIGHT, width, height: Math.max(0, height - HEADER_HEIGHT) };
+  return { x: 0, y: shellHeaderHeight, width, height: Math.max(0, height - shellHeaderHeight) };
+}
+
+function onShellHeaderHeight(event: IpcMainEvent, cssHeight: unknown): void {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return;
+  if (typeof cssHeight !== "number" || !Number.isFinite(cssHeight) || cssHeight <= 0 || cssHeight > 200) return;
+  const height = Math.ceil(cssHeight * event.sender.getZoomFactor());
+  if (height === shellHeaderHeight) return;
+  shellHeaderHeight = height;
+  resizeAppView();
 }
 
 function resizeAppView(): void {
@@ -1376,6 +1385,7 @@ async function main(): Promise<void> {
     installContextMenu,
   });
   dialogHost.registerIpc();
+  ipcMain.on("te2-desktop:shell-header-height", onShellHeaderHeight);
   ipcMain.on("te2-desktop:sidebar-surface-ready", handleDetachedSurfaceReady);
   ipcMain.on("te2-desktop:sidebar-surface-action", handleDetachedSurfaceAction);
   ipcMain.handle(
@@ -1465,6 +1475,7 @@ app.on("before-quit", (event) => {
   }
   localFrameworkController = null;
   ipcMain.removeHandler("te2-desktop:app-view-control");
+  ipcMain.off("te2-desktop:shell-header-height", onShellHeaderHeight);
   ipcMain.removeListener(
     "te2-desktop:sidebar-surface-ready",
     handleDetachedSurfaceReady,
