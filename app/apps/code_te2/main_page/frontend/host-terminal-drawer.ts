@@ -12,6 +12,7 @@ import {
   fileEditorSocketQuery,
 } from '../../src/rpc/socketio-topology.ts';
 import { resizedDrawerHeight } from './ui/drawer-sizing.ts';
+import { dragPortraitDrawer, finishPortraitDrag } from './ui/portrait-drawer-split.ts';
 import {
   bindTerminalSpecialKeyTarget,
   publishTerminalSpecialKeyFocus,
@@ -1470,7 +1471,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         window.innerHeight - 40,
       );
       
-      drawer.style.height = `${newHeight}px`;
+      if (!dragPortraitDrawer(startHeight + deltaY)) drawer.style.height = `${newHeight}px`;
       
       // Refit terminal during resize
       if (fitAddon && isOpen) {
@@ -1483,6 +1484,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       if (!isResizing) return;
       
       isResizing = false;
+      finishPortraitDrag();
       document.body.style.cursor = '';
       
       // Send final size to backend

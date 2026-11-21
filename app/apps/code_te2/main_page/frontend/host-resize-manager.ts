@@ -2,6 +2,7 @@ import { isUnknownArray } from '../../src/rpc/value-types.ts';
 // Host resize manager - handle main-page panel resizing with drag handles.
 
 import { resizedDrawerHeight } from './ui/drawer-sizing.ts';
+import { observePortraitDrawer, dragPortraitDrawer, finishPortraitDrag } from './ui/portrait-drawer-split.ts';
 
 type ResizePanel = 'explorer' | 'agent' | 'secondary' | 'terminal' | null;
 
@@ -185,6 +186,7 @@ function suspendResizeInteraction(panel: Exclude<ResizePanel, null>): () => void
 
 export function initResizeManager(): () => void {
   disposeResizeManager?.();
+  const disposePortrait = observePortraitDrawer();
   const handles = Array.from(document.querySelectorAll<HTMLElement>('.resize-handle'));
   let drag: ResizeDrag | null = null;
   let disposed = false;
@@ -200,6 +202,7 @@ export function initResizeManager(): () => void {
       }
     } catch { /* Capture may already be lost when the window is deactivated. */ }
     current.restoreInteraction();
+    if (current.panel === 'terminal') finishPortraitDrag();
     if (current.panel === 'secondary') {
       window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-end', {
         detail: { dockSize: currentPanelWidth('secondary') },
@@ -253,8 +256,11 @@ export function initResizeManager(): () => void {
         finish();
         return;
       }
-      const height = resizedDrawerHeight(startSize + startPos - event.clientY, 150, 800);
-      document.documentElement.style.setProperty('--terminal-height', `${height}px`);
+      const requested = startSize + startPos - event.clientY;
+      if (!dragPortraitDrawer(requested)) {
+        const height = resizedDrawerHeight(requested, 150, 800);
+        document.documentElement.style.setProperty('--terminal-height', `${height}px`);
+      }
     }
     // Existing Monaco/terminal/native placement observers consume the resize event.
     window.dispatchEvent(new Event('resize'));
@@ -278,6 +284,7 @@ export function initResizeManager(): () => void {
     if (disposed) return;
     disposed = true;
     finish();
+    disposePortrait();
     handles.forEach(handle => handle.removeEventListener('pointerdown', onStart));
     window.removeEventListener('pointermove', onMove, true);
     window.removeEventListener('pointerup', onEnd, true);
