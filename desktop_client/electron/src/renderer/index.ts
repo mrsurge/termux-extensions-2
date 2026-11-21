@@ -317,10 +317,6 @@ document.querySelector("#recents")?.addEventListener(
   "click",
   () => runUiTask(bridge.request("view_action", { action: "recents" })),
 );
-document.querySelector("#lock")?.addEventListener(
-  "click",
-  () => runUiTask(bridge.request("view_action", { action: "lock" })),
-);
 document.querySelector("#quit-app")?.addEventListener("click", async () => {
   const appId = appIdFromCurrentUrl();
   if (!appId) return toast("No framework app is open");

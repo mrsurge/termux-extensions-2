@@ -118,7 +118,6 @@ class MainActivity : AppCompatActivity() {
     private var preservePersistedSessionUntilStartupReady = false
     private var lastRunTargetError: String? = null
     private var currentAppId: String = DEFAULT_APP_ID
-    private var isLocked: Boolean = false
 
     private var canNavigateBack = false
 
@@ -837,7 +836,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         findViewById<Button>(R.id.btnRecents).setOnClickListener { showRecents() }
-        findViewById<Button>(R.id.btnLock).setOnClickListener { toggleLock() }
         findViewById<Button>(R.id.btnQuit).setOnClickListener { quitCurrentApp() }
         findViewById<Button>(R.id.btnConsole).setOnClickListener { toggleConsoleOverlay() }
 
@@ -1359,8 +1357,6 @@ class MainActivity : AppCompatActivity() {
         updatePersistentNetworkService()
         currentAppId = appId
         appHealthFailureCount = 0
-        isLocked = false
-        findViewById<Button>(R.id.btnLock).text = "Lock"
         geckoSession.loadUri(appUrl)
         updateAppHealthMonitoring(immediate = true)
     }
@@ -1418,30 +1414,6 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun toggleLock() {
-        Thread {
-            try {
-                val endpoint = if (isLocked) "unlock" else "lock"
-                val url = frameworkBaseUrl.trimEnd('/') + "/api/apps/" + currentAppId + "/" + endpoint
-                val req = Request.Builder()
-                    .url(url)
-                    .post("".toRequestBody("application/json".toMediaType()))
-                    .build()
-                httpClient.newCall(req).execute().use { resp ->
-                    val body = resp.body?.string().orEmpty()
-                    if (!resp.isSuccessful || body.isBlank()) return@use
-                    val json = JSONObject(body)
-                    if (json.optBoolean("ok")) {
-                        isLocked = !isLocked
-                        runOnUiThread {
-                            findViewById<Button>(R.id.btnLock).text = if (isLocked) "Unlock" else "Lock"
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }.start()
-    }
 
     private fun quitCurrentApp() {
         Thread {

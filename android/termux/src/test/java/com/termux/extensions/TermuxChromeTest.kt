@@ -18,8 +18,8 @@ class TermuxChromeTest {
     @Test fun exactAllowlistedActionsReuseConsumerHandlersOnce() {
         val seen = mutableListOf<String>()
         val protocol = TermuxChromePolicy.protocol(descriptor, { seen.add(it) },
-            { JSONObject().put("locked", true) })
-        for (name in listOf("home", "reload", "recents", "lock", "quit", "tools",
+            { JSONObject().put("inAppShell", true) })
+        for (name in listOf("home", "reload", "recents", "quit", "tools",
             "scale-down", "scale-reset", "scale-up")) {
             val request = protocol.parse(JSONObject().put("id", 1).put("method", "view_action")
                 .put("documentId", "1234567890abcdef")
@@ -27,13 +27,13 @@ class TermuxChromeTest {
             assertTrue(protocol.execute(request).getJSONObject("result").getBoolean("ok"))
             assertEquals(name, seen.last())
         }
-        assertEquals(9, seen.size)
-        for (params in listOf(JSONObject().put("action", "exec"),
+        assertEquals(8, seen.size)
+        for (params in listOf(JSONObject().put("action", "lock"), JSONObject().put("action", "exec"),
             JSONObject().put("action", "home").put("script", "x"))) {
             val request = protocol.parse(JSONObject().put("id", 1).put("method", "view_action")
                 .put("params", params).toString(), descriptor.entrypoint)
             assertFalse(protocol.execute(request).getJSONObject("result").getBoolean("ok"))
         }
-        assertEquals(9, seen.size)
+        assertEquals(8, seen.size)
     }
 }

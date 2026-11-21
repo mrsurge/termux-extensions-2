@@ -274,7 +274,6 @@ class WebShell(Gtk.Application):
         self.home_button: Gtk.Button | None = None
         self.reload_button: Gtk.Button | None = None
         self.recents_button: Gtk.Button | None = None
-        self.lock_button: Gtk.Button | None = None
         self.quit_button: Gtk.Button | None = None
         self.zoom_out_button: Gtk.Button | None = None
         self.zoom_reset_button: Gtk.Button | None = None
@@ -457,10 +456,6 @@ class WebShell(Gtk.Application):
             "Recents",
             lambda _button: self.activate_app_shell_button("btn-recents"),
         )
-        self.lock_button = self.header_text_button(
-            "Lock",
-            lambda _button: self.activate_app_shell_button("btn-lock"),
-        )
         self.quit_button = self.header_text_button(
             "Quit",
             lambda _button: self.quit_current_app(),
@@ -468,7 +463,6 @@ class WebShell(Gtk.Application):
 
         for button in (
             self.quit_button,
-            self.lock_button,
             self.recents_button,
         ):
             header.pack_end(button)
@@ -656,13 +650,10 @@ class WebShell(Gtk.Application):
         in_app_shell = self.is_app_shell_uri(webview.get_uri())
         for button in (
             self.recents_button,
-            self.lock_button,
             self.quit_button,
         ):
             if button is not None:
                 button.set_visible(in_app_shell)
-        if self.lock_button is not None and in_app_shell:
-            self.lock_button.set_label("Lock")
 
     def framework_app_id(self, uri: str | None) -> str | None:
         app_id = app_id_from_uri(uri)

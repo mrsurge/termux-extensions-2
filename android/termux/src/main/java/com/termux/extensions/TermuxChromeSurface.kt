@@ -34,7 +34,7 @@ internal object TermuxChromePolicy {
         "view_action" to { params ->
             require(params.length() == 1)
             val name = params.getString("action")
-            require(name in setOf("home", "reload", "recents", "lock", "quit", "tools",
+            require(name in setOf("home", "reload", "recents", "quit", "tools",
                 "scale-down", "scale-reset", "scale-up"))
             action(name)
             ConsumerResult(state())

@@ -1111,11 +1111,6 @@ async function viewAction(params: Record<string, unknown>): Promise<Record<strin
       'document.getElementById("btn-recents")?.click()',
       true,
     );
-  } else if (action === "lock") {
-    await appView?.webContents.executeJavaScript(
-      'document.getElementById("btn-lock")?.click()',
-      true,
-    );
   } else if (action === "set_zoom") {
     settings = await writeDesktopSettings({
       ...settings,

@@ -6,7 +6,6 @@
     <string name="native_action_home">Home</string>
     <string name="native_action_reload">Reload</string>
     <string name="native_action_recents">Recents</string>
-    <string name="native_action_lock">Lock</string>
     <string name="native_action_quit">Quit</string>
     <string name="native_action_tools">Tools</string>
     <string name="native_action_tools_symbol">⚙️</string>

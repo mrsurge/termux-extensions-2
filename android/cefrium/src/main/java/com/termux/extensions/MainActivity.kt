@@ -101,7 +101,6 @@ class MainActivity : AppCompatActivity() {
     private var currentPath = LAUNCHER_PATH
     private var canNavigateBack = false
     private var inAppShell = false
-    private var isLocked = false
     private var toolsState = AndroidToolsState()
     private var toolsSelectedTab = NativeToolsTab.CONSOLE
     private var devToolsRunProfilesEnabled = false
@@ -432,7 +431,6 @@ class MainActivity : AppCompatActivity() {
             if (::browser.isInitialized) browser.reload()
         }
         findViewById<Button>(R.id.btnRecents).setOnClickListener { showRecents() }
-        findViewById<Button>(R.id.btnLock).setOnClickListener { toggleLock() }
         findViewById<Button>(R.id.btnQuit).setOnClickListener { quitCurrentApp() }
         findViewById<Button>(R.id.btnConsole).setOnClickListener { toggleTools() }
     }
@@ -647,14 +645,13 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                         "recents" -> showRecents()
-                        "lock" -> toggleLock()
                         "quit" -> quitCurrentApp()
                         "tools" -> toggleTools()
                         "scale-down" -> changeClientUiScale(clientUiScale - CefriumViewportPolicy.SCALE_STEP)
                         "scale-reset" -> changeClientUiScale(CefriumViewportPolicy.DEFAULT_SCALE)
                         "scale-up" -> changeClientUiScale(clientUiScale + CefriumViewportPolicy.SCALE_STEP)
                     }
-                }, { JSONObject().put("inAppShell", inAppShell).put("locked", isLocked)
+                }, { JSONObject().put("inAppShell", inAppShell)
                     .put("appId", currentAppId).put("title", chromeTitle)
                     .put("uiScalePercent", clientUiScale) },
                 { message -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show() })
@@ -1024,8 +1021,6 @@ class MainActivity : AppCompatActivity() {
     private fun loadApp(appId: String) {
         ++navigationGeneration
         currentAppId = appId
-        isLocked = false
-        findViewById<Button>(R.id.btnLock).text = "Lock"
         updateToolbar()
         browser.loadUrl(
             withAndroidNativePageIdentity(
@@ -1230,38 +1225,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun toggleLock() {
-        if (!inAppShell) return
-        Thread {
-            val nextLocked = !isLocked
-            val action = if (nextLocked) "lock" else "unlock"
-            try {
-                val request = Request.Builder()
-                    .url("$frameworkBaseUrl/api/apps/$currentAppId/$action")
-                    .post("".toRequestBody(JSON_MEDIA_TYPE))
-                    .build()
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw IllegalStateException("HTTP ${response.code}")
-                    }
-                }
-                isLocked = nextLocked
-                runOnUiThread {
-                    findViewById<Button>(R.id.btnLock).text =
-                        if (isLocked) "Unlock" else "Lock"
-                    updateToolbar()
-                }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    Toast.makeText(
-                        this,
-                        "App $action failed: ${error.message}",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            }
-        }.start()
-    }
 
     private fun quitCurrentApp() {
         if (!inAppShell) {
