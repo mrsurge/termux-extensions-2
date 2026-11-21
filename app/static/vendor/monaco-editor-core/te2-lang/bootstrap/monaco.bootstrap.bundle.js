@@ -51240,7 +51240,16 @@ var init_viewCursor = __esm({
        * Also returns the next grapheme.
        */
       _getGraphemeAwarePosition() {
-        const { lineNumber, column } = this._position;
+        let paintPosition = this._position;
+        const model = this._context.viewModel;
+        if ((this._cursorStyle === TextEditorCursorStyle.Block || this._cursorStyle === TextEditorCursorStyle.BlockOutline) && model.getInjectedTextAt(paintPosition)?.options.inlineClassName?.endsWith(" te2-inlay-cursor-stop")) {
+          paintPosition = model.normalizePosition(
+            paintPosition,
+            4
+            /* PositionAffinity.RightOfInjectedText */
+          );
+        }
+        const { lineNumber, column } = paintPosition;
         const lineContent = this._context.viewModel.getLineContent(lineNumber);
         const [startOffset, endOffset] = getCharContainingOffset(lineContent, column - 1);
         return [new Position(lineNumber, startOffset + 1), lineContent.substring(startOffset, endOffset)];
@@ -194100,7 +194109,7 @@ var InlayHintsController = class InlayHintsController2 {
       const opts = {
         content,
         inlineClassNameAffectsLetterSpacing: true,
-        inlineClassName: ref.className,
+        inlineClassName: ref.className + " te2-inlay-cursor-stop",
         cursorStops,
         attachedData
       };
