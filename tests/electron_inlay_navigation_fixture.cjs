@@ -52,6 +52,26 @@ window.read = () => ({
   }),value:e.getValue(),
   ready:document.querySelector('.view-line')?.textContent.includes('HINT') && e.hasTextFocus()
 });
+window.paintTest=async()=>{
+  const delay=ms=>new Promise(r=>setTimeout(r,ms));
+  e.setValue(['abcdef','xy','abcdefgh'].join(String.fromCharCode(10)));
+  e.updateOptions({inlayHints:{enabled:'on',padding:true},roundedSelection:true});
+  e.setSelection({startLineNumber:1,startColumn:3,endLineNumber:3,endColumn:6});
+  await delay(500);
+  const h=document.querySelector('.selector.left .bottom-cursor'),r=h.getBoundingClientRect();
+  const t=new Touch({identifier:2,target:h,clientX:r.left+r.width/2,clientY:r.top+r.height/2});
+  const fire=type=>h.dispatchEvent(new TouchEvent(type,{bubbles:true,cancelable:true,touches:type==='touchend'?[]:[t],changedTouches:[t]}));
+  fire('touchstart');fire('touchmove');await delay(180);
+  const paint=n=>{const s=getComputedStyle(n);return [s.backgroundColor,s.borderRadius]};
+  const lens=document.querySelector('.monaco-touch-selection-lens');
+  const sample=lens.querySelector('.monaco-touch-lens-caret').previousElementSibling;
+  const hints=n=>[...n.querySelectorAll('.te2-inlay-cursor-stop')].map(paint);
+  const marks=[...lens.querySelectorAll('.monaco-touch-lens-selection')].map(paint);
+  const masks=[...document.querySelectorAll('.view-overlays .selected-text + .cslr.monaco-editor-background')].map(paint);
+  const outer=[...document.querySelectorAll('.view-overlays .selected-text')].map(paint);
+  const result={source:hints(document.querySelector('.view-line')),copy:hints(sample),marks,masks,outer};
+  fire('touchend');return result;
+};
 </script>`;
 const server = createServer((req,res) => {
   if(req.url === '/') {res.setHeader('Content-Type','text/html');res.end(html);return;}
@@ -98,6 +118,10 @@ app.whenReady().then(async () => {
     assert.ok(Math.abs(drag.bar-drag.hi)<2,JSON.stringify(drag));
     await wc.insertText('X');
     assert.equal((await wc.executeJavaScript('read()')).value,'aXbc');
+    const paint=await wc.executeJavaScript('paintTest()');
+    assert.deepEqual(paint.copy,paint.source);
+    assert.ok(paint.copy.some(([bg,r])=>bg!=='rgba(0, 0, 0, 0)' && r!=='0px'));
+    for(const group of [paint.masks,paint.outer])assert.ok(group.some(([c,r])=>r!=='0px'&&paint.marks.some(([mc,mr])=>mc===c&&mr===r)),JSON.stringify(paint));
     console.log('PASS: arrows, touch snapping, handle anchor, lens cell width and insertion across a padded hint.');
   } finally {win.destroy(); server.close();}
   app.exit(0);
