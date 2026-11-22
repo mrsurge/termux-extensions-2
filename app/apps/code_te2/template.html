@@ -416,13 +416,28 @@
     box-sizing: border-box;
   }
 
-  .layout-mobile:has(.terminal-drawer.fullscreen) {
-    grid-template-rows: auto auto 0 minmax(0, 1fr) auto auto;
+  .fe-root:has(> .terminal-drawer.open.fullscreen) {
+    position: relative;
   }
-
-  .layout-mobile .terminal-drawer.fullscreen {
+  .layout-mobile:has(> .terminal-drawer.open.fullscreen) {
+    grid-template-rows: auto auto minmax(0, var(--tiled-editor-share)) minmax(0, var(--tiled-drawer-share)) auto auto;
+  }
+  .layout-desktop:has(> .terminal-drawer.open.fullscreen) {
+    grid-template-rows: auto auto minmax(0, 1fr) var(--split-rail-size) minmax(0, var(--tiled-drawer-footprint)) auto;
+  }
+  .fe-root .terminal-drawer.open.fullscreen {
+    position: absolute !important;
+    grid-row: 3 / 5;
+    inset: 0;
     height: auto !important;
     min-height: 0;
+    z-index: 51;
+  }
+  .layout-desktop .terminal-drawer.open.fullscreen {
+    grid-row: 3 / 6;
+  }
+  .fe-root:has(> .terminal-drawer.open.fullscreen) :is(.fe-editor-container,.resize-handle--secondary) {
+    visibility: hidden;
   }
 
   /* When terminal is "closed" (open class NOT present) */
@@ -1834,9 +1849,6 @@
 
   .terminal-drawer.open {
     transform: translateY(0);
-  }
-  .terminal-drawer.fullscreen {
-    height: calc(var(--te-app-container-height, 100vh) - 80px) !important;
   }
   .terminal-header {
     display: flex;

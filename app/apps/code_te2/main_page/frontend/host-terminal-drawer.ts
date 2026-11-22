@@ -320,6 +320,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
   function setDrawerCollapsedState(collapsed: boolean): void {
     if (!(drawer instanceof HTMLElement)) return;
+    if (collapsed && isFullscreen) setFullscreen(false);
     drawer.classList.toggle('terminal-drawer--collapsed', !!collapsed);
   }
 
@@ -1426,14 +1427,26 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   /**
    * Toggle fullscreen mode
    */
-  function toggleFullscreen(): void {
+  function setFullscreen(maximized: boolean): void {
     if (!(drawer instanceof HTMLElement)) return;
-    isFullscreen = !isFullscreen;
+    const root = drawer.closest<HTMLElement>('.fe-root');
+    if (maximized && root) {
+      // Measure before removing the drawer from normal grid flow. Keep its
+      // tiled footprint separate from the live bounds of the overlay.
+      const panel = drawer.getBoundingClientRect().height;
+      const editor = root.querySelector('.fe-editor-container')?.getBoundingClientRect().height ?? 0;
+      root.style.setProperty('--tiled-drawer-footprint', panel + 'px');
+      root.style.setProperty('--tiled-drawer-share', Math.max(1, panel) + 'fr');
+      root.style.setProperty('--tiled-editor-share', Math.max(1, editor) + 'fr');
+    } else if (root) {
+      for (const key of ['--tiled-drawer-footprint', '--tiled-drawer-share', '--tiled-editor-share']) root.style.removeProperty(key);
+    }
+    isFullscreen = maximized;
     drawer.classList.toggle('fullscreen', isFullscreen);
     
     // Update button icon
     if (fullscreenBtn) {
-      fullscreenBtn.textContent = isFullscreen ? '⛶' : '⛶';
+      fullscreenBtn.setAttribute('aria-pressed', String(isFullscreen));
       fullscreenBtn.title = isFullscreen ? 'Exit drawer fullscreen' : 'Toggle drawer fullscreen';
       fullscreenBtn.setAttribute(
         'aria-label',
@@ -1449,6 +1462,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       scheduleStartupResizeSync('fullscreen');
     }
   }
+
+  function toggleFullscreen(): void { setFullscreen(!isFullscreen); }
 
   /**
    * Enable manual resize by dragging header

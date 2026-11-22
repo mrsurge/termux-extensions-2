@@ -39,11 +39,11 @@ test("keeps the extension drawer and status projection in the host source graph"
   );
   assert.match(
     template,
-    /\.layout-mobile:has\(\.terminal-drawer\.fullscreen\)\s*\{\s*grid-template-rows:\s*auto auto 0 minmax\(0, 1fr\) auto auto;/,
+    /\.layout-mobile:has\(> \.terminal-drawer\.open\.fullscreen\)\s*\{\s*grid-template-rows:\s*auto auto minmax\(0, var\(--tiled-editor-share\)\) minmax\(0, var\(--tiled-drawer-share\)\) auto auto;/,
   );
   assert.match(
     template,
-    /\.layout-mobile \.terminal-drawer\.fullscreen\s*\{\s*height:\s*auto !important;\s*min-height:\s*0;/,
+    /\.fe-root \.terminal-drawer\.open\.fullscreen\s*\{\s*position: absolute !important;\s*grid-row: 3 \/ 5;/,
   );
   assert.doesNotMatch(
     template,

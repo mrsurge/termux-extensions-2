@@ -910,6 +910,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         : 0;
       const visible = visibleOverride ?? (
         secondaryEditorEmbedded()
+        && !(root.querySelector('.terminal-drawer.open.fullscreen') && !secondContainer.closest('.terminal-drawer.open.fullscreen'))
         && (root.classList.contains('layout-desktop') || (!!electronSecondEditor.dockedEditorReady &&
             !!secondContainer.closest('.terminal-drawer.open') && !secondContainer.hidden))
         && document.visibilityState !== 'hidden'
