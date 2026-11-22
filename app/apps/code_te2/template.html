@@ -105,6 +105,12 @@
      ======================================== */
 
   .fe-root.layout-desktop {
+    /* Two 1px pane outlines extend into this track, leaving a connected 3px gap. */
+    --split-rail-size: 5px;
+    --pane-stroke: color-mix(in srgb, var(--te2-code-foreground, var(--fg)) 38%, var(--bg));
+    /* Keep the outside pixel of the pane outlines inside the clipped grid. */
+    box-sizing: border-box;
+    border: 1px solid transparent;
     display: grid;
     grid-template-columns: var(--explorer-track, var(--explorer-width-effective)) var(--explorer-gap, var(--split-rail-size)) minmax(0, 1fr) var(--secondary-gap, 0px) var(--secondary-editor-width-effective) var(--sidebar-gap, var(--split-rail-size)) var(--sidebar-track, var(--agent-width-effective));
     grid-template-rows: auto auto minmax(0, 1fr) var(--bottom-gap, 0px) auto auto;
@@ -132,6 +138,12 @@
     grid-column: 3 / 6;
     grid-row: 1;
     z-index: 40;
+  }
+  /* The toolbar spans both panes. Give it its own frame rather than joining
+     its right edge to two different curves when the second editor is open. */
+  .layout-desktop .fe-toolbar {
+    margin-bottom: var(--split-rail-size);
+    border-bottom-color: transparent;
   }
 
   /* Recent-file tabs stay with the primary editor; side rails own columns 1 and 4. */
@@ -215,9 +227,30 @@
   }
   .layout-desktop .extension-statusbar {
     grid-row: 6;
+    margin-top: 1px;
   }
-  .layout-desktop :is(.fe-drawer,.fe-editor-container,.te2-secondary-editor-host,.terminal-drawer,.agent-drawer) {
-    border-radius: 2px;
+  .layout-desktop :is(.fe-toolbar,.fe-drawer,.terminal-drawer.open,.agent-drawer.open),
+  .layout-desktop.te2-secondary-editor-docked .te2-secondary-editor-host,
+  .fe-root.layout-desktop::after {
+    border-radius: 4px;
+    outline: 1px solid var(--pane-stroke);
+  }
+  /* Frame the primary tabs and editor together without clipping editor overlays. */
+  .fe-root.layout-desktop::after {
+    content: '';
+    grid-column: 3;
+    grid-row: 2 / 4;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .layout-desktop .resize-handle::before {
+    content: none;
+  }
+  :is(.hc-black,.hc-light) .fe-root.layout-desktop {
+    --pane-stroke: var(--te2-code-foreground, var(--fg));
+  }
+  @media (forced-colors: active) {
+    .fe-root.layout-desktop { --pane-stroke: CanvasText; }
   }
   .layout-desktop .terminal-header {
     cursor: default;
