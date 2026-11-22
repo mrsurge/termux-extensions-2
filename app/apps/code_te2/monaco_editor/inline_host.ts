@@ -53,6 +53,21 @@ const INLINE_EDITOR_HOST_STYLE = `
 [data-te2-working-editor-host][data-te2-native-renderer='cefrium'] .monaco-editor textarea.inputarea.android-ime-input {
   font-size: 16px !important;
 }
+/* Monaco positions overflow widgets in viewport coordinates. Keep the host
+   out of the clipped pane and let only actual widgets accept pointer input. */
+.monaco-editor.te2-secondary-widget-layer {
+  position: fixed;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 365;
+  pointer-events: none;
+}
+.te2-secondary-widget-layer[hidden] { display: none; }
+.te2-secondary-widget-layer > :is(.overflowingContentWidgets,.overflowingOverlayWidgets) > * {
+  pointer-events: auto;
+}
 .fe-editor-container > .te2-mobile-editor-overlay,
 .te2-secondary-editor-body > .te2-mobile-editor-overlay {
   position: absolute;

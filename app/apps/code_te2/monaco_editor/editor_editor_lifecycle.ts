@@ -44,6 +44,7 @@ interface EditorLifecycleDeps {
   isDisposed?(): boolean;
   getMonaco(): MonacoRefLike | null;
   getEditorContainer(): HTMLElement | null;
+  overflowWidgetHost?(): HTMLElement | null;
   fetchSSOTState(): Promise<unknown>;
   getCachedPrefs(): unknown;
   setCachedPrefs(value: unknown): void;
@@ -174,6 +175,11 @@ export function disposeGitBaselines(deps: EditorLifecycleDeps): void {
   deps.clearGitBaselineModels();
 }
 
+function widgetOptions(deps: EditorLifecycleDeps): Record<string, unknown> {
+  const host = deps.overflowWidgetHost?.();
+  return host ? { overflowWidgetsDomNode: host, fixedOverflowWidgets: true } : {};
+}
+
 export async function ensureEditorWithPrefs(deps: EditorLifecycleDeps): Promise<MonacoEditorLike | null> {
   if (deps.isDisposed?.()) return null;
   const existing = deps.getEditor();
@@ -196,7 +202,7 @@ export async function ensureEditorWithPrefs(deps: EditorLifecycleDeps): Promise<
   }
 
   if (deps.isDisposed?.()) return null;
-  const created = monacoRef.editor.create(container, deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs()));
+  const created = monacoRef.editor.create(container, { ...deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs()), ...widgetOptions(deps) });
   deps.setEditor(created);
   const model = deps.getModel();
   if (model && typeof created.setModel === 'function') {
@@ -240,7 +246,7 @@ export function ensurePlainEditorWithPrefs(deps: EditorLifecycleDeps): MonacoEdi
   const monacoRef = deps.getMonaco();
   if (!container || !monacoRef) return null;
 
-  const created = monacoRef.editor.create(container, deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs()));
+  const created = monacoRef.editor.create(container, { ...deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs()), ...widgetOptions(deps) });
   deps.setEditor(created);
   applySharedPlainEditorSetup(deps, created, {
     themeKey: themeFromPrefs(deps.getCachedPrefs()),
@@ -286,6 +292,7 @@ export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiff
   if (!container || !monacoRef) return null;
 
   const diffEditor = monacoRef.editor.createDiffEditor(container, {
+    ...widgetOptions(deps),
     renderSideBySide: false,
     readOnly: false,
     originalEditable: false,

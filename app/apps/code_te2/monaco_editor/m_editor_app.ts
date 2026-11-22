@@ -416,6 +416,22 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     onCleanupError: error => console.warn('[editor] instance cleanup failed', error),
   });
   const documentLeaseOwner = {};
+  let widgetLayer: HTMLElement | null = null;
+  function getOverflowWidgetHost(): HTMLElement | null {
+    if (rendererContext.identity.clientRole !== 'secondary') return null;
+    if (widgetLayer) return widgetLayer;
+    const mount = options.mount.root;
+    const doc = mount.ownerDocument;
+    const layer = doc.createElement('div');
+    layer.className = 'monaco-editor te2-secondary-widget-layer';
+    doc.body.append(layer);
+    const visibility = new IntersectionObserver(entries => {
+      for (const entry of entries) layer.hidden = !entry.isIntersecting;
+    });
+    visibility.observe(mount);
+    lifetime.addCleanup(() => { visibility.disconnect(); layer.remove(); widgetLayer = null; });
+    return widgetLayer = layer;
+  }
   let initialBootSnapshot = options.bootSnapshot || null;
   let resolveInlineRuntimeBoot: (() => void) | null = null;
   let rejectInlineRuntimeBoot: ((error: unknown) => void) | null = null;
@@ -1779,6 +1795,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   }
 
   var editorLifecycleDeps = buildEditorLifecycleDeps({
+    overflowWidgetHost: getOverflowWidgetHost,
     isDisposed: lifetime.isDisposed,
     getMonaco: function () {
       return window.monaco || null;
