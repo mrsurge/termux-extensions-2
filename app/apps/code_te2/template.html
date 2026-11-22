@@ -44,6 +44,9 @@
   :root {
     --fg: var(--foreground, #e5e7eb);
     --bg: var(--background, #2e323cff);
+    --split-rail-size: 3px;
+    --editor-overlay-bottom: 14px;
+    --drawer-tab-pad: 5px;
     --card: var(--card, #1f222bff);
     --border: var(--border, #333);
     --muted: var(--muted-foreground, #9ca3af);
@@ -103,7 +106,7 @@
 
   .fe-root.layout-desktop {
     display: grid;
-    grid-template-columns: var(--explorer-track, var(--explorer-width-effective)) var(--explorer-gap, 2px) minmax(0, 1fr) var(--secondary-gap, 0px) var(--secondary-editor-width-effective) var(--sidebar-gap, 2px) var(--sidebar-track, var(--agent-width-effective));
+    grid-template-columns: var(--explorer-track, var(--explorer-width-effective)) var(--explorer-gap, var(--split-rail-size)) minmax(0, 1fr) var(--secondary-gap, 0px) var(--secondary-editor-width-effective) var(--sidebar-gap, var(--split-rail-size)) var(--sidebar-track, var(--agent-width-effective));
     grid-template-rows: auto auto minmax(0, 1fr) var(--bottom-gap, 0px) auto auto;
     height: 100%;
     min-height: 0;
@@ -116,7 +119,7 @@
   }
 
   .fe-root.layout-desktop.te2-secondary-editor-docked {
-    --secondary-gap: 2px;
+    --secondary-gap: var(--split-rail-size);
     --secondary-editor-width-effective: var(--secondary-editor-dock-size);
   }
 
@@ -208,17 +211,13 @@
   }
 
   .layout-desktop:has(.terminal-drawer.open:not(.terminal-drawer--collapsed):not(.fullscreen)) {
-    --bottom-gap: 2px;
+    --bottom-gap: var(--split-rail-size);
   }
   .layout-desktop .extension-statusbar {
     grid-row: 6;
   }
   .layout-desktop :is(.fe-drawer,.fe-editor-container,.te2-secondary-editor-host,.terminal-drawer,.agent-drawer) {
     border-radius: 2px;
-  }
-  .layout-desktop .resize-handle::before {
-    background: var(--divider-ink);
-    opacity: .32;
   }
   .layout-desktop .terminal-header {
     cursor: default;
@@ -348,7 +347,7 @@
     grid-column: 1;
     grid-row: 4;
     height: var(--terminal-height, 340px);
-    border-top: 2px solid var(--border);
+    border-top: var(--split-rail-size) solid transparent;
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
     z-index: 50;
   }
@@ -471,11 +470,13 @@
 
   .resize-handle {
     --rail-direction: to right;
-    --rail-width: 2px;
+    --rail-width: var(--split-rail-size);
     --rail-height: 100%;
     --grip-width: 3px;
     --grip-height: 26px;
     --divider-ink: var(--te2-code-foreground, var(--foreground, #909090));
+    --rail-fill: var(--bg);
+    --rail-line: color-mix(in srgb, var(--divider-ink) 38%, var(--rail-fill));
     background: transparent;
     touch-action: none;
     position: relative;
@@ -485,7 +486,7 @@
   .resize-handle--terminal {
     --rail-direction: to bottom;
     --rail-width: 100%;
-    --rail-height: 2px;
+    --rail-height: var(--split-rail-size);
     --grip-width: 26px;
     --grip-height: 3px;
   }
@@ -499,9 +500,8 @@
   .resize-handle::before {
     width: var(--rail-width);
     height: var(--rail-height);
-    background: linear-gradient(var(--rail-direction), var(--divider-ink) 0 .5px,
-      transparent .5px 1.5px, var(--divider-ink) 1.5px 2px);
-    opacity: .38;
+    background: linear-gradient(var(--rail-direction), var(--rail-line) 0 1px,
+      var(--rail-fill) 1px 2px, var(--rail-line) 2px 3px);
   }
   .resize-handle::after {
     width: var(--grip-width);
@@ -510,18 +510,21 @@
     background: var(--divider-ink);
     opacity: .72;
   }
-  .resize-handle:hover,
-  .resize-handle.dragging {
+  .layout-desktop .resize-handle:is(:hover,.dragging) {
     --divider-ink: var(--primary, #3b82f6);
   }
-  .resize-handle:is(:hover,.dragging)::after,
-  :is(.hc-black,.hc-light) .resize-handle::before,
+  .layout-desktop .resize-handle:is(:hover,.dragging)::after,
   :is(.hc-black,.hc-light) .resize-handle::after {
     opacity: 1;
+  }
+  :is(.hc-black,.hc-light) .resize-handle::before {
+    --rail-line: var(--divider-ink);
   }
   @media (forced-colors: active) {
     .resize-handle::before, .resize-handle::after {
       --divider-ink: ButtonText;
+      --rail-line: ButtonText;
+      --rail-fill: Canvas;
       forced-color-adjust: none;
       opacity: 1;
     }
@@ -584,12 +587,19 @@
 
   /* Terminal resize handle (horizontal, mobile only) */
   .layout-mobile .resize-handle--terminal {
-    height: 5px;
+    height: calc(var(--editor-overlay-bottom) + var(--split-rail-size) + var(--drawer-tab-pad));
+    z-index: 51;
+    -webkit-tap-highlight-color: transparent;
     cursor: row-resize;
     grid-column: 1;
     grid-row: 4;
     align-self: start;
-    margin-top: -5px;
+    margin-top: calc(0px - var(--editor-overlay-bottom));
+  }
+  .layout-mobile .resize-handle--terminal::before,
+  .layout-mobile .resize-handle--terminal::after {
+    top: var(--editor-overlay-bottom);
+    bottom: auto;
   }
 
   .layout-desktop:has(.terminal-drawer.open) .resize-handle--terminal,
@@ -1125,7 +1135,7 @@
     flex-shrink: 0;
   }
   .drawer-tab {
-    padding: 5px 16px;
+    padding: var(--drawer-tab-pad) 16px;
     font-size: 12px;
     font-family: inherit;
     color: var(--fg-dim, #6e7681);

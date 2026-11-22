@@ -61,7 +61,7 @@ const INLINE_EDITOR_HOST_STYLE = `
   gap: 8px;
   left: 14px;
   right: 14px;
-  bottom: 14px;
+  bottom: var(--editor-overlay-bottom, 14px);
   min-width: 0;
   pointer-events: none;
   z-index: 35;
@@ -143,7 +143,7 @@ const INLINE_EDITOR_HOST_STYLE = `
 .fe-editor-container > .te2-mobile-second-window-trigger {
   position: absolute;
   left: 14px;
-  bottom: 14px;
+  bottom: var(--editor-overlay-bottom, 14px);
 }
 .te2-mobile-editor-overlay .te2-mobile-special-key[hidden],
 .te2-mobile-editor-overlay[hidden],

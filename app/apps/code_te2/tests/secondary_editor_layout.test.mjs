@@ -45,5 +45,7 @@ test('side rails retain their full height and mobile resize geometry is unchange
   }
   assert.equal(declaration('.layout-mobile .resize-handle--terminal', 'grid-column'), '1');
   assert.equal(declaration('.layout-mobile .resize-handle--terminal', 'grid-row'), '4');
-  assert.equal(declaration('.layout-mobile .resize-handle--terminal', 'margin-top'), '-5px');
+  const handle = '.layout-mobile .resize-handle--terminal';
+  assert.equal(declaration(handle, 'margin-top'), 'calc(0px - var(--editor-overlay-bottom))');
+  assert.equal(declaration(handle, 'height'), 'calc(var(--editor-overlay-bottom) + var(--split-rail-size) + var(--drawer-tab-pad))');
 });
