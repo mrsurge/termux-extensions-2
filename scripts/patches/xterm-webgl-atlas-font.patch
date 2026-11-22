@@ -1,0 +1,7 @@
+--- a/src/browser/renderer/shared/TextureAtlas.ts
++++ b/src/browser/renderer/shared/TextureAtlas.ts
+@@ -489,3 +489,3 @@
+     this._tmpCtx.font =
+-      `${fontStyle} ${fontWeight} ${this._config.fontSize * this._config.devicePixelRatio}px ${this._config.fontFamily}`;
++      `${fontStyle} ${fontWeight} ${this._config.fontSize * this._config.devicePixelRatio}px ${this._config.fontFamily}`.trim();
+     this._tmpCtx.textBaseline = TEXT_BASELINE;
