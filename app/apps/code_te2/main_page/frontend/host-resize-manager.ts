@@ -187,6 +187,39 @@ function suspendResizeInteraction(panel: Exclude<ResizePanel, null>): () => void
 export function initResizeManager(): () => void {
   disposeResizeManager?.();
   const disposePortrait = observePortraitDrawer();
+  const root = document.querySelector<HTMLElement>('.fe-root');
+  const toolbar = root?.querySelector<HTMLElement>('.fe-toolbar');
+  const ratioKey = 'code_te2_desktop_secondary_ratio';
+  let ratio: number | null = null;
+  let ratioDirty = false;
+  try {
+    const stored = localStorage.getItem(ratioKey);
+    if (stored?.trim() && +stored > 0 && +stored < 1) ratio = +stored;
+  } catch { /* Session-only layout. */ }
+  function splitSpan(): number {
+    if (!root || !toolbar || !root.matches('.layout-desktop.te2-secondary-editor-docked:not(.te2-secondary-editor-collapsed)')) return 0;
+    // The toolbar spans both editor tracks and their gutter, not the sidebars.
+    return Math.max(0, toolbar.getBoundingClientRect().width -
+      (parsePixelValue(getComputedStyle(root).getPropertyValue('--split-rail-size')) ?? 0));
+  }
+  function projectSplit(): void {
+    const span = splitSpan();
+    if (!root || !span) return;
+    const scale = Math.min(1, span / (PRIMARY_MIN_WIDTH + SECONDARY_MIN_WIDTH));
+    ratio ??= clamp(secondaryDockWidth() ?? 480, SECONDARY_MIN_WIDTH * scale, span - PRIMARY_MIN_WIDTH * scale) / span;
+    root.style.setProperty('--primary-floor', PRIMARY_MIN_WIDTH * scale + 'px');
+    root.style.setProperty('--secondary-floor', SECONDARY_MIN_WIDTH * scale + 'px');
+    root.style.setProperty('--primary-share', (1 - ratio) * 100 + 'fr');
+    root.style.setProperty('--secondary-share', ratio * 100 + 'fr');
+    root.dataset.desktopSplit = '';
+  }
+  const sizeObserver = toolbar ? new ResizeObserver(projectSplit) : null;
+  const modeObserver = toolbar ? new MutationObserver(projectSplit) : null;
+  if (toolbar && root) {
+    sizeObserver?.observe(toolbar);
+    modeObserver?.observe(root, {attributes:true, attributeFilter:['class']});
+    projectSplit();
+  }
   const handles = Array.from(document.querySelectorAll<HTMLElement>('.resize-handle'));
   let drag: ResizeDrag | null = null;
   let disposed = false;
@@ -204,6 +237,10 @@ export function initResizeManager(): () => void {
     current.restoreInteraction();
     if (current.panel === 'terminal') finishPortraitDrag();
     if (current.panel === 'secondary') {
+      if (ratioDirty && ratio !== null) {
+        ratioDirty = false;
+        try { localStorage.setItem(ratioKey, String(ratio)); } catch { /* optional */ }
+      }
       window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-end', {
         detail: { dockSize: currentPanelWidth('secondary') },
       }));
@@ -246,7 +283,16 @@ export function initResizeManager(): () => void {
       const width = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth(panel));
       document.documentElement.style.setProperty(panel === 'explorer' ? '--explorer-width' : '--agent-width', `${width}px`);
     } else if (panel === 'secondary') {
-      const width = clamp(startSize + startPos - event.clientX, SECONDARY_MIN_WIDTH, maxPanelWidth('secondary'));
+      const span = splitSpan();
+      const scale = Math.min(1, span / (PRIMARY_MIN_WIDTH + SECONDARY_MIN_WIDTH));
+      const requested = startSize + startPos - event.clientX;
+      const width = span ? clamp(requested, SECONDARY_MIN_WIDTH * scale, span - PRIMARY_MIN_WIDTH * scale)
+        : clamp(requested, SECONDARY_MIN_WIDTH, maxPanelWidth('secondary'));
+      if (span && scale === 1) {
+        ratio = width / span;
+        ratioDirty = true;
+        projectSplit();
+      }
       document.querySelector<HTMLElement>('.fe-root')?.style.setProperty('--secondary-editor-dock-size', `${width}px`);
       window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize', {
         detail: { dockSize: width },
@@ -285,6 +331,8 @@ export function initResizeManager(): () => void {
     disposed = true;
     finish();
     disposePortrait();
+    sizeObserver?.disconnect();
+    modeObserver?.disconnect();
     handles.forEach(handle => handle.removeEventListener('pointerdown', onStart));
     window.removeEventListener('pointermove', onMove, true);
     window.removeEventListener('pointerup', onEnd, true);

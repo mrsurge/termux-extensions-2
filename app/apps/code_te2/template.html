@@ -112,7 +112,7 @@
     box-sizing: border-box;
     border: 1px solid transparent;
     display: grid;
-    grid-template-columns: var(--explorer-track, var(--explorer-width-effective)) var(--explorer-gap, var(--split-rail-size)) minmax(0, 1fr) var(--secondary-gap, 0px) var(--secondary-editor-width-effective) var(--sidebar-gap, var(--split-rail-size)) var(--sidebar-track, var(--agent-width-effective));
+    grid-template-columns: var(--explorer-track, var(--explorer-width-effective)) var(--explorer-gap, var(--split-rail-size)) var(--primary-track, minmax(0, 1fr)) var(--secondary-gap, 0px) var(--secondary-editor-width-effective) var(--sidebar-gap, var(--split-rail-size)) var(--sidebar-track, var(--agent-width-effective));
     grid-template-rows: auto auto minmax(0, 1fr) var(--bottom-gap, 0px) auto auto;
     height: 100%;
     min-height: 0;
@@ -131,6 +131,10 @@
 
   .fe-root.layout-desktop.te2-secondary-editor-collapsed {
     --secondary-editor-width-effective: 52px;
+  }
+  .fe-root.layout-desktop.te2-secondary-editor-docked:not(.te2-secondary-editor-collapsed)[data-desktop-split] {
+    --primary-track: minmax(var(--primary-floor), var(--primary-share));
+    --secondary-editor-width-effective: minmax(var(--secondary-floor), var(--secondary-share));
   }
 
   /* Desktop toolbar spans both editor surfaces; side rails own their full height. */
