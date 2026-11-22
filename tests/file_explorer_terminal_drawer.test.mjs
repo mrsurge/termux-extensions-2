@@ -216,6 +216,7 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'Desktop' } });
   globalThis.document = { addEventListener() {}, removeEventListener() {}, createElement: () => new Element(), head: { append(node) { if (node.onload === null) return; queueMicrotask(() => node.onload?.()); } } };
   globalThis.window = { Terminal: View, FitAddon: { FitAddon: class { fit() {} } },
+    WebglAddon: { WebglAddon: class { dispose() {} onContextLoss() { return { dispose() {} }; } } },
     WebFontsAddon: { WebFontsAddon: class { async loadFonts() {} } },
     te2TerminalTouchSelection: { attach() { return { dispose() {} }; } },
     teUI: { dialog: { async confirm() { return true; } } } };

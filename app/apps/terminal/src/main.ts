@@ -1,6 +1,7 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
 import { bindTerminalContextMenu } from '../../../libs/terminal_runtime/terminal_context_menu';
 import { bindTerminalCursor } from '../../../libs/terminal_runtime/terminal_cursor';
+import { loadTerminalWebgl, attachTerminalWebgl } from '../../../libs/terminal_runtime/terminal_webgl';
 import { shiftTerminalText } from '../../../libs/terminal_runtime/terminal_shift';
 import { bindTerminalShiftButton } from '../../../libs/terminal_runtime/terminal_shift_button';
 import { bindSoftkeyHaptics } from '../../../libs/terminal_runtime/softkey-haptics';
@@ -1414,6 +1415,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
   }
 
+  let webglBinding: {dispose(): void} | null = null;
   function disposeSession(): void {
     emitTerminalImeIntent(false, 'dispose_session');
     state.wsDesiredId = null;
@@ -1439,6 +1441,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       // ignore
     }
     state.touchSelection = null;
+    webglBinding?.dispose(); webglBinding = null;
     try {
       state.term?.dispose();
     } catch {
@@ -1599,6 +1602,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     installGlobalViewportHandlers();
 
     const TerminalCtor = await ensureXterm();
+    const Webgl = await loadTerminalWebgl();
     const webFontsAddon = await prepareTerminalWebFonts();
     const term = new TerminalCtor({
       convertEol: true,
@@ -1615,6 +1619,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       term.loadAddon(webFontsAddon);
     }
     term.open(ui.termContainer);
+    try {
+      webglBinding = attachTerminalWebgl(term, Webgl, () => setStatus('WebGL context lost. Reopen the terminal.'));
+    } catch (error: unknown) {
+      term.dispose();
+      throw error;
+    }
     term.focus();
     emitTerminalImeIntent(true, 'select_shell');
     state.term = term;

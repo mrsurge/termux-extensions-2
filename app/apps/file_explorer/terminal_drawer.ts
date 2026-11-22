@@ -6,6 +6,7 @@ import { bindTerminalCursor } from '../../libs/terminal_runtime/terminal_cursor'
 import { shiftTerminalText } from '../../libs/terminal_runtime/terminal_shift';
 import { bindTerminalShiftButton } from '../../libs/terminal_runtime/terminal_shift_button';
 import { bindSoftkeyHaptics } from '../../libs/terminal_runtime/softkey-haptics';
+import { loadTerminalWebgl, attachTerminalWebgl } from '../../libs/terminal_runtime/terminal_webgl';
 
 interface Disposable { dispose(): void; cancelGesture?(): void }
 interface Terminal {
@@ -385,6 +386,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     const current = generation;
     mounting = (async () => {
       const api = await loadRuntime();
+      const Webgl = await loadTerminalWebgl();
       if (current !== generation || disposed) return;
       const view = new api.Terminal({ convertEol: true, cursorBlink: true, scrollback: 5000,
         fontFamily: TERMINAL_FONT_FAMILY, fontSize: fontSize.value,
@@ -392,7 +394,11 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       const fonts = new api.WebFontsAddon.WebFontsAddon(true);
       await fonts.loadFonts([TERMINAL_WEB_FONT_FAMILY]);
       if (current !== generation || disposed) { view.dispose(); return; }
-      terminal = view; view.loadAddon(fonts); fit = new api.FitAddon.FitAddon(); view.loadAddon(fit); view.open(viewport);
+      view.loadAddon(fonts); fit = new api.FitAddon.FitAddon(); view.loadAddon(fit); view.open(viewport);
+      try {
+        bindings.push(attachTerminalWebgl(view, Webgl, () => error(new Error('WebGL context lost. Reopen the terminal.'))));
+      } catch (cause: unknown) { view.dispose(); throw cause; }
+      terminal = view;
       updateZoomButtons();
       bindings.push({ dispose: bindTerminalContextMenu(viewport, view, error) });
       bindings.push(bindTerminalCursor(viewport, view));

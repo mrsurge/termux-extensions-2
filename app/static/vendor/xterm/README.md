@@ -11,3 +11,8 @@ Do not edit the minified browser bundle directly. Modify and validate the fork,
 run its browser TypeScript build and webpack package step, then copy
 `lib/xterm.js` and `css/xterm.css` into this directory. The detailed validation,
 publication, and rebase instructions are in `worktrees/xterm-te2/TE2_PATCH_GUIDE.md`.
+
+The Code TE2 drawer, standalone Terminal, and File Explorer terminal load the npm distribution of `xterm-addon-webgl@0.16.0`
+after opening xterm. Its browser bundle and MIT license are vendored here. The
+scoped 0.17.0 and 0.19.0 releases failed activation against this 5.3.0 fork.
+This renderer trial does not change the PTY, headless worker, or xterm core.

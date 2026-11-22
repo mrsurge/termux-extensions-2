@@ -100,6 +100,8 @@ interface XtermFitAddon {
   fit: () => void;
 }
 
+import { attachTerminalWebgl, loadTerminalWebgl, type TerminalWebglAddon } from '../../../../libs/terminal_runtime/terminal_webgl';
+
 interface XtermWebFontsAddon {
   dispose?: () => void;
   loadFonts: (fonts?: (string | FontFace)[]) => Promise<FontFace[]>;
@@ -149,7 +151,7 @@ interface XtermTerminal {
     end: { x: number; y: number };
   } | undefined;
   hasSelection?: () => boolean;
-  loadAddon: (addon: XtermFitAddon | XtermWebFontsAddon) => void;
+  loadAddon: (addon: XtermFitAddon | XtermWebFontsAddon | TerminalWebglAddon) => void;
   onData: (handler: (data: string) => void) => void;
   onResize: (handler: (size: { cols: number; rows: number }) => void) => XtermDisposable;
   onScroll?: (handler: (viewportY: number) => void) => XtermDisposable;
@@ -246,6 +248,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   } = options;
 
   let term: XtermTerminal | null = null;
+  let drawerWebgl: {dispose(): void} | null = null;
   let ws: TerminalSocket | null = null;
   let shellId: string | null = null;
   let fitAddon: XtermFitAddon | null = null;
@@ -1198,6 +1201,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       throw new Error('Terminal container not found');
     }
     const Terminal = await loadXterm();
+    const Webgl = await loadTerminalWebgl();
     const webFontsAddon = await prepareTerminalWebFonts();
 
     // FitAddon might be nested in exports object or directly on window
@@ -1221,12 +1225,20 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         foreground: '#e5e7eb',
       },
     });
-    term = nextTerm;
-
     fitAddon = new FitAddon();
     nextTerm.loadAddon(fitAddon);
     if (webFontsAddon) nextTerm.loadAddon(webFontsAddon);
     nextTerm.open(container);
+    try {
+      drawerWebgl = attachTerminalWebgl(nextTerm, Webgl, () => {
+        if (term === nextTerm) console.error('Drawer WebGL context lost. Reload the editor to recreate the renderer.');
+      });
+    } catch (error: unknown) {
+      nextTerm.dispose();
+      fitAddon = null;
+      throw new Error('Could not start the drawer WebGL renderer', { cause: error });
+    }
+    term = nextTerm;
     cursorBinding?.dispose();
     cursorBinding = bindTerminalCursor(container, nextTerm);
     disposeClipboardMenu?.();
@@ -1374,6 +1386,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       touchSelectionDisposable?.dispose();
       touchSelectionDisposable = null;
       disposeClipboardMenu?.(); disposeClipboardMenu = null;
+      drawerWebgl?.dispose(); drawerWebgl = null;
       term.dispose();
       cursorBinding?.dispose(); cursorBinding = null;
       term = null;
