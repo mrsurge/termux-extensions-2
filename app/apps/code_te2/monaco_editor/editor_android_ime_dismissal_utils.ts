@@ -1,18 +1,16 @@
-export const CEFRIUM_IME_DISMISSED_EVENT = 'te2:android-ime-dismissed';
+export const ANDROID_IME_DISMISSED_EVENT = 'te2:android-ime-dismissed';
 
-interface CefriumImeEditor {
+interface AndroidImeEditor {
   getDomNode?(): HTMLElement | null;
   hasTextFocus?(): boolean;
 }
 
-export function isCefriumAndroidRuntime(search: string): boolean {
-  const params = new URLSearchParams(search || '');
-  return params.get('gv_native') === '1'
-    && params.get('te2_renderer')?.trim().toLowerCase() === 'cefrium';
-}
+type KeyboardHostWindow = Window & {
+  electromux?: { virtualKeyboard?: { subscribe?: () => () => void } };
+};
 
-export function releaseCefriumEditorFocus(
-  editor: CefriumImeEditor,
+export function releaseAndroidEditorFocus(
+  editor: AndroidImeEditor,
   doc: Document = document,
 ): boolean {
   const editorDom = editor.getDomNode?.();
@@ -33,11 +31,10 @@ export function releaseCefriumEditorFocus(
   return doc.activeElement === focusTarget;
 }
 
-export function bindCefriumImeDismissal(
-  editor: CefriumImeEditor,
-  win: Window = window,
+export function bindAndroidImeDismissal(
+  editor: AndroidImeEditor,
+  win: KeyboardHostWindow = window,
 ): { dispose(): void } | null {
-  if (!isCefriumAndroidRuntime(win.location.search)) return null;
   const editorDom = editor.getDomNode?.();
   const host = editorDom?.closest<HTMLElement>('[data-te2-working-editor-host]')
     ?? editorDom?.closest<HTMLElement>('#editor-frame');
@@ -45,24 +42,32 @@ export function bindCefriumImeDismissal(
 
   let pendingFocusFrame: number | null = null;
   const onDismissed = (): void => {
-    releaseCefriumEditorFocus(editor, win.document);
+    releaseAndroidEditorFocus(editor, win.document);
     if (pendingFocusFrame !== null) {
       win.cancelAnimationFrame(pendingFocusFrame);
     }
     pendingFocusFrame = win.requestAnimationFrame(() => {
       pendingFocusFrame = null;
-      releaseCefriumEditorFocus(editor, win.document);
+      releaseAndroidEditorFocus(editor, win.document);
     });
   };
-  win.addEventListener(CEFRIUM_IME_DISMISSED_EVENT, onDismissed);
+  win.addEventListener(ANDROID_IME_DISMISSED_EVENT, onDismissed);
 
+  // Cefrium already emits the window event; Electromux opts each document in.
+  let unsubscribe: (() => void) | undefined;
+  try {
+    unsubscribe = win.electromux?.virtualKeyboard?.subscribe?.();
+  } catch {
+    // The host capability is optional. Keep listening for legacy delivery.
+  }
   return {
     dispose() {
-      win.removeEventListener(CEFRIUM_IME_DISMISSED_EVENT, onDismissed);
+      win.removeEventListener(ANDROID_IME_DISMISSED_EVENT, onDismissed);
       if (pendingFocusFrame !== null) {
         win.cancelAnimationFrame(pendingFocusFrame);
         pendingFocusFrame = null;
       }
+      unsubscribe?.();
     },
   };
 }

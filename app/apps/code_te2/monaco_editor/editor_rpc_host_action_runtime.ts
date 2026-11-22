@@ -3,7 +3,7 @@ import type { EditorReadinessState } from './editor_renderer_context.ts';
 import { bindFocusRelay } from './editor_rpc_focus_relay_utils.ts';
 import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.ts';
 import { bindAndroidKeyboardRecovery } from './editor_android_keyboard_recovery_utils.ts';
-import { bindCefriumImeDismissal } from './editor_cefrium_ime_dismissal_utils.ts';
+import { bindAndroidImeDismissal } from './editor_android_ime_dismissal_utils.ts';
 import { bindMobileEditorSpecialKeys, type MobileEditorInputBinding } from './editor_mobile_special_keys_utils.ts';
 import {
   EDITOR_RPC_METHODS,
@@ -68,7 +68,7 @@ export function createEditorRpcHostActionRuntime(
   let focusDisposable: DisposableLike | null = null;
   let mobileCtrlDisposable: DisposableLike | null = null;
   let androidKeyboardRecoveryDisposable: DisposableLike | null = null;
-  let cefriumImeDismissalDisposable: DisposableLike | null = null;
+  let androidImeDismissalDisposable: DisposableLike | null = null;
   let mobileSpecialKeysDisposable: DisposableLike | null = null;
   const readiness = (): EditorReadinessState => deps.getReadinessState?.() ?? deps.getWindow();
 
@@ -199,17 +199,17 @@ export function createEditorRpcHostActionRuntime(
 
   function bindNativeImeDismissal(): void {
     try {
-      cefriumImeDismissalDisposable?.dispose?.();
-      cefriumImeDismissalDisposable = null;
+      androidImeDismissalDisposable?.dispose?.();
+      androidImeDismissalDisposable = null;
 
       const editor = resolveActiveEditor();
       if (!editor) return;
-      cefriumImeDismissalDisposable = bindCefriumImeDismissal(
+      androidImeDismissalDisposable = bindAndroidImeDismissal(
         editor,
         deps.getWindow(),
       );
     } catch (error) {
-      console.warn('[cefrium_ime_dismissal] bind failed', error);
+      console.warn('[android_ime_dismissal] bind failed', error);
     }
   }
 
@@ -254,7 +254,7 @@ export function createEditorRpcHostActionRuntime(
         () => focusDisposable?.dispose?.(),
         () => mobileCtrlDisposable?.dispose?.(),
         () => androidKeyboardRecoveryDisposable?.dispose?.(),
-        () => cefriumImeDismissalDisposable?.dispose?.(),
+        () => androidImeDismissalDisposable?.dispose?.(),
         () => mobileSpecialKeysDisposable?.dispose?.(),
       ];
       adapterStateUnsubscribe = projectSwitchingUnsubscribe = projectSwitchedUnsubscribe = null;
@@ -264,7 +264,7 @@ export function createEditorRpcHostActionRuntime(
         }
       }
       focusDisposable = mobileCtrlDisposable = androidKeyboardRecoveryDisposable = null;
-      cefriumImeDismissalDisposable = mobileSpecialKeysDisposable = null;
+      androidImeDismissalDisposable = mobileSpecialKeysDisposable = null;
     },
   };
 }

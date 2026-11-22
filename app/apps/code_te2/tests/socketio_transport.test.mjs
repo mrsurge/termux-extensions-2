@@ -1737,14 +1737,13 @@ test('Android Gecko keyboard recovery synchronously restores focus', async () =>
   );
 });
 
-test('Android Cefrium IME dismissal transfers the active editor to the toolbar', async () => {
+test('Android IME dismissal transfers the active editor to the toolbar', async () => {
   const {
-    bindCefriumImeDismissal,
-    CEFRIUM_IME_DISMISSED_EVENT,
-    isCefriumAndroidRuntime,
-    releaseCefriumEditorFocus,
+    bindAndroidImeDismissal,
+    ANDROID_IME_DISMISSED_EVENT,
+    releaseAndroidEditorFocus,
   } = await importTypeScript(
-    'monaco_editor/editor_cefrium_ime_dismissal_utils.ts',
+    'monaco_editor/editor_android_ime_dismissal_utils.ts',
   );
   const calls = [];
   const input = {};
@@ -1767,18 +1766,9 @@ test('Android Cefrium IME dismissal transfers the active editor to the toolbar',
     }),
   };
 
-  assert.equal(releaseCefriumEditorFocus(editor, doc), true);
+  assert.equal(releaseAndroidEditorFocus(editor, doc), true);
   assert.deepEqual(calls, [['toolbar-focus']]);
   assert.equal(doc.activeElement, toolbarButton);
-  assert.equal(
-    isCefriumAndroidRuntime('?gv_native=1&te2_renderer=cefrium'),
-    true,
-  );
-  assert.equal(
-    isCefriumAndroidRuntime('?gv_native=1&te2_renderer=gecko'),
-    false,
-  );
-
   calls.length = 0;
   doc.activeElement = input;
   let focusAttempts = 0;
@@ -1808,9 +1798,9 @@ test('Android Cefrium IME dismissal transfers the active editor to the toolbar',
       frames.delete(frameId);
     },
   };
-  const binding = bindCefriumImeDismissal(editor, win);
+  const binding = bindAndroidImeDismissal(editor, win);
   assert.ok(binding);
-  listeners.get(CEFRIUM_IME_DISMISSED_EVENT)();
+  listeners.get(ANDROID_IME_DISMISSED_EVENT)();
   assert.equal(focusAttempts, 1);
   assert.equal(doc.activeElement, input);
   assert.equal(frames.size, 1);
@@ -1819,11 +1809,26 @@ test('Android Cefrium IME dismissal transfers the active editor to the toolbar',
   assert.equal(doc.activeElement, toolbarButton);
 
   doc.activeElement = input;
-  listeners.get(CEFRIUM_IME_DISMISSED_EVENT)();
+  listeners.get(ANDROID_IME_DISMISSED_EVENT)();
   assert.equal(frames.size, 2);
   binding.dispose();
   assert.deepEqual(cancelledFrames, [2]);
-  assert.equal(listeners.has(CEFRIUM_IME_DISMISSED_EVENT), false);
+  assert.equal(listeners.has(ANDROID_IME_DISMISSED_EVENT), false);
+  let subscribed = 0;
+  let unsubscribed = 0;
+  delete win.location;
+  win.electromux = {virtualKeyboard: {subscribe() {
+    assert.ok(listeners.has(ANDROID_IME_DISMISSED_EVENT));
+    subscribed++;
+    return () => unsubscribed++;
+  }}};
+  bindAndroidImeDismissal(editor, win).dispose();
+  assert.deepEqual([subscribed, unsubscribed], [1, 1]);
+  win.electromux.virtualKeyboard.subscribe = () => { throw Error('unavailable'); };
+  const fallback = bindAndroidImeDismissal(editor, win);
+  assert.ok(listeners.has(ANDROID_IME_DISMISSED_EVENT));
+  fallback.dispose();
+
 });
 
 test('WBA startup tracing is bounded and does not initiate connections or expose RPC params', async () => {
