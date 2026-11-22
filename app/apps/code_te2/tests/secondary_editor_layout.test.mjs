@@ -21,7 +21,7 @@ test('desktop secondary editor and vertical divider stop before the terminal row
     '.layout-desktop .te2-secondary-editor-host',
     '.layout-desktop.te2-secondary-editor-docked .resize-handle--secondary',
   ]) {
-    assert.equal(declaration(selector, 'grid-column'), '3');
+    assert.equal(declaration(selector, 'grid-column'), selector.endsWith('-host') ? '5' : '4');
     assert.equal(declaration(selector, 'grid-row'), '2 / 4');
   }
 });
@@ -31,17 +31,17 @@ test('desktop terminal and its resize handle span both editor columns', () => {
     '.layout-desktop .terminal-drawer',
     '.layout-desktop .resize-handle--terminal',
   ]) {
-    assert.equal(declaration(selector, 'grid-column'), '2 / 4');
-    assert.equal(declaration(selector, 'grid-row'), '4');
+    assert.equal(declaration(selector, 'grid-column'), '3 / 6');
+    assert.equal(declaration(selector, 'grid-row'), selector.endsWith('terminal-drawer') ? '5' : '4');
   }
   // The native secondary WebContentsView paints above DOM content. Keep the
-  // whole resize hitbox in the terminal row instead of underneath that view.
+  // sash centered in its own row, outside the native pane's bounds.
   assert.equal(declaration('.layout-desktop .resize-handle--terminal', 'margin-top'), '0');
 });
 
 test('side rails retain their full height and mobile resize geometry is unchanged', () => {
   for (const selector of ['.layout-desktop .fe-drawer', '.layout-desktop .agent-drawer']) {
-    assert.equal(declaration(selector, 'grid-row'), '1 / 5');
+    assert.equal(declaration(selector, 'grid-row'), '1 / 6');
   }
   assert.equal(declaration('.layout-mobile .resize-handle--terminal', 'grid-column'), '1');
   assert.equal(declaration('.layout-mobile .resize-handle--terminal', 'grid-row'), '4');

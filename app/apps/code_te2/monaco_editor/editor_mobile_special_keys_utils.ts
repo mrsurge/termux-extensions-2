@@ -269,7 +269,16 @@ export function bindMobileEditorSpecialKeys(
   const trigger = createOverlayButton(doc, 'Ctrl', 'Toggle editor special keys');
   trigger.classList.add('te2-mobile-special-key-trigger');
 
-  const hover = createOverlayButton(doc, '\ud83d\ude81', 'Show hover');
+  const hover = createOverlayButton(doc, '', 'Show hover');
+  // Match the touch-selection context menu's Hover pointer.
+  const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.setAttribute('focusable', 'false');
+  const glyph = doc.createElementNS(icon.namespaceURI!, 'path');
+  glyph.setAttribute('d', 'M3 3l5 15 3-6 6-3z M15 15l5 5');
+  icon.append(glyph);
+  hover.append(icon);
   const context = createOverlayButton(doc, 'Ctx', 'Context menu');
   const cut = createOverlayButton(doc, 'Cut', 'Cut selection');
   const copy = createOverlayButton(doc, 'Copy', 'Copy selection');
@@ -427,6 +436,7 @@ export function bindMobileEditorSpecialKeys(
 
   const syncOverlayOwner = (): void => {
     overlay.hidden = currentMobileEditorOwner(win) !== role;
+    overlay.inert = overlay.hidden;
   };
   const onOwnerChanged = (): void => syncOverlayOwner();
   const onEditorFocus = (): void => publishMobileEditorFocus(win, role);

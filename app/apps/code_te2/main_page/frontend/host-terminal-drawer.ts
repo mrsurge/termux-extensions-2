@@ -1448,6 +1448,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     let isResizing = false;
 
     header.addEventListener('mousedown', (e: MouseEvent) => {
+      // Desktop tabs share the dedicated split gutter, never this header.
+      if (drawer.closest('.layout-desktop')) return;
       // Only resize on header background, not interactive controls
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.closest('.terminal-shell-dropdown')) return;

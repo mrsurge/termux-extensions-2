@@ -219,6 +219,11 @@ class FakeDocument extends EventTarget {
     };
   }
 
+  createElementNS(namespaceURI, tagName) {
+    const el = this.createElement(tagName);
+    el.namespaceURI = namespaceURI;
+    return el;
+  }
   createElement(tagName) {
     return new FakeElement(tagName, this);
   }

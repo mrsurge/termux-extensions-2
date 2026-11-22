@@ -56,9 +56,24 @@ export function observePortraitDrawer(): () => void {
     apply(g, preferred);
   }
   const schedule = (): void => { if (!frame) frame = window.requestAnimationFrame(refresh); };
+  let motionTimer = 0;
+  const stopMotion = (): void => {
+    window.clearTimeout(motionTimer);
+    drawer.removeAttribute('data-focus-handoff');
+  };
+  const onFocus = (): void => {
+    if (geometry() && !dirty) {
+      window.clearTimeout(motionTimer);
+      drawer.setAttribute('data-focus-handoff','');
+      motionTimer = window.setTimeout(stopMotion,200);
+    }
+    schedule();
+  };
+  const onViewport = (): void => { stopMotion(); schedule(); };
   adjust = height => {
     const g = geometry();
     if (!g) return false;
+    stopMotion();
     const effective = projectDrawer(g, (height-g.base)/g.usable);
     preferred = Math.max(0, Math.min(1, (effective-g.base)/g.usable));
     dirty = true;
@@ -77,14 +92,15 @@ export function observePortraitDrawer(): () => void {
     if (el) mo.observe(el,{attributes:true,attributeFilter:['hidden','class']});
   }
   schedule();
-  window.addEventListener(MOBILE_EDITOR_OWNER_EVENT,schedule);
+  window.addEventListener(MOBILE_EDITOR_OWNER_EVENT,onFocus);
   window.addEventListener(MOBILE_EDITOR_PANEL_STATE_EVENT,schedule);
-  window.visualViewport?.addEventListener('resize',schedule);
+  window.visualViewport?.addEventListener('resize',onViewport);
   return () => {
     window.cancelAnimationFrame(frame); ro.disconnect(); mo.disconnect();
-    window.removeEventListener(MOBILE_EDITOR_OWNER_EVENT,schedule);
+    stopMotion();
+    window.removeEventListener(MOBILE_EDITOR_OWNER_EVENT,onFocus);
     window.removeEventListener(MOBILE_EDITOR_PANEL_STATE_EVENT,schedule);
-    window.visualViewport?.removeEventListener('resize',schedule);
+    window.visualViewport?.removeEventListener('resize',onViewport);
     adjust = commit = undefined;
   };
 }

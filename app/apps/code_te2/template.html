@@ -103,8 +103,8 @@
 
   .fe-root.layout-desktop {
     display: grid;
-    grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--secondary-editor-width-effective) var(--agent-width-effective);
-    grid-template-rows: auto auto 1fr auto auto;
+    grid-template-columns: var(--explorer-track, var(--explorer-width-effective)) var(--explorer-gap, 2px) minmax(0, 1fr) var(--secondary-gap, 0px) var(--secondary-editor-width-effective) var(--sidebar-gap, 2px) var(--sidebar-track, var(--agent-width-effective));
+    grid-template-rows: auto auto minmax(0, 1fr) var(--bottom-gap, 0px) auto auto;
     height: 100%;
     min-height: 0;
     min-width: 0;
@@ -112,10 +112,11 @@
   }
 
   .fe-root.layout-desktop.explorer-collapsed {
-    grid-template-columns: 0px minmax(0, 1fr) var(--secondary-editor-width-effective) var(--agent-width-effective);
+    --explorer-track: 0px; --explorer-gap: 0px;
   }
 
   .fe-root.layout-desktop.te2-secondary-editor-docked {
+    --secondary-gap: 2px;
     --secondary-editor-width-effective: var(--secondary-editor-dock-size);
   }
 
@@ -125,14 +126,14 @@
 
   /* Desktop toolbar spans both editor surfaces; side rails own their full height. */
   .layout-desktop .fe-toolbar {
-    grid-column: 2 / 4;
+    grid-column: 3 / 6;
     grid-row: 1;
     z-index: 40;
   }
 
   /* Recent-file tabs stay with the primary editor; side rails own columns 1 and 4. */
   .layout-desktop .fe-file-tabs {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 2;
   }
 
@@ -145,8 +146,8 @@
     bottom: auto;
     width: 100%;
     grid-column: 1;
-    grid-row: 1 / 5;
-    border-right: 1px solid var(--border);
+    grid-row: 1 / 6;
+    border-right: 0;
   }
 
   .layout-desktop.explorer-collapsed .fe-drawer {
@@ -164,7 +165,7 @@
 
   /* Editor in middle column - now starts at row 3 */
   .layout-desktop .fe-editor-container {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 3;
     position: relative;
     overflow: visible;
@@ -178,9 +179,9 @@
     top: auto;
     bottom: auto;
     width: 100% !important;
-    grid-column: 4;
-    grid-row: 1 / 5;
-    border-left: 1px solid var(--border);
+    grid-column: 7;
+    grid-row: 1 / 6;
+    border-left: 0;
     transition: none !important;
     overflow-y: auto;
     z-index: 50;
@@ -203,15 +204,28 @@
 
   /* Adjust grid when sidebar is closed */
   .layout-desktop:has(.agent-drawer:not(.open)) {
-    grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--secondary-editor-width-effective) 0px;
+     --sidebar-track: 0px; --sidebar-gap: 0px;
   }
 
-  .layout-desktop.explorer-collapsed:has(.agent-drawer:not(.open)) {
-    grid-template-columns: 0px minmax(0, 1fr) var(--secondary-editor-width-effective) 0px;
+  .layout-desktop:has(.terminal-drawer.open:not(.terminal-drawer--collapsed):not(.fullscreen)) {
+    --bottom-gap: 2px;
+  }
+  .layout-desktop .extension-statusbar {
+    grid-row: 6;
+  }
+  .layout-desktop :is(.fe-drawer,.fe-editor-container,.te2-secondary-editor-host,.terminal-drawer,.agent-drawer) {
+    border-radius: 2px;
+  }
+  .layout-desktop .resize-handle::before {
+    background: var(--divider-ink);
+    opacity: .32;
+  }
+  .layout-desktop .terminal-header {
+    cursor: default;
   }
 
   .layout-desktop .te2-secondary-editor-host {
-    grid-column: 3;
+    grid-column: 5;
     grid-row: 2 / 4;
     min-width: 0;
     min-height: 0;
@@ -236,11 +250,11 @@
     bottom: auto;
     left: auto;
     right: auto;
-    grid-column: 2 / 4;
-    grid-row: 4;
+    grid-column: 3 / 6;
+    grid-row: 5;
     height: var(--terminal-height, 340px);
-    border-top: 2px solid var(--border);
-    transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
+    border-top: 0;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
   }
 
   /* When terminal is "closed" (open class NOT present) */
@@ -254,7 +268,7 @@
 
   /* Adjust grid when terminal is closed in desktop */
   .layout-desktop:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
-    grid-template-rows: auto auto 1fr 0px auto;
+    grid-template-rows: auto auto minmax(0, 1fr) 0 0 auto;
   }
 
   .layout-desktop .terminal-drawer.terminal-drawer--collapsed {
@@ -274,7 +288,7 @@
   }
 
   .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) {
-    grid-template-rows: auto auto 1fr 2px auto;
+    grid-template-rows: auto auto minmax(0, 1fr) 0 2px auto;
   }
 
   /* Fix z-index for dropdowns in desktop mode */
@@ -351,6 +365,11 @@
     min-height: 0;
     box-sizing: border-box;
     transition-property: opacity, visibility;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .layout-mobile:not(.desktop-user-agent) .terminal-drawer.open[data-focus-handoff]:not(.fullscreen):not(.terminal-drawer--collapsed) {
+      transition: height 150ms ease;
+    }
   }
   .layout-mobile.desktop-user-agent:has(.terminal-drawer.open:not(.fullscreen):not(.terminal-drawer--collapsed)) {
     grid-template-rows: auto auto minmax(0, 1fr) minmax(0, max-content) auto auto;
@@ -451,17 +470,61 @@
      ======================================== */
 
   .resize-handle {
+    --rail-direction: to right;
+    --rail-width: 2px;
+    --rail-height: 100%;
+    --grip-width: 3px;
+    --grip-height: 26px;
+    --divider-ink: var(--te2-code-foreground, var(--foreground, #909090));
     background: transparent;
     touch-action: none;
     position: relative;
     z-index: 50;
-    transition: background 0.2s;
     user-select: none;
   }
-
+  .resize-handle--terminal {
+    --rail-direction: to bottom;
+    --rail-width: 100%;
+    --rail-height: 2px;
+    --grip-width: 26px;
+    --grip-height: 3px;
+  }
+  .resize-handle::before, .resize-handle::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    pointer-events: none;
+  }
+  .resize-handle::before {
+    width: var(--rail-width);
+    height: var(--rail-height);
+    background: linear-gradient(var(--rail-direction), var(--divider-ink) 0 .5px,
+      transparent .5px 1.5px, var(--divider-ink) 1.5px 2px);
+    opacity: .38;
+  }
+  .resize-handle::after {
+    width: var(--grip-width);
+    height: var(--grip-height);
+    border-radius: 2px;
+    background: var(--divider-ink);
+    opacity: .72;
+  }
   .resize-handle:hover,
   .resize-handle.dragging {
-    background: var(--primary, #3b82f6);
+    --divider-ink: var(--primary, #3b82f6);
+  }
+  .resize-handle:is(:hover,.dragging)::after,
+  :is(.hc-black,.hc-light) .resize-handle::before,
+  :is(.hc-black,.hc-light) .resize-handle::after {
+    opacity: 1;
+  }
+  @media (forced-colors: active) {
+    .resize-handle::before, .resize-handle::after {
+      --divider-ink: ButtonText;
+      forced-color-adjust: none;
+      opacity: 1;
+    }
   }
 
   /* Hide all handles by default */
@@ -474,10 +537,9 @@
     display: block;
     width: 6px;
     cursor: col-resize;
-    grid-column: 1;
-    grid-row: 1 / 5;
-    justify-self: end;
-    transform: translateX(100%);
+    grid-column: 2;
+    grid-row: 1 / 6;
+    justify-self: center;
     z-index: 260;
     touch-action: none;
   }
@@ -491,10 +553,9 @@
     display: block;
     width: 6px;
     cursor: col-resize;
-    grid-column: 4;
-    grid-row: 1 / 5;
-    justify-self: start;
-    transform: translateX(-100%);
+    grid-column: 6;
+    grid-row: 1 / 6;
+    justify-self: center;
     z-index: 220;
     touch-action: none;
   }
@@ -504,10 +565,9 @@
     display: block;
     width: 6px;
     cursor: col-resize;
-    grid-column: 3;
+    grid-column: 4;
     grid-row: 2 / 4;
-    justify-self: start;
-    transform: translateX(-100%);
+    justify-self: center;
     z-index: 280;
     touch-action: none;
   }
@@ -516,9 +576,9 @@
   .layout-desktop .resize-handle--terminal {
     height: 5px;
     cursor: row-resize;
-    grid-column: 2 / 4;
+    grid-column: 3 / 6;
     grid-row: 4;
-    align-self: start;
+    align-self: center;
     margin-top: 0;
   }
 
@@ -550,7 +610,8 @@
   }
 
   /* Hide resize handles when panels are closed */
-  .layout-desktop .agent-drawer:not(.open) ~ .resize-handle--agent {
+  .layout-desktop:not(:has(.agent-drawer.open)) .resize-handle--agent,
+  .fe-root:has(.terminal-drawer:is(.fullscreen,.terminal-drawer--collapsed)) .resize-handle--terminal {
     display: none;
   }
 

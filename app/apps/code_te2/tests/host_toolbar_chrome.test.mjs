@@ -81,15 +81,15 @@ test('toolbar and Drafts overlay keep the intended source structure', async () =
   );
   assert.match(
     template,
-    /\.layout-desktop \.fe-toolbar\s*\{[\s\S]*?grid-column:\s*2 \/ 4/,
+    /\.layout-desktop \.fe-toolbar\s*\{[^}]*grid-column:\s*3 \/ 6/,
   );
   assert.match(
     template,
-    /\.layout-desktop \.te2-secondary-editor-host\s*\{[\s\S]*?grid-column:\s*3;[\s\S]*?grid-row:\s*2 \/ 5/,
+    /\.layout-desktop \.te2-secondary-editor-host\s*\{[^}]*grid-column:\s*5;[^}]*grid-row:\s*2 \/ 4/,
   );
   assert.match(
     template,
-    /\.layout-desktop \.agent-drawer\s*\{[\s\S]*?grid-column:\s*4/,
+    /\.layout-desktop \.agent-drawer\s*\{[^}]*grid-column:\s*7/,
   );
   assert.match(
     template,
@@ -101,7 +101,7 @@ test('toolbar and Drafts overlay keep the intended source structure', async () =
   );
   assert.match(
     template,
-    /\.layout-desktop\.te2-secondary-editor-docked \.resize-handle--secondary\s*\{[\s\S]*?grid-column:\s*3/,
+    /\.layout-desktop\.te2-secondary-editor-docked \.resize-handle--secondary\s*\{[^}]*grid-column:\s*4/,
   );
   assert.match(resizeManager, /code-te2:secondary-editor-resize-start/);
   assert.match(resizeManager, /code-te2:secondary-editor-resize-end/);

@@ -76,6 +76,7 @@ const INLINE_EDITOR_HOST_STYLE = `
 .te2-mobile-editor-overlay-left {
   flex: 1 1 auto;
   min-width: 0;
+  padding-block: 2px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
@@ -91,21 +92,53 @@ const INLINE_EDITOR_HOST_STYLE = `
 .fe-editor-container > .te2-mobile-editor-overlay-with-keyboard-recovery {
   right: 66px;
 }
+:root.vs {
+  --te2-overlay-border: #b9b9b9;
+  --te2-overlay-label: #595959;
+}
+:is(:root.hc-black,:root.hc-light) {
+  --te2-overlay-border: var(--te2-code-foreground);
+  --te2-overlay-label: var(--te2-code-foreground);
+  --te2-overlay-fill: var(--te2-code-background);
+}
 .te2-mobile-editor-overlay .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger,
 .fe-editor-container > .te2-mobile-second-window-trigger {
   flex: 0 0 44px;
   width: 44px;
   height: 44px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid var(--te2-overlay-border, #565656);
   border-radius: 12px;
-  background: rgba(24, 28, 34, 0.34);
-  color: rgba(255, 255, 255, 0.58);
+  background: var(--te2-overlay-fill, transparent);
+  color: var(--te2-overlay-label, #b0b0b0);
   font: 600 0.72rem/1 'JetBrains Mono Nerd', 'JetBrains Mono', monospace;
   touch-action: manipulation;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   z-index: 35;
+}
+@supports ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))) {
+  :root:not(.hc-black):not(.hc-light) :is(.te2-mobile-editor-overlay, .fe-editor-container) .te2-mobile-special-key-overlay-trigger {
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+}
+:is(.hc-black,.hc-light) .te2-mobile-special-key-overlay-trigger { outline: 1px solid currentColor; }
+@media (forced-colors: active) {
+  .te2-mobile-special-key-overlay-trigger { outline: 1px solid ButtonText; }
+}
+.te2-mobile-editor-overlay button svg {
+  width: 19px; height: 19px; vertical-align: middle; pointer-events: none;
+  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports (transition-behavior: allow-discrete) {
+    .te2-mobile-editor-overlay {
+      transition: opacity 150ms ease, display 150ms allow-discrete;
+    }
+    .te2-mobile-editor-overlay[hidden] { opacity: 0; }
+    @starting-style { .te2-mobile-editor-overlay:not([hidden]) { opacity: 0; } }
+  }
 }
 .fe-editor-container > .te2-mobile-second-window-trigger {
   position: absolute;
