@@ -33,8 +33,8 @@ function statusText(state, ownerLabel = "Electron") {
     : `Start a loopback-only TE2 framework at ${state.localOrigin}`;
 }
 
-function refreshLauncherSurfaces() {
-  window.dispatchEvent(new CustomEvent("te2:launcher-refresh"));
+function refreshLauncherApps() {
+  window.dispatchEvent(new CustomEvent("te2:launcher-apps-refresh"));
 }
 
 export const localFrameworkExtension = {
@@ -53,7 +53,7 @@ export const localFrameworkExtension = {
       try {
         state = await operation();
         render();
-        refreshLauncherSurfaces();
+        refreshLauncherApps();
       } catch (error) {
         host.toast(error?.message || "Local framework action failed");
         await refresh();
@@ -240,7 +240,7 @@ export const localFrameworkExtension = {
       const changed = state && ["phase", "ownership", "selected"].some(key => state[key] !== nextState[key]);
       state = nextState;
       render();
-      if (changed) refreshLauncherSurfaces();
+      if (changed) refreshLauncherApps();
     });
     void refresh();
 
