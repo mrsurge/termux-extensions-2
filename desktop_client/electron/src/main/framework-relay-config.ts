@@ -1,10 +1,13 @@
 import { randomInt, randomUUID } from "node:crypto";
-import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { link, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { te2ConfigHome } from "./te2-paths";
 
 // Separate from editable endpoint settings: Save must never rotate this origin.
-export async function readPreferredRelayPort(environment = process.env): Promise<number> {
+export async function readPreferredRelayPort(
+  environment = process.env,
+  createHardLink: typeof link = link,
+): Promise<number> {
   const root = te2ConfigHome(environment);
   const path = join(root, "desktop-framework-relay.json");
   function decode(raw: string): number {
@@ -19,14 +22,26 @@ export async function readPreferredRelayPort(environment = process.env): Promise
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   await mkdir(root, { recursive: true, mode: 0o700 });
   const port = randomInt(49152, 65536);
-  const temporary = `${path}.${randomUUID()}.tmp`;
+  const candidate = join(root, `.desktop-framework-relay.${randomUUID()}.json`);
+  let keepCandidate = false;
   try {
-    await writeFile(temporary, `${JSON.stringify({ version: 1, preferredPort: port })}\n`, { flag: "wx", mode: 0o600 });
+    await writeFile(candidate, `${JSON.stringify({ version: 1, preferredPort: port })}\n`, { flag: "wx", mode: 0o600 });
     // Publish a complete file without replacing another startup's winner.
-    await link(temporary, path);
+    try {
+      await createHardLink(candidate, path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EACCES" && code !== "EPERM" && code !== "EOPNOTSUPP") throw error;
+      // Android app-data policy can deny hard links. A relative symlink also
+      // publishes the completed JSON atomically and fails if another caller won.
+      await symlink(basename(candidate), path);
+      keepCandidate = true;
+    }
     return port;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     return decode(await readFile(path, "utf8"));
-  } finally { await rm(temporary, { force: true }); }
+  } finally {
+    if (!keepCandidate) await rm(candidate, { force: true });
+  }
 }
