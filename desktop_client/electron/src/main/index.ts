@@ -760,6 +760,8 @@ function installContextMenu(
   contents: WebContents,
   explicitOwnerWindow?: BrowserWindow | (() => BrowserWindow | null),
 ): void {
+  // Chromium owns the mobile selection toolbar and its editing commands.
+  if (process.platform === "android" && "checkAndroidPermissions" in app) return;
   contents.on("context-menu", async (event, params) => {
     event.preventDefault();
     // A terminal owns this gesture even when it forwards mouse input to a TUI.
