@@ -609,7 +609,7 @@ def ensure_desktop_runtime(
         published = False
         try:
             if force or not _runtime_is_ready(target, expected):
-                _check_free_space(cache_base)
+                #_check_free_space(cache_base)
                 stage = runtimes / f".{fingerprint}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
                 try:
                     _build_runtime(
