@@ -20,6 +20,7 @@ import { clearFrameworkAssetCaches } from "./asset-cache";
 import { DesktopAssetManager, MIME_TYPES } from "./assets";
 import { installCloseOnFocusHandoff } from "./focus-handoff-close-policy";
 import { installChromiumScrollbars } from "./chromium-scrollbars";
+import { installTextContextMenu } from "./text-context-menu";
 import { DesktopDialogHost } from "./dialog-host";
 import { toggleDetachedDevTools } from "./devtools";
 import {
@@ -760,41 +761,13 @@ function installContextMenu(
   contents: WebContents,
   explicitOwnerWindow?: BrowserWindow | (() => BrowserWindow | null),
 ): void {
-  // Chromium owns the mobile selection toolbar and its editing commands.
+  // Use Chromium’s native text-selection toolbar on Electromux Android.
   if (process.platform === "android" && "checkAndroidPermissions" in app) return;
-  contents.on("context-menu", async (event, params) => {
-    event.preventDefault();
-    // A terminal owns this gesture even when it forwards mouse input to a TUI.
-    const terminalHandled = await Promise.all(contents.mainFrame.framesInSubtree.map(frame =>
-      frame.executeJavaScript("Date.now() - Number(document.documentElement.dataset.te2TerminalContextAt || 0) < 1000")
-        .catch(() => false),
-    ));
-    if (contents.isDestroyed() || terminalHandled.some(Boolean)) return;
-    contents.focus();
-    const canCopy = params.editFlags.canCopy || Boolean(params.selectionText);
-    const canPaste = params.editFlags.canPaste || params.isEditable;
-    const menu = Menu.buildFromTemplate([
-      {
-        label: "Copy",
-        accelerator: "CmdOrCtrl+C",
-        enabled: canCopy,
-        click: () => contents.copy(),
-      },
-      {
-        label: "Paste",
-        accelerator: "CmdOrCtrl+V",
-        enabled: canPaste,
-        click: () => contents.paste(),
-      },
-    ]);
+  installTextContextMenu(contents, () => {
     const configuredOwner = typeof explicitOwnerWindow === "function"
       ? explicitOwnerWindow()
       : explicitOwnerWindow;
-    const ownerWindow =
-      configuredOwner || BrowserWindow.fromWebContents(contents) || mainWindow;
-    if (ownerWindow && !ownerWindow.isDestroyed()) {
-      menu.popup({ window: ownerWindow });
-    }
+    return configuredOwner || BrowserWindow.fromWebContents(contents) || mainWindow;
   });
 }
 

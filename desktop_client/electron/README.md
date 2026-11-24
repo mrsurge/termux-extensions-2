@@ -136,3 +136,21 @@ roots are changed.
 Useful smoke variables are `TE2_DESKTOP_EXIT_AFTER_SECONDS`,
 `TE2_DESKTOP_AUTO_OPEN`, `TE2_DESKTOP_APP_ID`, and
 `TE2_DESKTOP_URL`.
+
+### Text editing menus
+
+On desktop, TE2 shows Undo, Redo, Cut, Copy, Paste, Paste Without Formatting, Delete and
+Select All for editable text. Chromium's editing flags determine which actions
+are available. Selected read-only text has a compact Copy and Select All menu.
+The originating WebContents handles each command, including in detached windows.
+On Electromux Android, TE2 leaves text editing to Chromium’s selection toolbar.
+
+With development dependencies installed, run the desktop regression against a
+disposable X server and clipboard from this directory:
+
+```sh
+xvfb-run -a node_modules/.bin/electron tests/text-context-menu.cjs
+```
+
+The test opens the native popup by right-clicking real fields and invokes the
+menu callbacks, including a formatted clipboard paste into rich text.
