@@ -24,6 +24,18 @@ SPEC.loader.exec_module(installer)
 
 
 class TermuxPyPIInstallerTests(unittest.TestCase):
+    def test_versioned_node_is_requested_after_enabling_tur(self) -> None:
+        prefix = Path("/termux")
+        versions = {"tur-repo": iter([None, "1"]), "nodejs-24": iter(["24"])}
+        with patch.object(installer, "_dpkg_version", side_effect=lambda name: next(versions[name])), \
+             patch.object(installer, "_confirm_install"), patch.object(installer.subprocess, "run") as run:
+            installer._ensure_prerequisites({"aptPackages": [{"name": "tur-repo"}, {"name": "nodejs-24"}]},
+                                            prefix, assume_yes=True)
+        apt = str(prefix / "bin/apt-get")
+        self.assertEqual([call.args[0] for call in run.call_args_list],
+                         [[apt, "update"], [apt, "install", "-y", "tur-repo"],
+                          [apt, "update"], [apt, "install", "-y", "nodejs-24"]])
+
     def test_refresh_uses_installed_package_names_and_explicit_profile_policy(self) -> None:
         prefix = Path("/data/data/com.termux/files/usr")
         inventory = (
@@ -183,8 +195,8 @@ class TermuxPyPIInstallerTests(unittest.TestCase):
 
     def test_termux_runtime_prerequisites_omit_retired_crypto_and_unused_bun(self) -> None:
         names = {item["name"] for item in installer.TERMUX_APT_PACKAGES}
-        self.assertFalse(names & {"python-cryptography", "bun"})
-        self.assertTrue({"python", "python-pip", "codex", "nodejs-lts", "libarchive", "libgit2"} <= names)
+        self.assertFalse(names & {"python-cryptography", "bun", "nodejs-lts", "npm", "libicu"})
+        self.assertTrue({"python", "python-pip", "codex", "nodejs-24", "libarchive", "libgit2"} <= names)
         codex = next(item for item in installer.TERMUX_APT_PACKAGES if item["name"] == "codex")
         self.assertEqual(codex["executables"], ["codex"])
 

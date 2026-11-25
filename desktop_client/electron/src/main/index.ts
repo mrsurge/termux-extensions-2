@@ -17,6 +17,7 @@ import {
   type WebContents,
 } from "electron";
 
+import { FrameworkInstaller } from "../../../electromux/framework-installer";
 import { AndroidSession, supportsAndroidSession } from "./android-session";
 import { androidSettings } from "./android-settings";
 import { clearFrameworkAssetCaches } from "./asset-cache";
@@ -1050,6 +1051,36 @@ async function removeFrameworkBookmark(
   return frameworkBookmarksResult();
 }
 
+let installer: FrameworkInstaller | undefined;
+let installation: Promise<void> | undefined;
+
+function launcherState(state: LocalFrameworkState) {
+  if (!installer) return state;
+  const canInstall = !installation && !installer.active() && !state.commandDetected &&
+    state.commandSource === "none" && !state.venvPath && !localFrameworkConfig.error &&
+    !["running", "starting", "stopping", "probing"].includes(state.phase);
+  return {...state, installation: installer.snapshot(), canInstall};
+}
+
+async function installLocalFramework(params: Record<string, unknown>) {
+  if (!installer || !localFrameworkController || desktopExitRequested) throw new Error("Termux installer unavailable");
+  if (params?.confirmed !== true || Object.keys(params).length !== 1) throw new Error("Explicit installation confirmation required");
+  await refreshLocalFrameworkConfiguration();
+  const controller = localFrameworkController;
+  const state = launcherState(await controller.refresh());
+  if (!("canInstall" in state) || !state.canInstall || installation || desktopExitRequested) throw new Error("Installation unavailable");
+  const current = installer;
+  installation = current.start().then(async () => {
+    await refreshLocalFrameworkConfiguration();
+    current.discovered(localFrameworkConfig.commandDetected);
+    await controller.refresh();
+  }).catch(error => sendToShell("te2-desktop:status", errorMessage(error))).finally(() => {
+    installation = undefined;
+    controller.publishCurrent();
+  });
+  return launcherState(controller.snapshot());
+}
+
 async function refreshLocalFrameworkConfiguration(): Promise<LocalFrameworkConfigView> {
   if (!localFrameworkController?.ownsRunningProcess()) {
     localFrameworkConfig = await readLocalFrameworkConfig();
@@ -1135,17 +1166,26 @@ async function nativeRequest(
     return refreshLocalFrameworkConfiguration();
   }
   if (method === "save_local_framework_config") {
+    if (installation) throw new Error("Installation is active");
     return saveLocalFrameworkConfiguration(params);
+  }
+  if (method === "install_local_framework") return installLocalFramework(params);
+  if (method === "cancel_local_framework_install") {
+    if (!installer || !localFrameworkController) throw new Error("Termux installer unavailable");
+    await installer.cancel();
+    await installation;
+    return launcherState(localFrameworkController.snapshot());
   }
   if (method === "get_local_framework_state") {
     if (!localFrameworkController) throw new Error("Local framework controller is unavailable");
     await refreshLocalFrameworkConfiguration();
-    return localFrameworkController.refresh();
+    return launcherState(await localFrameworkController.refresh());
   }
   if (method === "start_local_framework") {
     if (!localFrameworkController) throw new Error("Local framework controller is unavailable");
     await refreshLocalFrameworkConfiguration();
-    return localFrameworkController.start();
+    if (installation) throw new Error("Installation is active");
+    return launcherState(await localFrameworkController.start());
   }
   if (method === "stop_local_framework") {
     if (!localFrameworkController) throw new Error("Local framework controller is unavailable");
@@ -1297,6 +1337,17 @@ async function main(): Promise<void> {
   if (localFrameworkConfig.error) {
     console.warn(`[te2-local] ${localFrameworkConfig.error}`);
   }
+  const prefix = "/data/data/com.termux/files/usr";
+  // Android Node omits process.getuid(). The private profile belongs to this APK's UID.
+  const termuxPrefix = process.platform === "android" ? await stat(prefix).catch(() => null) : null;
+  if (termuxPrefix?.isDirectory() && termuxPrefix.uid === (await stat(app.getPath("userData"))).uid) {
+    installer = new FrameworkInstaller({
+      environment: {...process.env, PREFIX: prefix, TMPDIR: prefix + "/tmp",
+        PATH: prefix + "/bin:" + prefix + "/bin/applets:/system/bin",
+        HOME: "/data/data/com.termux/files/home", LD_PRELOAD: prefix + "/lib/libtermux-exec.so"},
+      changed: () => localFrameworkController?.publishCurrent(),
+    });
+  }
   localFrameworkController = new LocalFrameworkController({
     waitIndefinitelyForStartup: true,
     getLaunchConfig: () => localFrameworkConfig,
@@ -1310,7 +1361,7 @@ async function main(): Promise<void> {
       });
     },
     publish: (state: LocalFrameworkState) => {
-      sendToShell("te2-desktop:local-framework-state", state);
+      sendToShell("te2-desktop:local-framework-state", launcherState(state));
     },
   });
   runTargetRelays = new RunTargetRelayManager(() => configuredFrameworkOrigin);
@@ -1444,14 +1495,15 @@ app.on("before-quit", (event) => {
   if (
     !ownedFrameworkShutdownComplete
     && (
-      configuredStartupPromise !== null
+      installation !== undefined
+      || configuredStartupPromise !== null
       || localFrameworkController?.ownsRunningProcess()
     )
   ) {
     event.preventDefault();
     if (!ownedFrameworkShutdownStarted) {
       ownedFrameworkShutdownStarted = true;
-      void Promise.resolve(configuredStartupPromise)
+      void Promise.all([configuredStartupPromise, installer?.dispose(), installation])
         .catch((error) => {
           console.warn(
             `[te2-desktop] Startup interrupted during exit: ${errorMessage(error)}`,

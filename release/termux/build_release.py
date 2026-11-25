@@ -373,25 +373,14 @@ def _manifest(
                 "role": "Termux-owned crypto stack and its post-install Python inputs",
             },
             {
-                "executables": ["node"],
-                "imports": [],
-                "majorVersion": 24,
-                "minimumVersion": "24.18.0-1",
-                "name": "nodejs-lts",
-                "role": "WBA and Terminal Node runtime",
+                "name": "nodejs-24",
+                "role": "TUR Node 24 and its bundled npm for WBA and Terminal",
             },
             {
                 "executables": ["bun"],
                 "imports": [],
                 "name": "bun",
                 "role": "next-release JavaScript runtime prerequisite",
-            },
-            {
-                "executables": ["npm"],
-                "imports": [],
-                "minimumVersion": "11.19.0",
-                "name": "npm",
-                "role": "Terminal first-use dependency bootstrap",
             },
             {
                 "executables": ["cc", "c++", "make"],

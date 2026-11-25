@@ -39,8 +39,7 @@ TERMUX_APT_PACKAGES = (
     {"name": "python-pip", "executables": ["pip"]},
     {"name": "git", "executables": ["git"]},
     {"name": "codex", "executables": ["codex"]},
-    {"name": "nodejs-lts", "executables": ["node"], "majorVersion": 24},
-    {"name": "npm", "executables": ["npm"]},
+    {"name": "nodejs-24"},
     # node-pty still builds on first use; small Python dependencies may build too.
     {"name": "build-essential", "executables": ["cc", "c++", "make"]},
     {"name": "libarchive", "libraries": ["lib/libarchive.so"]},
@@ -393,14 +392,22 @@ def _ensure_prerequisites(
     if not isinstance(raw_packages, list):
         raise SystemExit("Manifest aptPackages must be a list")
     packages = [_mapping(item, "aptPackages item") for item in raw_packages]
-    missing = [str(item["name"]) for item in packages if _dpkg_version(str(item["name"])) is None]
-    if missing:
+    names = [str(item["name"]) for item in packages]
+    # Ask APT for the versioned TUR package even if another Node is on PATH.
+    needed = [name for name in names if name == "nodejs-24" or _dpkg_version(name) is None]
+    if needed:
         _confirm_install(
-            "TE2 needs these Termux packages: " + ", ".join(missing),
+            "TE2 needs these Termux packages: " + ", ".join(needed),
             assume_yes=assume_yes,
         )
-        subprocess.run([str(prefix / "bin" / "apt-get"), "update"], check=True)
-        subprocess.run([str(prefix / "bin" / "apt-get"), "install", "-y", *missing], check=True)
+        apt = str(prefix / "bin" / "apt-get")
+        subprocess.run([apt, "update"], check=True)
+        if "tur-repo" in needed:
+            subprocess.run([apt, "install", "-y", "tur-repo"], check=True)
+            subprocess.run([apt, "update"], check=True)
+            needed.remove("tur-repo")
+        if needed:
+            subprocess.run([apt, "install", "-y", *needed], check=True)
     for item in packages:
         name = str(item["name"])
         installed = _dpkg_version(name)
@@ -1412,7 +1419,8 @@ def _string_list(value: object, name: str) -> list[str]:
 def _command_output(command: list[str], *, required: bool) -> str:
     result = subprocess.run(command, check=False, capture_output=True, text=True)
     if required and result.returncode != 0:
-        raise SystemExit(f"Command failed: {shlex.join(command)}")
+        detail = result.stderr.strip()
+        raise SystemExit(f"Command failed: {shlex.join(command)}" + (f"\n{detail}" if detail else ""))
     return result.stdout.strip()
 
 

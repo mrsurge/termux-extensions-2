@@ -113,6 +113,8 @@ export type NativeRequestMethod =
   | "get_local_framework_config"
   | "save_local_framework_config"
   | "get_local_framework_state"
+  | "install_local_framework"
+  | "cancel_local_framework_install"
   | "start_local_framework"
   | "stop_local_framework"
   | "use_local_framework"

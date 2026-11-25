@@ -13,7 +13,7 @@ not compatible with this signing/shared-UID lane.**
 Install/open the compatible Termux build once, then install/open the TE2 Termux
 preview APK. With no existing TE2 executable or manually configured command/venv,
 the launcher and Settings local-framework card offer **Install**. Confirm to run
-the published `latest/download/install-te2` script inside Termux; the app shows
+the published `termux-installer-0.2.357-preview.1/install-te2` prerelease script inside Termux; the app shows
 progress and supports cancellation. On success, executable discovery is repeated.
 Choose **Start** separately, or select a remote framework URL/bookmark; installing
 does not automatically start the framework or retarget a remote connection.

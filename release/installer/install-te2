@@ -140,7 +140,7 @@ download "$release_base_url/SHA256SUMS" "$scratch/SHA256SUMS"
 
 verify_file() {
     filename=$1
-    "$python_bin" - "$scratch/SHA256SUMS" "$scratch/$filename" "$filename" <<'PY'
+    "$python_bin" - "${2:-$scratch/SHA256SUMS}" "$scratch/$filename" "$filename" <<'PY'
 from pathlib import Path
 import hashlib
 import sys
@@ -209,8 +209,16 @@ installer_name=$(manifest_value installer)
 case "$installer_name" in
     ''|*/*|*..*) printf '%s\n' 'Release manifest has an unsafe installer filename.' >&2; exit 2 ;;
 esac
-download "$release_base_url/$installer_name" "$scratch/$installer_name"
-verify_file "$installer_name"
+# Stable builds use one release for both the payload manifest and installer.
+# The preview packager pins its own installer assets while retaining a released wheel.
+installer_base_url=$release_base_url
+installer_sums=$scratch/SHA256SUMS
+if [ "$installer_base_url" != "$release_base_url" ]; then
+    installer_sums=$scratch/installer-SHA256SUMS
+    download "$installer_base_url/SHA256SUMS" "$installer_sums"
+fi
+download "$installer_base_url/$installer_name" "$scratch/$installer_name"
+verify_file "$installer_name" "$installer_sums"
 
 # Older Termux releases need their matching GitHub wheelhouse, even when an
 # old release is still selected by `latest`. New explicit tags use PyPI too.
