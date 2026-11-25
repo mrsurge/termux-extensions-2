@@ -18,6 +18,7 @@ export type DesktopShellSettings = {
   frameworkBookmarks: DesktopFrameworkBookmark[];
   zoomLevel: number;
   showDevToolsButton: boolean;
+  androidInspector?: "eruda" | "chromium";
   startLocalFrameworkOnLaunch: boolean;
   autostart: boolean;
   preferredAppId: string;

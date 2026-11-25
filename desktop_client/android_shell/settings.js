@@ -31,6 +31,8 @@ const saveLocalFrameworkConfigButton = document.querySelector("#save-local-frame
 const addLocalFrameworkBroadcastButton = document.querySelector("#add-local-framework-broadcast");
 const addLocalFrameworkEnvironmentButton = document.querySelector("#add-local-framework-env");
 const autostartLocalFrameworkInput = document.querySelector("#autostart-local-framework");
+const inspectorSelect = document.querySelector("#android-inspector");
+const inspectorField = document.querySelector("#android-inspector-field");
 const showDevToolsButtonInput = document.querySelector("#show-devtools-button");
 if (desktopShellHost.supportsDevToolsButton) {
   document.querySelector("#desktop-devtools-settings").hidden = false;
@@ -73,6 +75,7 @@ async function connectToFramework(frameworkHost, frameworkPort, successMessage =
     startLocalFrameworkOnLaunch: autostartLocalFrameworkInput.checked,
     autostart: autostartPreferredAppInput.checked,
     preferredAppId: preferredAppSelect.value,
+    ...(!inspectorField.hidden ? { androidInspector: inspectorSelect.value } : {}),
     ...(desktopShellHost.supportsDevToolsButton ? { showDevToolsButton: showDevToolsButtonInput.checked } : {}),
   });
   persistedSettings = settings;
@@ -102,6 +105,7 @@ function queueStartupSettingsSave() {
     startLocalFrameworkOnLaunch: autostartLocalFrameworkInput.checked,
     autostart: autostartPreferredAppInput.checked,
     preferredAppId: preferredAppSelect.value,
+    ...(!inspectorField.hidden ? { androidInspector: inspectorSelect.value } : {}),
     ...(desktopShellHost.supportsDevToolsButton ? { showDevToolsButton: showDevToolsButtonInput.checked } : {}),
   };
   setStatus(settingsStatus, "loading", "Saving startup settings");
@@ -206,6 +210,8 @@ async function loadSettings() {
   hostInput.value = settings.frameworkHost || "127.0.0.1";
   portInput.value = String(settings.frameworkPort || 8089);
   autostartLocalFrameworkInput.checked = settings.startLocalFrameworkOnLaunch === true;
+  inspectorField.hidden = !settings.androidInspector;
+  if (settings.androidInspector) inspectorSelect.value = settings.androidInspector;
   showDevToolsButtonInput.checked = settings.showDevToolsButton === true;
   autostartPreferredAppInput.checked = settings.autostart === true;
   preferredAppSelect.disabled = !autostartPreferredAppInput.checked;
@@ -538,6 +544,7 @@ autostartLocalFrameworkInput?.addEventListener(
   "change",
   () => void queueStartupSettingsSave(),
 );
+inspectorSelect.addEventListener("change", () => void queueStartupSettingsSave());
 showDevToolsButtonInput?.addEventListener('change', () => {
   if (desktopShellHost.supportsDevToolsButton) void queueStartupSettingsSave();
 });

@@ -301,6 +301,7 @@ button {
 }
 
 .settings-section[hidden] { display: none; }
+#android-inspector-field[hidden] { display: none; }
 
 .section-header,
 .toggle-row,

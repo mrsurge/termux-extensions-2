@@ -21,6 +21,7 @@
     "@types/node": "24.10.0",
     "@types/yauzl": "2.10.3",
     "electron": "43.1.1",
+    "eruda": "3.4.3",
     "esbuild": "0.28.1",
     "tsx": "4.20.6",
     "typescript": "5.9.3"

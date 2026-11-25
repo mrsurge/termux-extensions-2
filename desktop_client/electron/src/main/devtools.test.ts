@@ -32,7 +32,7 @@ test('toolbar targets the displayed app and desktop settings alone expose the co
   assert.ok(html.indexOf('id="home"') < html.indexOf('id="devtools"'));
   assert.ok(html.indexOf('id="devtools"') < html.indexOf('id="reload"'));
   assert.match(html, /id="devtools"[^>]*hidden/);
-  assert.match(main, /toggleDetachedDevTools\(settings.showDevToolsButton, appView\?\.webContents \?\? mainWindow\?\.webContents\)/);
+  assert.match(main, /toggleInspector\(settings.showDevToolsButton, appView\?\.webContents \?\? mainWindow\?\.webContents, settings.androidInspector/);
   assert.match(renderer, /devToolsButton.hidden = settings.showDevToolsButton !== true/);
   assert.match(host, /const supportsDevToolsButton = !!parentBridge && !platformBridge && !nativeBridge/);
   assert.match(settings, /if \(desktopShellHost.supportsDevToolsButton\)/);

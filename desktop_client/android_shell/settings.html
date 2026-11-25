@@ -21,9 +21,16 @@
       <label class="toggle-row" for="show-devtools-button">
         <span>
           <strong>Show DevTools button</strong>
-          <small>Inspect the displayed app in a floating window. The button appears beside Home.</small>
+          <small>Inspect the displayed app. The button appears beside Home.</small>
         </span>
         <input id="show-devtools-button" type="checkbox">
+      </label>
+      <label id="android-inspector-field" class="field" for="android-inspector" hidden>
+        <span>Inspector</span>
+        <select id="android-inspector">
+          <option value="eruda">Eruda (in page)</option>
+          <option value="chromium">Chromium DevTools (separate window)</option>
+        </select>
       </label>
     </section>
     <section class="settings-section">

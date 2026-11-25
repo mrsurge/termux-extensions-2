@@ -107,6 +107,7 @@ function normalizeSettings(settings = {}) {
     startLocalFrameworkOnLaunch: settings.startLocalFrameworkOnLaunch === true,
     autostart: settings.autostart === true,
     preferredAppId: String(settings.preferredAppId || "").trim(),
+    ...(supportsDevToolsButton && settings?.androidInspector ? { androidInspector: settings.androidInspector } : {}),
     ...(supportsDevToolsButton ? { showDevToolsButton: settings.showDevToolsButton === true } : {}),
   };
 }
@@ -125,6 +126,7 @@ export async function saveSettings(settings) {
     startLocalFrameworkOnLaunch: settings?.startLocalFrameworkOnLaunch === true,
     autostart: settings?.autostart === true,
     preferredAppId: String(settings?.preferredAppId || "").trim(),
+    ...(supportsDevToolsButton && settings?.androidInspector ? { androidInspector: settings.androidInspector } : {}),
     ...(supportsDevToolsButton ? { showDevToolsButton: settings?.showDevToolsButton === true } : {}),
   });
   const nextSettings = result?.settings || result;

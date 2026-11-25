@@ -1,4 +1,3 @@
-import { toggleDetachedDevTools } from "./devtools";
 import { resolve } from "node:path";
 
 import {
@@ -36,6 +35,7 @@ interface SidebarSurfaceEntry {
 }
 
 export interface DetachedSidebarSurfaceRegistryOptions {
+  toggleInspector(contents: WebContents): Promise<void>;
   panelsChanged?(state: SecondaryPanelSnapshot): void;
   getAppPath(): string;
   getAppContents(): WebContents | null;
@@ -321,7 +321,7 @@ export class DetachedSidebarSurfaceRegistry {
     }
     if (action === "devtools") {
       if (!entry.view.webContents.isDestroyed()) {
-        toggleDetachedDevTools(true, entry.view.webContents);
+        void this.#options.toggleInspector(entry.view.webContents).catch(error => console.warn("[te2-desktop] Inspector:", errorMessage(error)));
       }
       return true;
     }

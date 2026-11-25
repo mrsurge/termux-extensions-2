@@ -27,7 +27,7 @@ import { installCloseOnFocusHandoff } from "./focus-handoff-close-policy";
 import { installChromiumScrollbars } from "./chromium-scrollbars";
 import { installTextContextMenu } from "./text-context-menu";
 import { DesktopDialogHost } from "./dialog-host";
-import { toggleDetachedDevTools } from "./devtools";
+import { toggleInspector } from "./mobile-inspector";
 import {
   FRAMEWORK_REQUEST_TIMEOUT_MS,
   frameworkConnectionError,
@@ -986,6 +986,8 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
 }> {
   const candidate: DesktopShellSettings = {
     ...settings,
+    ...(settings.androidInspector && params.androidInspector !== undefined
+      ? { androidInspector: params.androidInspector === "chromium" ? "chromium" as const : "eruda" as const } : {}),
     showDevToolsButton: params.showDevToolsButton === undefined
       ? settings.showDevToolsButton
       : params.showDevToolsButton === true,
@@ -1112,7 +1114,7 @@ async function viewAction(params: Record<string, unknown>): Promise<Record<strin
   const action = String(params.action || "");
   if (action === "home") closeAppView();
   else if (action === "devtools") {
-    toggleDetachedDevTools(settings.showDevToolsButton, appView?.webContents ?? mainWindow?.webContents);
+    await toggleInspector(settings.showDevToolsButton, appView?.webContents ?? mainWindow?.webContents, settings.androidInspector ?? "chromium");
   }
   else if (action === "back" && appView?.webContents.navigationHistory.canGoBack()) {
     appView.webContents.navigationHistory.goBack();
@@ -1413,6 +1415,7 @@ async function main(): Promise<void> {
     layoutPrimary: resizeAppView,
   });
   detachedSurfaceRegistry = new DetachedSidebarSurfaceRegistry({
+    toggleInspector: target => toggleInspector(true, target, settings.androidInspector ?? "chromium"),
     panelsChanged: state => {
       appView?.webContents.send("te2-desktop:secondary-panels", state);
       secondaryEditorRegistry?.publishPanels(state);

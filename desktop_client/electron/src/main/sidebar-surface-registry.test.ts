@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
+import { toggleDetachedDevTools } from "./devtools";
 import { buildSync } from "esbuild";
 import type { WebContents } from "electron";
 import type { ElectronSidebarSurfaceDescriptor } from "../shared/app-view-contracts";
@@ -70,6 +71,7 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
   const main = new Window();
   const app = new Contents();
   const registry = new DetachedSidebarSurfaceRegistry({
+    toggleInspector: async (target: WebContents) => toggleDetachedDevTools(true, target),
     getMainWindow: () => main,
     getAppContents: () => app,
     getAppPath: () => ".",

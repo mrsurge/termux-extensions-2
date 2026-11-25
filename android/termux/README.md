@@ -186,3 +186,12 @@ node android/termux/electromux/stage-native-style.mjs "$staged_app"
 This registers the bundled native stylesheet in the staged package manifest.
 Edit `electromux/native.css` for host-drawn menus, message boxes, file pickers
 and select controls. The dark palette uses fixed Material 3 baseline colors.
+
+### Inspecting the displayed page
+
+Turn on **Show DevTools button** in the client’s Developer Tools settings.
+On Android the **Inspector** choice defaults to **Eruda (in page)**. The
+header button opens the bundled console in the displayed document; press it
+again to hide it. A detached extension's header inspects its content view.
+Choose **Chromium DevTools (separate window)** to use the full local inspector.
+This choice is saved for subsequent launches. Both modes work offline.

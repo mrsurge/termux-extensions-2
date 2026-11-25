@@ -18,6 +18,14 @@ await Promise.all([
 
 await Promise.all([
   build({
+    entryPoints: [resolve(root, "src/inspector/mobile.ts")],
+    outfile: resolve(dist, "mobile-inspector.js"),
+    bundle: true,
+    format: "iife",
+    minify: true,
+    target: "chrome140",
+  }),
+  build({
     entryPoints: [resolve(root, "src/main/index.ts")],
     outfile: resolve(dist, "main.cjs"),
     bundle: true,
@@ -99,6 +107,7 @@ await Promise.all([
 ]);
 
 await Promise.all([
+  cp(resolve(root, "src/inspector/ERUDA-LICENSE"), resolve(dist, "ERUDA-LICENSE")),
   cp(resolve(root, "src/renderer/index.html"), resolve(renderer, "index.html")),
   cp(resolve(root, "src/renderer/index.css"), resolve(renderer, "index.css")),
   cp(resolve(root, "src/dialog/index.html"), resolve(dialog, "index.html")),
