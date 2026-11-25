@@ -101,6 +101,9 @@ export type AssetUpdateResult = AssetStatus & {
 };
 
 export type NativeRequestMethod =
+  | "save_android_session_settings"
+  | "get_android_system_settings"
+  | "open_android_system_settings"
   | "get_settings"
   | "get_browser_framework_origin"
   | "save_settings"

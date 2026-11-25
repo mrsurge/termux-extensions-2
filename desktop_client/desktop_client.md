@@ -95,3 +95,9 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+### Keep a TE2 app session active on Android
+
+In the unified Electron launcher, open **Settings → Android settings** and turn on **Keep active app connections alive**. Opening a local or remote framework app starts a foreground session with a **Stop** notification. Returning to the launcher releases it. The separate **Keep CPU awake during the session** preference requests a partial CPU wake lock for the same lifetime. Both preferences default off and are saved in the host app’s private profile. Enable notification delivery for the host APK before starting a session.
+
+**Stop** releases the service and lock for the current app session. The app stays open. Opening another app or returning to the launcher and reopening the same app starts a fresh session using the saved preferences.

@@ -622,3 +622,15 @@ button {
     flex-direction: column;
   }
 }
+
+/* Nested status and control groups retain the Termux settings-section rhythm. */
+#android-system-settings .android-status-lines,
+#android-system-settings [data-session]:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+
+#android-system-settings .section-actions {
+  flex-wrap: wrap;
+}

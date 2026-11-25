@@ -1,3 +1,4 @@
+import { mountAndroidSettings } from "./android-settings";
 import type {
   AppNavigation,
   AssetStatus,
@@ -77,6 +78,7 @@ launcherView.addEventListener("load", () => {
   try {
     if (launcherView.contentDocument) {
       installChromiumScrollbarStyle(launcherView.contentDocument);
+      mountAndroidSettings(launcherView.contentDocument, bridge);
     }
   } catch (error) {
     console.warn(

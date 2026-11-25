@@ -8,6 +8,7 @@ import {
   Menu,
   protocol,
   session,
+  shell,
   webFrameMain,
   WebContentsView,
   type IpcMainEvent,
@@ -16,6 +17,8 @@ import {
   type WebContents,
 } from "electron";
 
+import { AndroidSession, supportsAndroidSession } from "./android-session";
+import { androidSettings } from "./android-settings";
 import { clearFrameworkAssetCaches } from "./asset-cache";
 import { DesktopAssetManager, MIME_TYPES } from "./assets";
 import { installCloseOnFocusHandoff } from "./focus-handoff-close-policy";
@@ -315,6 +318,7 @@ function closeAppView(): void {
   closeSurfaceWindows();
   dialogHost?.closeForOwner(closing.webContents);
   appView = null;
+  void androidSession?.appOpened(false).catch(sessionError);
   trustedFrameworkContents.delete(closing.webContents);
   mainWindow?.contentView.removeChildView(closing);
   if (!closing.webContents.isDestroyed()) closing.webContents.close();
@@ -945,7 +949,9 @@ async function navigateApp(rawUrl: string): Promise<{ url: string }> {
   appView = createAppView();
   mainWindow?.contentView.addChildView(appView);
   resizeAppView();
-  await appView.webContents.loadURL(target.href);
+  const opened = appView;
+  await opened.webContents.loadURL(target.href);
+  if (opened === appView) void androidSession?.appOpened(true).catch(sessionError);
   return { url: target.href };
 }
 
@@ -1098,10 +1104,27 @@ async function viewAction(params: Record<string, unknown>): Promise<Record<strin
   return {};
 }
 
+let androidSession: AndroidSession | undefined;
+function sessionError(error: unknown) {
+  sendToShell("te2-desktop:status", errorMessage(error));
+}
+
+const androidSystemSettings = androidSettings(process.platform, app as Electron.App & Parameters<typeof androidSettings>[1], url => shell.openExternal(url));
+
 async function nativeRequest(
   method: NativeRequestMethod,
   params: Record<string, unknown>,
 ): Promise<unknown> {
+  if (method === "get_android_system_settings") {
+    const result = await androidSystemSettings.read();
+    return result && {...result, session: androidSession?.state()};
+  }
+  if (method === "save_android_session_settings") {
+    if (!androidSession) throw new Error("Android session service unavailable");
+    await androidSession.configure(params.enabled, params.keepCpuAwake);
+    return androidSession.state();
+  }
+  if (method === "open_android_system_settings") return androidSystemSettings.open(params.destination);
   if (method === "get_settings") return settings;
   if (method === "get_browser_framework_origin") return { origin: relay.browserOrigin };
   if (method === "save_settings") return saveConnection(params);
@@ -1257,6 +1280,10 @@ async function runConfiguredStartup(shellReady: Promise<void>): Promise<void> {
 
 async function main(): Promise<void> {
   await app.whenReady();
+  if (supportsAndroidSession(process.platform, app)) {
+    androidSession = new AndroidSession(app, app.getPath("userData"), message => sendToShell("te2-desktop:status", message));
+    await androidSession.load().catch(error => console.warn("[te2-desktop] Android session preferences:", errorMessage(error)));
+  }
   Menu.setApplicationMenu(null);
   await protocol.handle(SHELL_SCHEME, localShellResponse);
 
