@@ -343,6 +343,9 @@ export const desktopShellHost = {
   deleteFrameworkBookmark: (name) =>
     nativeRequest("delete_framework_bookmark", { name }),
   getLocalFrameworkConfig: () => nativeRequest("get_local_framework_config"),
+  pickLocalFrameworkPath: parentBridge && !platformBridge && !nativeBridge
+    ? (field, currentPath) => nativeRequest("pick_local_framework_path", { field, currentPath })
+    : null,
   saveLocalFrameworkConfig: (config) =>
     nativeRequest("save_local_framework_config", config),
   getLocalFrameworkState,

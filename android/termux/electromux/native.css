@@ -1,0 +1,94 @@
+/* Electromux native presenter lengths are logical Android dp, spelled px. */
+message-box, browser-select-panel, file-picker, menu-panel { border-radius: 28px; }
+file-picker-filter-panel, file-picker-path, file-picker-filename,
+file-picker-filter, menu-item, file-picker-row, file-picker-filter-row,
+browser-select-row { border-radius: 4px; }
+
+menu-panel, file-picker-filter-panel { padding: 4px; }
+file-picker-hidden { padding: 4px 8px; }
+file-picker-path, file-picker-filename, file-picker-filter { padding: 8px 12px; }
+file-picker-row, file-picker-filter-row, browser-select-row { padding: 8px 12px; }
+
+/* An oversized uniform radius yields a capsule at normal native button heights. */
+button, file-picker-home, file-picker-shared, file-picker-up, file-picker-navigate,
+file-picker-path-toggle, file-picker-accept, file-picker-cancel,
+browser-select-accept, browser-select-cancel { border-radius: 256px; }
+
+file-picker-home, file-picker-shared, file-picker-up, file-picker-path-toggle,
+file-picker-navigate, file-picker-accept, file-picker-cancel { margin: 0 2px; }
+
+taskbar-button { border-radius: 8px; background-color: #e1e3e6; color: #202124; }
+taskbar-button.active { background-color: #315f9a; color: #ffffff; }
+taskbar, menu-bar { background-color: #f3edf7; color: #1d1b20; }
+file-picker, browser-select-panel, message-box, menu-panel, file-picker-filter-panel {
+  background-color: #ece6f0; color: #1d1b20;
+}
+file-picker-list { background-color: #fef7ff; }
+file-picker-status, message-box-detail, browser-select-group { color: #49454f; }
+file-picker-path, file-picker-filename, file-picker-filter {
+  background-color: #ece6f0; color: #1d1b20;
+  border-style: solid; border-width: 1px; border-color: #faf7fc;
+}
+button, file-picker-home, file-picker-shared, file-picker-up, file-picker-navigate,
+file-picker-path-toggle, file-picker-cancel, browser-select-cancel {
+  background-color: #e1e3e6; color: #202124;
+}
+button.default, file-picker-accept, browser-select-accept {
+  background-color: #315f9a; color: #ffffff;
+}
+menu-item.checkbox, menu-item.radio, file-picker-hidden, file-picker-row,
+browser-select-row, message-box-checkbox { accent-color: #315f9a; }
+menu-separator { background-color: #cac4d0; }
+menu-item:checked, file-picker-row:checked, file-picker-filter-row:checked, browser-select-row:checked,
+menu-item:focus, file-picker-row:focus, file-picker-filter-row:focus, browser-select-row:focus,
+menu-item:active, file-picker-row:active, file-picker-filter-row:active, browser-select-row:active {
+  background-color: #e0ecff; color: #1d192b;
+}
+
+/* Let the navigation row and its controls share the picker surface. */
+file-picker-navigation, file-picker-home, file-picker-shared, file-picker-up,
+file-picker-path-toggle { background-color: transparent; }
+
+@media (prefers-color-scheme: dark) {
+  taskbar-button { background-color: #292c35; color: #e6e8ed; }
+  taskbar-button.active { background-color: #b4c7ec; color: #181a1e; }
+  taskbar, menu-bar, menu-panel, message-box, file-picker, file-picker-list,
+  file-picker-actions, file-picker-filter-panel, browser-select-panel {
+    background-color: #181a1e; color: #e6e8ed;
+  }
+  menu-panel.context { background-color: #22262c; }
+  file-picker-status, message-box-detail, browser-select-group { color: #bec3ce; }
+  file-picker-path, file-picker-filename, file-picker-filter {
+    background-color: #181a1e; color: #e6e8ed; border-color: #383d47;
+  }
+  button, file-picker-home, file-picker-shared, file-picker-up, file-picker-navigate,
+  file-picker-path-toggle, file-picker-cancel, browser-select-cancel {
+    background-color: #292c35; color: #e6e8ed;
+  }
+  button.default, file-picker-accept, browser-select-accept {
+    background-color: #405373; color: #ffffff;
+  }
+  menu-item.checkbox, menu-item.radio, file-picker-hidden, file-picker-row,
+  browser-select-row, message-box-checkbox { accent-color: #b4c7ec; }
+  menu-separator { background-color: #383d47; }
+  menu-item:checked, file-picker-row:checked, file-picker-filter-row:checked, browser-select-row:checked {
+    background-color: #b4c7ec; color: #181a1e;
+  }
+  menu-item:focus, file-picker-row:focus, file-picker-filter-row:focus, browser-select-row:focus {
+    background-color: #405373; color: #ffffff;
+  }
+  button, file-picker-home, file-picker-shared, file-picker-up, file-picker-navigate,
+  file-picker-path-toggle, file-picker-accept, file-picker-cancel, browser-select-accept,
+  browser-select-cancel, menu-item, file-picker-row, file-picker-filter-row, browser-select-row {
+    transition: background-color 100ms ease-out;
+  }
+  button:active, file-picker-home:active, file-picker-shared:active, file-picker-up:active,
+  file-picker-navigate:active, file-picker-path-toggle:active, file-picker-cancel:active,
+  browser-select-cancel:active, menu-item:active, file-picker-row:active,
+  file-picker-filter-row:active, browser-select-row:active {
+    background-color: #353943; color: #ffffff;
+  }
+  button.default:active, file-picker-accept:active, browser-select-accept:active {
+    background-color: #4c6183; color: #ffffff;
+  }
+}

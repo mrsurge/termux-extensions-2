@@ -1,9 +1,10 @@
 import { readFile, stat } from "node:fs/promises";
-import { extname, relative, resolve } from "node:path";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Menu,
   protocol,
@@ -1162,6 +1163,18 @@ async function nativeRequest(
   if (method === "get_framework_bookmarks") return frameworkBookmarksResult();
   if (method === "upsert_framework_bookmark") return saveFrameworkBookmark(params);
   if (method === "delete_framework_bookmark") return removeFrameworkBookmark(params);
+  if (method === "pick_local_framework_path") {
+    const { field, currentPath } = params;
+    if (field !== "command" && field !== "venvPath") throw new Error("Unknown framework path field");
+    if (!mainWindow) throw new Error("Settings window is unavailable");
+    const directory = field === "venvPath";
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: directory ? "Choose virtual environment directory" : "Choose TE2 executable",
+      properties: [directory ? "openDirectory" : "openFile"],
+      defaultPath: typeof currentPath === "string" && isAbsolute(currentPath) ? currentPath : undefined,
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  }
   if (method === "get_local_framework_config") {
     return refreshLocalFrameworkConfiguration();
   }

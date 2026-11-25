@@ -572,6 +572,27 @@ addLocalFrameworkEnvironmentButton?.addEventListener("click", () => {
   appendEnvironmentRow();
 });
 
+if (desktopShellHost.pickLocalFrameworkPath) {
+  for (const [id, field, input] of [
+    ["browse-framework-command", "command", localFrameworkCommandInput],
+    ["browse-framework-venv", "venvPath", localFrameworkVenvInput],
+  ]) {
+    const button = document.getElementById(id);
+    button.hidden = false;
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const path = await desktopShellHost.pickLocalFrameworkPath(field, input.value.trim());
+        if (path) input.value = path;
+      } catch (error) {
+        setStatus(localFrameworkConfigStatus, "error", error?.message || "Could not open picker");
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+}
+
 saveLocalFrameworkConfigButton?.addEventListener("click", async () => {
   saveLocalFrameworkConfigButton.disabled = true;
   setStatus(localFrameworkConfigStatus, "loading", "Saving launch configuration");

@@ -102,6 +102,7 @@
         >
         <small>Auto-detected from PATH until this configuration is saved.</small>
       </label>
+      <button class="secondary-button" type="button" id="browse-framework-command" hidden>Choose executable…</button>
       <label class="field" for="local-framework-venv">
         <span>Virtual environment</span>
         <input
@@ -113,6 +114,7 @@
         >
         <small>Sets VIRTUAL_ENV and prepends its bin directory to PATH.</small>
       </label>
+      <button class="secondary-button" type="button" id="browse-framework-venv" hidden>Choose directory…</button>
       <label class="field field-port local-framework-port-field" for="local-framework-port">
         <span>Port</span>
         <input id="local-framework-port" type="number" inputmode="numeric" min="1" max="65535">

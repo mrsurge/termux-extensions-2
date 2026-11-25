@@ -173,3 +173,16 @@ Automatic framework/preferred-app selection is implemented. Complete Electron
 API parity is not claimed; remaining lifecycle/compatibility gates and publication
 work are tracked separately. Consumer launcher assets are APK-owned, while
 editor/application assets retain the existing APK-seed/OTA mechanism.
+
+## Electromux native controls
+
+For the Electron-based Android consumer, run the following from the TE2
+checkout after staging the Electron client and before packing its app.asar:
+
+```sh
+node android/termux/electromux/stage-native-style.mjs "$staged_app"
+```
+
+This registers the bundled native stylesheet in the staged package manifest.
+Edit `electromux/native.css` for host-drawn menus, message boxes, file pickers
+and select controls. The dark palette uses fixed Material 3 baseline colors.

@@ -111,6 +111,7 @@ export type NativeRequestMethod =
   | "upsert_framework_bookmark"
   | "delete_framework_bookmark"
   | "get_local_framework_config"
+  | "pick_local_framework_path"
   | "save_local_framework_config"
   | "get_local_framework_state"
   | "install_local_framework"
