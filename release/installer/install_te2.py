@@ -28,6 +28,8 @@ MANAGED_COMMANDS = (
     "als-rs",
     "als-rs-extension-adapter",
 )
+# framework-shells owns the pip console script in the shared Termux prefix.
+TERMUX_MANAGED_COMMANDS = tuple(name for name in MANAGED_COMMANDS if name != "fws")
 LINUX_APT_PACKAGES = ("git", "build-essential", "python3-venv")
 LINUX_LIBARCHIVE_PACKAGES = ("libarchive13t64", "libarchive13")
 LINUX_TARGET = "linux-glibc-x86_64"
@@ -951,7 +953,7 @@ def _prune_release_directories(releases: Path, *, retained: set[str]) -> None:
 
 
 def _wrapper_paths(prefix: Path) -> dict[str, Path]:
-    return {command: prefix / "bin" / command for command in MANAGED_COMMANDS}
+    return {command: prefix / "bin" / command for command in TERMUX_MANAGED_COMMANDS}
 
 
 def _wrapper_paths_for_bin(bin_dir: Path) -> dict[str, Path]:
@@ -980,7 +982,7 @@ def _write_wrappers(
 def _write_wrapper(
     wrapper: Path, install_root: Path, prefix: Path, *, command: str = "te2"
 ) -> None:
-    if command not in MANAGED_COMMANDS:
+    if command not in TERMUX_MANAGED_COMMANDS:
         raise ValueError(f"Unsupported managed command: {command}")
     if command == "te2":
         invocation = 'exec "$prefix/bin/python" -m app.cli.run_rust_framework "$@"'

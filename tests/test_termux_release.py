@@ -743,10 +743,38 @@ class TermuxInstallerTransactionTests(unittest.TestCase):
             self.assertTrue(other.exists())
             wrapper = prefix / "bin" / "te2"
             self.assertIn(installer.MANAGED_MARKER, wrapper.read_text(encoding="utf-8"))
-            for command in installer.MANAGED_COMMANDS:
+            for command in installer.TERMUX_MANAGED_COMMANDS:
                 managed = prefix / "bin" / command
                 self.assertTrue(managed.is_file())
                 self.assertIn(installer.MANAGED_MARKER, managed.read_text(encoding="utf-8"))
+
+    def test_termux_release_lifecycle_leaves_global_fws_to_pip(self) -> None:
+        for present in (False, True):
+            with self.subTest(present=present), tempfile.TemporaryDirectory() as raw:
+                prefix = Path(raw) / "prefix"
+                fws = prefix / "bin" / "fws"
+                fws.parent.mkdir(parents=True)
+                if present:
+                    fws.write_bytes(b"#!/bin/python\n# pip entry point\n")
+                    fws.chmod(0o755)
+
+                def snapshot():
+                    if fws.exists():
+                        return (fws.read_bytes(), fws.stat().st_ino, fws.stat().st_mode)
+                    return None
+
+                original = snapshot()
+                install = Path(raw) / "install"
+                releases = install / "releases"
+                releases.mkdir(parents=True)
+                for version in ("0.2.337", "0.2.338"):
+                    stage = self._staged_termux_release(releases, version, version)
+                    installer._activate_release(install, prefix, stage, version)
+                    self.assertEqual(original, snapshot())
+                installer._rollback(install, prefix, "0.2.337")
+                self.assertEqual(original, snapshot())
+                installer._uninstall(install, prefix)
+                self.assertEqual(original, snapshot())
 
     def test_third_activation_and_rollback_retain_exactly_two_releases(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -837,7 +865,7 @@ class TermuxInstallerTransactionTests(unittest.TestCase):
             wrapper = prefix / "bin" / "te2"
             wrapper.write_text(f"#!/bin/sh\n{installer.MANAGED_MARKER}\n", encoding="utf-8")
             wrapper.chmod(0o755)
-            for command in installer.MANAGED_COMMANDS:
+            for command in installer.TERMUX_MANAGED_COMMANDS:
                 managed = prefix / "bin" / command
                 managed.write_text(
                     f"#!/bin/sh\n{installer.MANAGED_MARKER}\n",
@@ -850,7 +878,7 @@ class TermuxInstallerTransactionTests(unittest.TestCase):
             self.assertFalse(install.exists())
             self.assertFalse(wrapper.exists())
             self.assertTrue(
-                all(not (prefix / "bin" / command).exists() for command in installer.MANAGED_COMMANDS)
+                all(not (prefix / "bin" / command).exists() for command in installer.TERMUX_MANAGED_COMMANDS)
             )
             self.assertTrue((state / "keep.json").is_file())
 
@@ -863,8 +891,8 @@ class TermuxInstallerTransactionTests(unittest.TestCase):
             install.mkdir()
             te2 = prefix / "bin" / "te2"
             te2.write_text(f"#!/bin/sh\n{installer.MANAGED_MARKER}\n", encoding="utf-8")
-            fws = prefix / "bin" / "fws"
-            fws.write_text("#!/bin/sh\n", encoding="utf-8")
+            als = prefix / "bin" / "als-rs"
+            als.write_text("#!/bin/sh\n", encoding="utf-8")
 
             with self.assertRaisesRegex(SystemExit, "unmanaged"):
                 installer._uninstall(install, prefix)

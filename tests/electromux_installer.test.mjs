@@ -102,7 +102,7 @@ test('published download uses fixed URL and rejects insecure redirects and overs
   await insecure.consumer.dispatch('install_local_framework', {confirmed: true});
   const failure = await insecure.wait(s => s.installation.phase === 'failed');
   assert.match(failure.installation.error, /HTTPS/);
-  assert.deepEqual(requested, ['https://github.com/mrsurge/termux-extensions-2/releases/download/termux-installer-0.2.357-preview.1/install-te2']);
+  assert.deepEqual(requested, ['https://github.com/mrsurge/termux-extensions-2/releases/download/termux-installer-0.2.357-preview.2/install-te2']);
   globalThis.fetch = async url => {
     if (String(url).startsWith('http://127.0.0.1:')) throw new Error('No fixture framework');
     return new Response(new Uint8Array(2 * 1024 * 1024 + 1));
