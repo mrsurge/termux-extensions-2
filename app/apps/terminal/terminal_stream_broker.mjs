@@ -8,15 +8,9 @@ import {
 } from './terminal_stream_protocol.mjs';
 import { requireTerminalNodeModule } from './terminal_node_modules.mjs';
 
-// Node 21+ exposes a browser-shaped navigator global. The xterm 5.3 packages
-// use navigator absence to select their headless path, so remove it before the
-// legacy, browser-version-matched packages are evaluated.
-if (Object.prototype.hasOwnProperty.call(globalThis, 'navigator')) {
-  delete globalThis.navigator;
-}
 const nodePty = requireTerminalNodeModule('node-pty');
-const headlessModule = requireTerminalNodeModule('xterm-headless');
-const serializeModule = requireTerminalNodeModule('xterm-addon-serialize');
+const headlessModule = requireTerminalNodeModule('@xterm/headless');
+const serializeModule = requireTerminalNodeModule('@xterm/addon-serialize');
 const HeadlessTerminal = headlessModule.Terminal || headlessModule.default?.Terminal;
 const SerializeAddon = serializeModule.SerializeAddon || serializeModule.default?.SerializeAddon;
 if (!HeadlessTerminal || !SerializeAddon) {

@@ -13,6 +13,14 @@ from collections.abc import Mapping
 log = logging.getLogger(__name__)
 
 
+def _termux_node(environ: Mapping[str, str]) -> str | None:
+    prefix = environ.get("PREFIX", "")
+    if sys.platform != "android" and prefix.rstrip("/") != "/data/data/com.termux/files/usr":
+        return None
+    node = Path(prefix or "/data/data/com.termux/files/usr") / "opt/nodejs-24/bin/node"
+    return str(node) if node.is_file() and os.access(node, os.X_OK) else None
+
+
 def discover_runtime(environ: Mapping[str, str]) -> str:
     """Filesystem-only checks: do not fork shells or execute version probes."""
     override = environ.get("TE2_WORKBENCH_ADAPTER_NODE_BIN", "").strip()
@@ -21,6 +29,9 @@ def discover_runtime(environ: Mapping[str, str]) -> str:
     bun = shutil.which("bun", path=environ.get("PATH", os.defpath))
     if bun:
         return bun
+    termux = _termux_node(environ)
+    if termux:
+        return termux
     # Desktop installations can ship Node alongside the Python interpreter.
     host_python = environ.get("CODE_TE2_HOST_PYTHON_EXECUTABLE") or sys.executable
     bundled_node = Path(host_python).parent / "node"
@@ -43,7 +54,7 @@ class WorkbenchRuntimeDiscovery:
                 return await asyncio.to_thread(discover_runtime, environ)
             except Exception:
                 log.exception("WBA runtime discovery failed; retaining Node default")
-                return "node"
+                return _termux_node(environ) or "node"
 
         self._task = asyncio.create_task(discover(), name="code_te2_wba_runtime_discovery")
 
@@ -55,7 +66,7 @@ class WorkbenchRuntimeDiscovery:
         task = self._task
         if task is not None and task.done() and not task.cancelled():
             return task.result()
-        return "node"
+        return _termux_node(os.environ) or "node"
 
     async def stop(self) -> None:
         task, self._task = self._task, None

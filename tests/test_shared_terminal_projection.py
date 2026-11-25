@@ -99,7 +99,7 @@ def test_checkpoint_restores_tui_mouse_paste_and_alternate_buffer_modes():
         result = subprocess.run(['node', '-e', '''
 const fs = require('node:fs');
 globalThis.window = globalThis;
-const { Terminal } = require('./app/apps/terminal/node_modules/xterm-headless');
+const { Terminal } = require('./app/apps/terminal/node_modules/@xterm/headless');
 const term = new Terminal({cols:80,rows:24,allowProposedApi:true});
 term.write(fs.readFileSync(0), () => {
   console.log(JSON.stringify({modes:term.modes, buffer:term.buffer.active.type,

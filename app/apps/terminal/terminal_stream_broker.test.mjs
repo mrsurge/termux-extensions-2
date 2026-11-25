@@ -5,8 +5,7 @@ import test from 'node:test';
 import { encodePipeFrame, PipeFrameDecoder } from './terminal_stream_protocol.mjs';
 import { requireTerminalNodeModule } from './terminal_node_modules.mjs';
 
-if (Object.prototype.hasOwnProperty.call(globalThis, 'navigator')) delete globalThis.navigator;
-const { Terminal: ReplayTerminal } = requireTerminalNodeModule('xterm-headless');
+const { Terminal: ReplayTerminal } = requireTerminalNodeModule('@xterm/headless');
 
 
 test('broker restores parsed PTY state at a reconnect sequence boundary', { timeout: 12_000 }, async () => {

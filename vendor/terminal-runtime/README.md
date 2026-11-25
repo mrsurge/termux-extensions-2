@@ -1,0 +1,5 @@
+# Terminal dependencies for release wheels
+
+The shared wheel payload serves both Terminal and File Explorer. The scoped headless terminal and serializer are JavaScript. The native addon is node-pty 1.1.0. The two stripped addons live in the node-pty-1.1.0-te2.1 prerelease; wheel assembly selects the matching asset and verifies its digest. An offline builder may point TE2_PTY_ASSET_DIR at the downloaded assets. The npm package lock in app/apps/terminal pins the corresponding JS distributions. To refresh the JS copies, run npm ci --omit=dev --ignore-scripts against that lock in a scratch directory and pass its node_modules directory to refresh.py. Package licenses are retained.
+
+Editable installs, source builds, incompatible Node ABIs and installations missing the prebuilt payload use the existing local bootstrap. Termux internal helpers prefer the versioned Node tree. Explicit toolchain overrides and project run-profile commands retain their own semantics. Qualify final wheel contents, size and runtime behavior on both supported platforms during the next TE2 release.

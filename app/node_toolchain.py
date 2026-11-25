@@ -157,6 +157,12 @@ def resolve_node_toolchain(
         if pair is not None:
             return pair
 
+    if sys.platform == "android" or str(source.get("PREFIX", "")).rstrip("/") == "/data/data/com.termux/files/usr":
+        prefix = Path(source.get("PREFIX") or "/data/data/com.termux/files/usr")
+        pair = _candidate_pair(prefix / "opt/nodejs-24/bin/node")
+        if pair is not None:
+            return pair
+
     python_pair = _python_environment_node_pair()
     if python_pair is not None:
         return python_pair
@@ -212,7 +218,10 @@ def node_toolchain_env(
     env["npm_config_fund"] = "false"
     env["npm_config_update_notifier"] = "false"
     prefix = str(env.get("PREFIX") or "").strip()
-    if prefix and (Path(prefix) / "include" / "node" / "node.h").is_file():
+    versioned = Path(prefix or "/data/data/com.termux/files/usr") / "opt/nodejs-24"
+    if node_binary.parent == versioned / "bin" and (versioned / "include/node/node.h").is_file():
+        env.setdefault("npm_config_nodedir", str(versioned))
+    elif prefix and (Path(prefix) / "include" / "node" / "node.h").is_file():
         _ = env.setdefault("npm_config_nodedir", prefix)
     wheel_root = _nodejs_wheel_root(node_binary)
     if wheel_root is not None:

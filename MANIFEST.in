@@ -14,3 +14,6 @@ global-exclude __pycache__/* *.pyc
 global-exclude *.map *.bak *.bak2 *.save
 prune app/static/vendor/monaco-editor-core/te2-lang/bootstrap/_deprecated
 prune app/apps/code_te2/vendor/highlightjs
+
+include scripts/stage_terminal_wheel.py
+graft vendor/terminal-runtime

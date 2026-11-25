@@ -19,6 +19,11 @@ class RuntimeDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(runtime.discover_runtime({"PATH": "/tools"}), "/tools/bun")
             which.assert_called_once_with("bun", path="/tools")
 
+    def test_termux_uses_versioned_node_without_bun(self) -> None:
+        with patch.object(shutil, "which", return_value=None), patch.object(Path, "is_file", return_value=True), patch.object(os, "access", return_value=True):
+            prefix = "/data/data/com.termux/files/usr"
+            self.assertEqual(runtime.discover_runtime({"PREFIX": prefix}), prefix + "/opt/nodejs-24/bin/node")
+
     def test_node_without_bun_or_npm(self) -> None:
         with patch.object(shutil, "which", side_effect=[None, "/tools/node"]), patch.object(Path, "is_file", return_value=False):
             self.assertEqual(runtime.discover_runtime({"PATH": "/tools"}), "/tools/node")

@@ -11,6 +11,7 @@ import subprocess
 from typing import Final, cast
 import uuid
 
+from app.release_runtime.terminal import packaged_terminal_root
 from app.node_toolchain import (
     NodeToolchainError,
     inspect_node_identity,
@@ -193,6 +194,10 @@ def ensure_terminal_node_runtime() -> NodeRuntime:
     node_binary, npm_binary = resolve_node_toolchain()
     identity = _node_identity(node_binary)
     fingerprint = _runtime_fingerprint(identity)
+    packaged = packaged_terminal_root(identity)
+    if packaged is not None:
+        return NodeRuntime(node_binary, npm_binary, packaged, fingerprint, identity,
+                           _toolchain_env(node_binary)["PATH"])
     base = terminal_node_runtime_base()
     target = base / fingerprint
     marker_payload = _marker_payload(fingerprint, identity)

@@ -17,6 +17,7 @@ from wheel.bdist_wheel import bdist_wheel
 # PEP 517 executes setup.py without necessarily placing its checkout on the
 # import path. Resolve the build-owned validator from this source tree.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scripts.stage_terminal_wheel import stage_terminal
 from app.release_runtime.code_te2 import validate_runtime
 from app.release_runtime.package_policy import development_asset, validate_wheel_size
 
@@ -97,6 +98,8 @@ class Te2BuildPy(build_py):
                 path.unlink()
         config = _release_wheel_config()
         package_root = Path(self.build_lib) / "app" / "release_runtime"
+        terminal = package_root / "vendor" / "terminal"
+        shutil.rmtree(terminal, ignore_errors=True)
         if config is None:
             shutil.rmtree(package_root / "bin", ignore_errors=True)
             shutil.rmtree(package_root / "code_te2", ignore_errors=True)
@@ -113,6 +116,8 @@ class Te2BuildPy(build_py):
                 encoding="utf-8",
             )
             return
+        stage_terminal(Path(__file__).resolve().parent, terminal,
+                       "android-arm64" if config.platform_tag == "android_24_arm64_v8a" else "linux-x64")
         binary_dir = package_root / "bin"
         binary_dir.mkdir(parents=True, exist_ok=True)
         target = binary_dir / "te2-server"

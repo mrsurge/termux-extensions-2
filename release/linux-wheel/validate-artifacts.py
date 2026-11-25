@@ -30,6 +30,7 @@ FORBIDDEN_MEMBER_PARTS: Final = (
     "/desktop_client/electron/dist/",
 )
 ALLOWED_NODE_MODULES_PREFIXES: Final = (
+    "app/release_runtime/vendor/terminal/node_modules/",
     "app/apps/code_te2/vendor/node_socketio/node_modules/",
     "app/release_runtime/code_te2/domain/lib/app/apps/code_te2/vendor/node_socketio/node_modules/",
 )

@@ -17,7 +17,7 @@ def test_file_explorer_has_no_terminal_app_source_dependency():
         assert 'apps/terminal/' not in source, path
     source = (app / 'terminal_stream_broker.mjs').read_text()
     assert 'HeadlessTerminal' not in source
-    assert 'xterm-headless' not in (app / 'package-lock.json').read_text()
+    assert '@xterm/headless' not in (app / 'package-lock.json').read_text()
     assert 'backend: pipe' in (app / 'shellspec/terminal.yaml').read_text()
 
 
