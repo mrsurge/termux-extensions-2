@@ -1,3 +1,4 @@
+import { toggleDetachedDevTools } from "./devtools";
 import { resolve } from "node:path";
 
 import {
@@ -320,7 +321,7 @@ export class DetachedSidebarSurfaceRegistry {
     }
     if (action === "devtools") {
       if (!entry.view.webContents.isDestroyed()) {
-        entry.view.webContents.openDevTools({ mode: "detach" });
+        toggleDetachedDevTools(true, entry.view.webContents);
       }
       return true;
     }

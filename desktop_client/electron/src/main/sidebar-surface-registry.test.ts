@@ -12,6 +12,10 @@ import type { DetachedSidebarSurfaceRegistryOptions } from "./sidebar-surface-re
 class Contents extends EventEmitter {
   sent: unknown[] = [];
   reloads = 0;
+  inspecting = false;
+  isDevToolsOpened() { return this.inspecting; }
+  openDevTools() { this.inspecting = true; }
+  closeDevTools() { this.inspecting = false; }
   reloadIgnoringCache() { this.reloads++; }
   isDestroyed() { return false; }
   getURL() { return "http://localhost/app"; }
@@ -90,6 +94,12 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
   assert.equal(registry.handleShellAction(sender(app), "minimize"), false);
   assert.equal(registry.handleShellAction(sender(new Contents()), "minimize"), false);
   assert.equal(registry.handleShellAction(sender(one.webContents), "minimize"), true);
+  assert.equal(registry.handleShellAction(sender(one.webContents), "devtools"), true);
+  assert.equal(View.all[0].webContents.inspecting, true);
+  assert.equal(one.webContents.inspecting, false);
+  assert.equal(View.all[1].webContents.inspecting, false);
+  assert.equal(registry.handleShellAction(sender(one.webContents), "devtools"), true);
+  assert.equal(View.all[0].webContents.inspecting, false);
   assert.equal(one.minimized, true);
   assert.equal(main.minimized, false);
   assert.equal(two.minimized, false);
