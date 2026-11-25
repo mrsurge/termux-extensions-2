@@ -163,7 +163,7 @@ export class DetachedSidebarSurfaceRegistry {
     entry.embeddedBounds = { ...bounds };
     entry.embeddedVisible = visible;
     if (entry.transferred) return { ok: true, presentationId: descriptor.presentationId };
-    if (!entry.window) this.#attachToMain(entry, false);
+    if (!entry.window && entry.parent !== "main") this.#attachToMain(entry, false);
     this.#layoutEntry(entry);
     await entry.loadPromise;
     entry.loadPromise = null;

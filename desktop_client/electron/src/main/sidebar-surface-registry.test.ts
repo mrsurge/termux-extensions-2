@@ -26,7 +26,8 @@ class View {
   constructor() { View.all.push(this); }
   webContents = new Contents();
   setBackgroundColor() {}
-  setVisible() {}
+  visibility: boolean[] = [];
+  setVisible(visible: boolean) { this.visibility.push(visible); }
   setBounds() {}
 }
 class Window extends EventEmitter {
@@ -107,13 +108,18 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
     surfaceId: "embedded", presentationId: "p3" };
   const bounds = { x: 0, y: 0, width: 300, height: 400 };
   await registry.place(embedded, bounds, true);
-  const embeddedContents = View.all[2].webContents;
+  const embeddedView = View.all[2];
+  embeddedView.visibility.length = 0;
+  await registry.place(embedded, { ...bounds, height: 240 }, true);
+  assert.ok(!embeddedView.visibility.includes(false), "resizing a visible pane must preserve input focus");
+  const embeddedContents = embeddedView.webContents;
   embeddedContents.emit("focus");
   assert.deepEqual(JSON.parse(JSON.stringify(app.sent)), [[
     "te2-desktop:sidebar-surface-event",
     { type: "focused", hostId: "host", surfaceId: "embedded", presentationId: "p3" },
   ]]);
   await registry.place(embedded, bounds, false);
+  assert.equal(embeddedView.visibility.at(-1), false);
   embeddedContents.emit("focus");
   assert.equal(app.sent.length, 1, "hidden content cannot claim foreground");
   await registry.place({ ...embedded, presentationId: "p4" }, bounds, true);
