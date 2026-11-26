@@ -27,7 +27,7 @@ import { installCloseOnFocusHandoff } from "./focus-handoff-close-policy";
 import { installChromiumScrollbars } from "./chromium-scrollbars";
 import { installTextContextMenu } from "./text-context-menu";
 import { DesktopDialogHost } from "./dialog-host";
-import { toggleInspector } from "./mobile-inspector";
+import { toggleDetachedDevTools } from "./devtools";
 import {
   FRAMEWORK_REQUEST_TIMEOUT_MS,
   frameworkConnectionError,
@@ -1114,7 +1114,7 @@ async function viewAction(params: Record<string, unknown>): Promise<Record<strin
   const action = String(params.action || "");
   if (action === "home") closeAppView();
   else if (action === "devtools") {
-    await toggleInspector(settings.showDevToolsButton, appView?.webContents ?? mainWindow?.webContents, settings.androidInspector ?? "chromium");
+    toggleDetachedDevTools(settings.showDevToolsButton, appView?.webContents ?? mainWindow?.webContents);
   }
   else if (action === "back" && appView?.webContents.navigationHistory.canGoBack()) {
     appView.webContents.navigationHistory.goBack();
@@ -1415,7 +1415,7 @@ async function main(): Promise<void> {
     layoutPrimary: resizeAppView,
   });
   detachedSurfaceRegistry = new DetachedSidebarSurfaceRegistry({
-    toggleInspector: target => toggleInspector(true, target, settings.androidInspector ?? "chromium"),
+    toggleInspector: async target => toggleDetachedDevTools(true, target),
     panelsChanged: state => {
       appView?.webContents.send("te2-desktop:secondary-panels", state);
       secondaryEditorRegistry?.publishPanels(state);
