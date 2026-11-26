@@ -16,6 +16,7 @@ interface Dependencies {  bindMenuToggle: (el: HTMLElement, action: () => unknow
     miToggleStickyScroll: HTMLElement,
   },
   getEditorViewState: () => EditorViewState | null,
+  toggleWrapDefault(): void,
   updatePreference: (key: string, value: unknown) => Promise<boolean>,
   toast: (msg: string) => void,
 }
@@ -52,10 +53,7 @@ export function installSimplePreferenceMenuActions(deps: Dependencies) {
     const ok = await deps.updatePreference('showInlayHints', !(s()?.showInlayHints));
     if (!ok) deps.toast('Failed to update inlay hints preference');
   });
-  t(deps.els.miToggleWrap, async () => {
-    const ok = await deps.updatePreference('wordWrap', !(s()?.wordWrap));
-    if (!ok) deps.toast('Failed to update preference');
-  });
+  t(deps.els.miToggleWrap, deps.toggleWrapDefault);
   t(deps.els.miToggleColorPicker, async () => {
     const ok = await deps.updatePreference('colorPicker', !(s()?.colorPicker));
     if (!ok) deps.toast('Failed to update color picker');

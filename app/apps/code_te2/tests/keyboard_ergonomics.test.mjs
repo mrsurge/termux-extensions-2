@@ -159,11 +159,15 @@ test('editor tab chords are physical-key and focus scoped; preference requests a
     const updates = [], cycles = [];
     const editor = { focus() { focusCalls++; }, hasTextFocus: () => focused, addAction() { actions++; } };
     const root = document.createElement('div'); root.setAttribute('data-te2-working-editor-host', ''); document.body.append(root);
-    const runtime = installEditorKeyboardRuntime({ root, getEditor: () => editor, getPrefs: () => ({ editor: { relativeLineNumbers: false } }), updatePreference: async (...args) => updates.push(args) });
+    const wrap = [];
+    const runtime = installEditorKeyboardRuntime({ root, getEditor: () => editor, toggleWrap: global => wrap.push(global), getPrefs: () => ({ editor: { relativeLineNumbers: false } }), updatePreference: async (...args) => updates.push(args) });
     runtime.bindEditor(); runtime.bindEditor(); assert.equal(actions, 1);
     window.addEventListener('code-te2:cycle-file-tab', event => cycles.push(event.detail));
     const key = (code, extras = {}) => document.dispatchEvent(new KeyboardEvent('keydown', { code, key: code === 'Comma' ? '<' : '>', ctrlKey: true, shiftKey: true, cancelable: true, ...extras }));
     key('Comma'); key('Period'); key('Period', { isComposing: true }); key('Comma', { repeat: true });
+    key('KeyZ', { altKey: true, ctrlKey: false, shiftKey: false });
+    key('KeyZ', { altKey: true, ctrlKey: false });
+    assert.deepEqual(wrap, [false, true]);
     focused = false; key('Comma'); assert.deepEqual(cycles, [-1, 1]);
     window.dispatchEvent(new CustomEvent('code-te2:palette-action', { detail: 'relative-numbers' }));
     window.dispatchEvent(new CustomEvent('code-te2:palette-action', { detail: 'relative-numbers' }));

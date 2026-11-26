@@ -1,6 +1,7 @@
 import { isUnknownArray } from '../../../src/rpc/value-types.ts';
 type State = Record<string, unknown>;
 interface PreferencesDeps {
+  getWrapDefault(seed?: boolean): boolean;
   getProject(): string | null;
   requestBackendEditorStateGet(): Promise<unknown>;
   requestBackendEditorPreferenceUpdate(payload: State): Promise<unknown>;
@@ -70,7 +71,7 @@ export function createPreferencesController(deps: PreferencesDeps) {
     deps.setMenuChecked(m.miToggleInlayHints, state.showInlayHints !== false);
     deps.setMenuChecked(m.miToggleShading, !!state.showShading);
     deps.setMenuChecked(m.miToggleIndentGuides, !!state.showIndentGuides);
-    deps.setMenuChecked(m.miToggleWrap, !!state.wordWrap);
+    deps.setMenuChecked(m.miToggleWrap, deps.getWrapDefault(typeof state.wordWrap === 'boolean' ? state.wordWrap : undefined));
     syncSaveModeMenu(m, state);
     const autoSave = !!state.autoSave;
     const showDraftDiffs = !autoSave && !!state.showDraftDiffs;

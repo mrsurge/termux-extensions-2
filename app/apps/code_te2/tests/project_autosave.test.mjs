@@ -17,6 +17,7 @@ test('preference projections reject another project and older same-project mode'
   globalThis.HTMLElement = class {};
   let project = '/a', state, resolve;
   const controller = api.createPreferencesController({
+    getWrapDefault: seed => seed ?? false,
     getProject: () => project, getClientId: () => null, getMenuItems: () => ({}),
     setEditorViewState: value => { state = value; }, setMenuChecked() {}, applyFontScale() {},
     requestBackendEditorStateGet: () => new Promise(done => { resolve = done; }),

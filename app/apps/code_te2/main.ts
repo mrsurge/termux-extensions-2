@@ -1,4 +1,5 @@
 import { isUnknownArray } from './src/rpc/value-types.ts';
+import { localWordWrap } from './src/local-word-wrap.ts';
 // /data/data/com.termux/files/home/mrselect/app/apps/code_te2/main.ts
 // app/apps/code_te2/main.ts
 // Inline Monaco editor integration
@@ -228,6 +229,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     return;
   }
   const clientId = clientIdentity.clientInstanceId;
+  const wrap = localWordWrap(clientId);
   const terminalDestinationPreference = createTerminalDestinationPreference(clientId);
   let problemsPanel: ProblemsPanelController = createProblemsState();
   let editorViewState: EditorViewState | null = null; // Projected from the host RPC state snapshot
@@ -771,6 +773,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   // ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
   const preferencesController = createPreferencesController({
+    getWrapDefault: seed => wrap.value(null, seed),
     getProject: () => cachedProjectRoot,
     requestBackendEditorStateGet: () => uiIpcConnections.requestBackendEditorStateGet(),
     requestBackendEditorPreferenceUpdate: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorPreferenceUpdate(payload),
@@ -1596,7 +1599,10 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     toast: (msg: string) => host.toast(msg),
   });
 
+  const stopWrapMenu = wrap.listen(() => setMenuChecked(miToggleWrap, wrap.value(null)));
+  window.addEventListener('pagehide', stopWrapMenu, { once: true });
   installSimplePreferenceMenuActions({
+    toggleWrapDefault: () => wrap.toggle(null, editorViewState?.wordWrap === true),
     bindMenuToggle,
     els: {
       miToggleLines,

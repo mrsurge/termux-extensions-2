@@ -765,9 +765,13 @@ from short Python-driven ping trials. Running-process replacement remains user-o
 
 - [x] Initial source audit: index.html and app_shell.html have manifest and
   apple-touch-icon links but no explicit standard favicon declaration.
-- [ ] Complete route/icon metadata audit and approve implementation.
-- [ ] Reuse launcher/app metadata icons with safe URLs and a TE2 fallback;
-  validate browser requests and bundled/OTA client routing.
+- [x] Live acceptance (2026-11-26, user): framework and app-shell favicons work.
+  The shell uses the app's same-origin icon when available, with the TE2 icon as fallback.
+- [x] Same slice, live accepted: breadcrumbs initially show the target, not the
+  root, and preserve deliberate wheel scrolling. Alt+Z toggles wrap for the
+  document; Alt+Shift+Z toggles the client default. Matching the default clears
+  the document override.
+- [ ] Separate packaging check: bundled/OTA favicon routing was not independently verified.
 
 ### 3. Client settings bookmark creation
 

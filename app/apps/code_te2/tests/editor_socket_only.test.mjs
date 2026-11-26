@@ -20,24 +20,27 @@ test('preferences use RPC for reads/writes and never fall back to HTTP', async (
   const { createPreferencesController } = await load('main_page/frontend/ui/preferences.ts');
   let state, fail = false;
   const calls = [];
+  const scope = {autosaveProject: '/repo', autosaveRevision: 1};
   const controller = createPreferencesController({
-    requestBackendEditorStateGet: async () => ({ view_state: { fontScale: 0.85 } }),
+    getProject: () => '/repo',
+    getWrapDefault: seed => seed ?? false,
+    requestBackendEditorStateGet: async () => ({ view_state: { ...scope, fontScale: 0.85 } }),
     requestBackendEditorPreferenceUpdate: async (payload) => {
       if (fail) throw Error('disconnected');
       calls.push(payload);
-      return { ok: true, data: { wordWrap: true } };
+      return { ok: true, data: { ...scope, showMinimap: true } };
     },
     apiPost: () => { throw Error('HTTP fallback forbidden'); },
     getClientId: () => null, setEditorViewState: (s) => { state = s; },
     getMenuItems: () => ({}), setMenuChecked() {}, applyFontScale() {},
   });
   await controller.refreshMenuState();
-  assert.deepEqual(state, { fontScale: 0.85 });
-  assert.equal(await controller.updatePreference('wordWrap', true), true);
-  assert.deepEqual(calls, [{ key: 'wordWrap', value: true }]);
+  assert.deepEqual(state, { ...scope, fontScale: 0.85 });
+  assert.equal(await controller.updatePreference('showMinimap', true), true);
+  assert.deepEqual(calls, [{ key: 'showMinimap', value: true, project: '/repo', expected_revision: 1 }]);
   fail = true;
-  assert.equal(await controller.updatePreference('wordWrap', false), false);
-  assert.deepEqual(state, { wordWrap: true });
+  assert.equal(await controller.updatePreference('showMinimap', false), false);
+  assert.deepEqual(state, { ...scope, showMinimap: true });
 });
 
 test('Monaco configuration updates use the editor RPC callback', async () => {

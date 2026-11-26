@@ -15,6 +15,7 @@ export function installEditorKeyboardRuntime(deps: {
   root: HTMLElement;
   getEditor(): KeyboardEditor | null;
   getPrefs(): unknown;
+  toggleWrap(global: boolean): void;
   updatePreference(key: string, value: boolean): Promise<unknown>;
 }) {
   const bound = new WeakSet<object>();
@@ -50,8 +51,14 @@ export function installEditorKeyboardRuntime(deps: {
   const focus = () => { if (owner.isActive()) current()?.focus?.(); };
   const keydown = (event: KeyboardEvent) => {
     if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat
-      || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey
       || !owner.isActive() || !current()?.hasTextFocus?.()) return;
+    if (event.altKey && !event.ctrlKey && !event.metaKey && event.code === 'KeyZ') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      deps.toggleWrap(event.shiftKey);
+      return;
+    }
+    if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return;
     const direction = event.code === 'Comma' ? -1 : event.code === 'Period' ? 1 : 0;
     if (!direction) return;
     event.preventDefault();

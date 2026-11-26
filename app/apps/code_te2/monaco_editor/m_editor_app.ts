@@ -1,4 +1,5 @@
 import { isUnknownArray } from '../src/rpc/value-types.ts';
+import { localWordWrap } from '../src/local-word-wrap.ts';
 import type { WorkingEditorMount } from './editor_mount.ts';
 import { buildUiUrl, fetchJsonWithBase } from "./editor_common_utils.ts";
 import {
@@ -486,7 +487,16 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     lifetime.addCleanup(() => options.mount.root.removeEventListener('code-te2:secondary-view-handoff', capture));
   }
   let cachedPrefs: CachedPrefsLike | null = null;
+  const wrap = localWordWrap(rendererContext.identity.mainPageClientInstanceId ?? rendererContext.identity.clientInstanceId);
+  function refreshWrap(touch = false): void {
+    const wordWrap = wrap.value(currentPath, cachedPrefs ? getBooleanPref(cachedPrefs, 'wordWrap') : undefined, touch) ? 'on' : 'off';
+    for (const control of new Set([editor, diffEditor?.getModifiedEditor?.(), diffEditor?.getOriginalEditor?.()])) control?.updateOptions?.({ wordWrap });
+  }
+  lifetime.addCleanup(wrap.listen(() => refreshWrap()));
   const keyboardRuntime = installEditorKeyboardRuntime({
+    toggleWrap: global => {
+      if (global || currentPath) wrap.toggle(global ? null : currentPath, cachedPrefs ? getBooleanPref(cachedPrefs, 'wordWrap') : undefined);
+    },
     root: options.mount.root,
     getEditor: () => diffEditor?.getModifiedEditor?.() ?? editor,
     getPrefs: () => cachedPrefs,
@@ -1035,6 +1045,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
       },
       setCurrentPath: function (value: string | null) {
         currentPath = value;
+        refreshWrap(true);
       },
       getBaseSha256: function () {
         return baseSha256;
@@ -1290,6 +1301,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   lifetime.addCleanup(() => editorHostActionRuntime.dispose());
   lifetime.addCleanup(() => runtimeSocketListeners.dispose());
   lifetime.addCleanup(() => keyboardRuntime.dispose());
+  lifetime.addCleanup(() => breadcrumbRuntime.dispose());
   lifetime.addCleanup(() => uiEditorRuntime.dispose());
   lifetime.addCleanup(() => languageBridgeProviders?.dispose());
   lifetime.addCleanup(() => textmateRuntime.dispose());
@@ -1782,12 +1794,13 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   function buildMonacoOptionsFromPrefs(
     state: unknown,
   ): Record<string, unknown> {
-    return buildMonacoOptionsFromPrefsState(
+    const result = buildMonacoOptionsFromPrefsState(
       state,
       textmateThemeOwnerRuntime
         ? textmateThemeOwnerRuntime.getThemeJsonCache()
         : {},
     );
+    return { ...result, wordWrap: wrap.value(currentPath, state ? result.wordWrap === 'on' : undefined) ? 'on' : 'off' };
   }
 
   function ensureTe2DiffTheme(): void {
@@ -2292,6 +2305,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     },
     setCurrentPath: function (path: string | null) {
       currentPath = path;
+      refreshWrap(true);
     },
     getBaseSha256: function () {
       return baseSha256;
@@ -2492,6 +2506,7 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
           },
           setCurrentPath: function (value: string | null) {
             currentPath = value;
+            refreshWrap(true);
           },
           clearActiveModel: clearActiveModel,
           wbBumpGeneration: _wbBumpGeneration,

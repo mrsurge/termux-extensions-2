@@ -6,6 +6,7 @@
     <title>TE2 App</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/icon.png">
+    <link id="app-favicon" rel="icon" href="/static/icon.png">
     <meta name="theme-color" content="#4caf50">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -688,6 +689,16 @@
                         return;
                     }
                     host.setTitle(appDef.name || 'TE2 App');
+                    if (typeof appDef.icon_src === 'string' && appDef.icon_src.trim()) {
+                        try {
+                            const url = new URL(appDef.icon_src, location.href);
+                            if (url.origin === location.origin && /^https?:$/.test(url.protocol)) {
+                                const image = new Image();
+                                image.onload = () => { document.getElementById('app-favicon').href = url.href; };
+                                image.src = url.href;
+                            }
+                        } catch { /* Keep the framework icon. */ }
+                    }
                     Promise.resolve(onCatalog(appDef)).catch(error => {
                         cleanup();
                         reject(error);

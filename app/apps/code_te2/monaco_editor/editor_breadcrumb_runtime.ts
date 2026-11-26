@@ -105,6 +105,7 @@ interface BreadcrumbModelLike {
 
 interface BreadcrumbRuntime {
   init(): void;
+  dispose(): void;
   bindEditor(): void;
   updatePath(absPath: string | null | undefined, deferSymbols?: boolean): void;
   requestSymbols(
@@ -490,6 +491,8 @@ export function createEditorBreadcrumbRuntime(
   let element: HTMLElement | null = null;
   let symbols: BreadcrumbSymbolLike[] = [];
   let lastPath: string | null = null;
+  let followTarget = true;
+  let observer: ResizeObserver | null = null;
   let lastCursorLine: number | undefined;
   let symbolsSeq = 0;
   let contentRefreshInFlight = false;
@@ -516,6 +519,7 @@ export function createEditorBreadcrumbRuntime(
 
   function render(cursorLine: number | undefined = currentCursorLine()): void {
     if (!element) return;
+    const previousScroll = element.scrollLeft;
     element.innerHTML = "";
     if (!lastPath) return;
 
@@ -570,7 +574,8 @@ export function createEditorBreadcrumbRuntime(
       }
     }
 
-    finalizeBreadcrumbScroll(element);
+    if (followTarget) finalizeBreadcrumbScroll(element);
+    else element.scrollLeft = previousScroll;
   }
 
   function onPathClick(event: Event): void {
@@ -637,7 +642,16 @@ export function createEditorBreadcrumbRuntime(
   function init(): void {
     const doc = deps.getDocument();
     if (!doc) return;
+    dispose();
     element = deps.getBreadcrumbElement();
+    element?.addEventListener("wheel", scrollBreadcrumb, { passive: false });
+    element?.addEventListener("touchmove", leaveTarget, { passive: true });
+    if (element && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        if (element && followTarget) finalizeBreadcrumbScroll(element);
+      });
+      observer.observe(element);
+    }
     bindEditor();
     loadBreadcrumbIcons(
       (path: string): Promise<unknown> => import(path),
@@ -652,6 +666,31 @@ export function createEditorBreadcrumbRuntime(
     );
   }
 
+  function leaveTarget(): void { followTarget = false; }
+  function dispose(): void {
+    contentDisposable?.dispose?.();
+    contentDisposable = null;
+    boundEditor = null;
+    observer?.disconnect();
+    observer = null;
+    element?.removeEventListener("wheel", scrollBreadcrumb);
+    element?.removeEventListener("touchmove", leaveTarget);
+    element = null;
+    followTarget = true;
+  }
+  function scrollBreadcrumb(event: WheelEvent): void {
+    if (!element || event.ctrlKey) return;
+    const delta = Math.abs(event.deltaX) >= Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (!delta) return;
+    const before = element.scrollLeft;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientWidth : 1;
+    element.scrollLeft += delta * unit;
+    if (element.scrollLeft !== before) {
+      followTarget = element.scrollWidth - element.clientWidth - element.scrollLeft <= 1;
+      event.preventDefault();
+    }
+  }
+
   function updatePath(
     absPath: string | null | undefined,
     deferSymbols?: boolean,
@@ -660,6 +699,7 @@ export function createEditorBreadcrumbRuntime(
     bindEditor();
     const nextPath = asString(absPath);
     if (!shouldUpdateBreadcrumbPath(nextPath, lastPath, deferSymbols)) return;
+    if (nextPath !== lastPath) followTarget = true;
     lastPath = nextPath;
     symbols = [];
     contentRefreshQueued = false;
@@ -763,6 +803,7 @@ export function createEditorBreadcrumbRuntime(
 
   return {
     init,
+    dispose,
     bindEditor,
     updatePath,
     requestSymbols,
