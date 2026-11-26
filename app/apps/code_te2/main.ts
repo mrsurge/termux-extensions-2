@@ -650,7 +650,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   // Preferences are managed by backend; frontend displays state only (no caching)
 
   let editorState: EditorState | null = null;
-  let branchMenuHandle: { close(): void } | null = null;
+  let branchMenuHandle: ReturnType<typeof initBranchMenu> | null = null;
   function buildSidebarMentionPayload(payload: UnknownRecord): UnknownRecord {
     const target = sidebarShortcuts?.getMentionTarget?.();
     if (!target) {

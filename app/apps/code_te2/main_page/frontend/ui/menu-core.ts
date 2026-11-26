@@ -6,7 +6,7 @@ interface Dependencies {  menuFileDD: HTMLElement,
   menuViewDD: HTMLElement,
   getAgentShortcutLoadDD: () => HTMLElement | null,
   getAgentShortcutLoadBtn: () => HTMLElement | null,
-  getBranchMenuHandle: () => { close(): void } | null,
+  getBranchMenuHandle: () => { open(): void; close(): void } | null,
   menuFileBtn: HTMLElement,
   menuEditBtn: HTMLElement,
   menuEditorBtn: HTMLElement,
@@ -19,11 +19,23 @@ interface Dependencies {  menuFileDD: HTMLElement,
 }
 
 export function createMenuCoreController(deps: Dependencies) {
+  const menus = [
+    { button: deps.menuFileBtn, panel: deps.menuFileDD },
+    { button: deps.menuEditBtn, panel: deps.menuEditDD },
+    { button: deps.menuEditorBtn, panel: deps.menuEditorDD },
+    { button: deps.menuViewBtn, panel: deps.menuViewDD },
+  ];
+  const branchButton = document.getElementById('menu-branch-btn');
+  const branchPanel = document.getElementById('menu-branch-dd');
+  if (branchButton && branchPanel) menus.push({ button: branchButton, panel: branchPanel });
+  let mouseMenu: HTMLElement | null = null;
+
   function closeAllMenus() {
-    deps.menuFileDD.classList.remove('show');
-    deps.menuEditDD.classList.remove('show');
-    deps.menuEditorDD.classList.remove('show');
-    deps.menuViewDD.classList.remove('show');
+    mouseMenu = null;
+    for (const { button, panel } of menus) {
+      panel.classList.remove('show');
+      button.setAttribute('aria-expanded', 'false');
+    }
     const agentShortcutLoadDD = deps.getAgentShortcutLoadDD();
     if (agentShortcutLoadDD) agentShortcutLoadDD.classList.remove('show');
     const agentShortcutLoadBtn = deps.getAgentShortcutLoadBtn();
@@ -48,18 +60,53 @@ export function createMenuCoreController(deps: Dependencies) {
   }
 
   function installPrimaryMenuButtons() {
-    const closeOthers = (except: HTMLElement) => {
-      [deps.menuFileDD, deps.menuEditDD, deps.menuEditorDD, deps.menuViewDD].forEach((dd) => {
-        if (dd !== except) dd.classList.remove('show');
-      });
-      const branchMenuHandle = deps.getBranchMenuHandle();
-      if (branchMenuHandle) branchMenuHandle.close();
-    };
+    for (const { button, panel } of menus) {
+      button.setAttribute('aria-controls', panel.id);
+      button.setAttribute('aria-expanded', 'false');
+      let pressedWith = '';
+      button.addEventListener('pointerdown', event => { pressedWith = event.pointerType; });
+      button.addEventListener('pointercancel', () => { pressedWith = ''; });
 
-    deps.menuFileBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuFileDD.classList.toggle('show'); if (open) closeOthers(deps.menuFileDD); });
-    deps.menuEditBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuEditDD.classList.toggle('show'); if (open) closeOthers(deps.menuEditDD); });
-    deps.menuEditorBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuEditorDD.classList.toggle('show'); if (open) closeOthers(deps.menuEditorDD); });
-    deps.menuViewBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuViewDD.classList.toggle('show'); if (open) closeOthers(deps.menuViewDD); });
+      const open = (mouse: boolean) => {
+        closeAllMenus();
+        if (panel === branchPanel) {
+          const branch = deps.getBranchMenuHandle();
+          if (!branch) return;
+          branch.open();
+        } else {
+          panel.classList.add('show');
+        }
+        button.setAttribute('aria-expanded', 'true');
+        if (mouse) mouseMenu = panel;
+      };
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        // Keyboard and programmatic clicks have no pointer activation.
+        const mouse = event.detail !== 0 &&
+          (('pointerType' in event && event.pointerType) || pressedWith) === 'mouse';
+        pressedWith = '';
+        if (panel.classList.contains('show')) closeAllMenus();
+        else open(mouse);
+      });
+      button.addEventListener('pointerenter', event => {
+        if (event.pointerType !== 'mouse' || mouseMenu === panel ||
+            !mouseMenu?.classList.contains('show')) return;
+        open(true);
+        button.focus({ preventScroll: true });
+      });
+    }
+    document.addEventListener('pointerdown', event => {
+      if (!mouseMenu || menus.some(({ button, panel }) =>
+        event.composedPath().includes(button) || event.composedPath().includes(panel))) return;
+      closeAllMenus();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !mouseMenu?.classList.contains('show')) return;
+      const trigger = menus.find(menu => menu.panel === mouseMenu)?.button;
+      closeAllMenus();
+      trigger?.focus({ preventScroll: true });
+    });
+    window.addEventListener('blur', () => { if (mouseMenu) closeAllMenus(); });
     installRunButtonInteractions(
       deps.runActiveBtn,
       deps.runCurrentFile,

@@ -36,8 +36,6 @@ const assetVersion = document.querySelector("#asset-version") as HTMLButtonEleme
 const zoomReset = document.querySelector("#zoom-reset") as HTMLButtonElement;
 const zoomOut = document.querySelector("#zoom-out") as HTMLButtonElement;
 const zoomIn = document.querySelector("#zoom-in") as HTMLButtonElement;
-const back = document.querySelector("#back") as HTMLButtonElement;
-const forward = document.querySelector("#forward") as HTMLButtonElement;
 const toastElement = document.querySelector("#native-toast") as HTMLElement;
 const frameworkOffline = document.querySelector("#framework-offline") as HTMLButtonElement;
 
@@ -173,11 +171,6 @@ async function setZoom(value: number): Promise<void> {
   renderZoom();
 }
 
-function setNavigation(canGoBack: boolean, canGoForward: boolean): void {
-  back.disabled = !currentUrl || !canGoBack;
-  forward.disabled = !currentUrl || !canGoForward;
-}
-
 function appIdFromCurrentUrl(): string | null {
   if (!currentUrl || currentUrl.origin !== browserFrameworkOrigin) return null;
   const match = currentUrl.pathname.match(/^\/app\/([A-Za-z0-9._-]+)(?:\/|$)/);
@@ -193,7 +186,6 @@ async function showApp(rawUrl: string): Promise<void> {
   currentUrl = url;
   launcherView.hidden = true;
   document.body.dataset.appOpen = "true";
-  setNavigation(false, false);
   startFrameworkStatusPoll();
   try {
     await bridge.request("navigate_app", { url: url.href });
@@ -212,7 +204,6 @@ function showHome(): void {
   launcherView.src = "./android_shell/index.html";
   delete document.body.dataset.appOpen;
   pageTitle.textContent = "TE2 Desktop";
-  setNavigation(false, false);
   runUiTask(bridge.request("view_action", { action: "home" }));
   runUiTask(bridge.request("set_window_title", { title: "TE2 Desktop" }));
 }
@@ -231,7 +222,6 @@ function handleNavigation(navigation: AppNavigation): void {
   launcherView.hidden = true;
   document.body.dataset.appOpen = "true";
   pageTitle.textContent = navigation.title || "TE2 Desktop";
-  setNavigation(navigation.canGoBack, navigation.canGoForward);
   if (!hadAppOpen) startFrameworkStatusPoll();
 }
 
@@ -306,8 +296,6 @@ assetVersion.addEventListener("click", async () => {
   }
 });
 frameworkOffline.addEventListener("click", showHome);
-back.addEventListener("click", () => runUiTask(bridge.request("view_action", { action: "back" })));
-forward.addEventListener("click", () => runUiTask(bridge.request("view_action", { action: "forward" })));
 document.querySelector("#reload")?.addEventListener(
   "click",
   () => runUiTask(bridge.request("view_action", { action: "reload" })),
@@ -352,4 +340,3 @@ if (!deferLauncherBoot) launcherView.src = "./android_shell/index.html";
 const initialAssetStatus = await bridge.request("get_asset_status") as AssetStatus;
 setAssetBadge(initialAssetStatus.localVersion);
 renderZoom();
-setNavigation(false, false);

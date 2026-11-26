@@ -18,6 +18,7 @@ interface BranchListResponse {
 }
 
 interface BranchMenuController {
+  open(): void;
   close(): void;
   refresh(): Promise<void>;
 }
@@ -59,13 +60,16 @@ export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
   const dropdown = document.getElementById('menu-branch-dd');
   const branchLabel = document.getElementById('menu-branch-label');
   if (!btn || !dropdown || !branchLabel) {
-    return { close: () => {}, refresh: () => Promise.resolve() };
+    return { open: () => {}, close: () => {}, refresh: () => Promise.resolve() };
   }
   const btnEl = btn;
   const dropdownEl = dropdown;
   const branchLabelEl = branchLabel;
 
+  let generation = 0;
   function closeDropdown(): void {
+    generation++;
+    btnEl.setAttribute('aria-expanded', 'false');
     dropdownEl.classList.remove('show');
   }
 
@@ -77,14 +81,15 @@ export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
   }
 
   async function loadBranches(showDropdown = false): Promise<void> {
+    const opening = generation;
     try {
       const data = asBranchListResponse(await deps.requestUiIpc(UI_IPC_RPC_METHODS.hostGitBranchesList));
       setLabel(data.current);
-      if (showDropdown) {
+      if (showDropdown && opening === generation) {
         renderDropdown(data.current, data.branches || []);
-        dropdownEl.classList.add('show');
       }
     } catch (err) {
+      if (showDropdown && opening === generation) closeDropdown();
       toast(errorMessage(err, 'Unable to load branches'));
     }
   }
@@ -246,25 +251,14 @@ export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
     }
   }
 
-  btnEl.addEventListener('click', async (ev) => {
-    ev.stopPropagation();
-    const isOpen = dropdownEl.classList.contains('show');
-    // Close all other menus
-    document.querySelectorAll('.fe-dropdown').forEach(d => {
-      if (d.id !== 'menu-branch-dd') {
-        d.classList.remove('show');
-      }
-    });
-
-    if (isOpen) {
-      closeDropdown();
-    } else {
-      await loadBranches(true);
-    }
-  });
+  function open(): void {
+    generation++;
+    dropdownEl.classList.add('show');
+    void loadBranches(true);
+  }
 
   // Prime label (don't open dropdown on initial load).
   loadBranches(false);
 
-  return { close: closeDropdown, refresh: () => loadBranches(false) };
+  return { open, close: closeDropdown, refresh: () => loadBranches(false) };
 }
