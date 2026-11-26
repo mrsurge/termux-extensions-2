@@ -59,6 +59,7 @@ ELECTRON_ROOT_INPUTS: Final = (
     "package-lock.json",
     "package.json",
     "package.mjs",
+    "src/inspector/ERUDA-LICENSE",
     "tsconfig.json",
 )
 ELECTRON_SOURCE_SUFFIXES: Final = frozenset({".css", ".html", ".ts", ".tsx"})

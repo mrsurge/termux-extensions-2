@@ -18,7 +18,7 @@ import {
   type WebContents,
 } from "electron";
 
-import { FrameworkInstaller } from "../../../electromux/framework-installer";
+import { FrameworkInstaller } from "./framework-installer";
 import { AndroidSession, supportsAndroidSession } from "./android-session";
 import { androidSettings } from "./android-settings";
 import { clearFrameworkAssetCaches } from "./asset-cache";

@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { LocalFrameworkController } from '../electron/src/main/local-framework-controller';
 import { readLocalFrameworkConfig, writeLocalFrameworkConfig } from '../electron/src/main/local-framework-config';
-import {FrameworkInstaller, type InstallerOptions} from './framework-installer';
+import {FrameworkInstaller, type InstallerOptions} from '../electron/src/main/framework-installer';
 
 export type LocalFrameworkConsumerOptions = {
   environment?: NodeJS.ProcessEnv;

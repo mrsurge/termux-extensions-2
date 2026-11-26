@@ -2,8 +2,8 @@ import {spawn, type ChildProcess} from 'node:child_process';
 import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {isAbsolute, join} from 'node:path';
 import {StringDecoder} from 'node:string_decoder';
-import {OwnedChildSupervisor} from '../../vendor/electromux/runtime/src/child-supervisor';
-import {OutputPump} from '../../vendor/electromux/runtime/src/output-pump';
+import {OwnedChildSupervisor} from './vendor/electromux/child-supervisor';
+import {OutputPump} from './vendor/electromux/output-pump';
 
 const INSTALLER_URL = 'https://github.com/mrsurge/termux-extensions-2/releases/download/termux-installer-0.2.357-preview.2/install-te2';
 export type InstallationState = {

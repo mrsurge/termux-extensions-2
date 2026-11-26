@@ -332,6 +332,17 @@ class DesktopElectronRuntimeTests(unittest.TestCase):
         self.assertFalse(any("process-tree-samples" in name for name in names))
         self.assertFalse(any(name.endswith("/README.md") for name in names))
 
+    def test_desktop_installer_and_build_inputs_are_staged(self) -> None:
+        workspace = self.home / "installer-source-stage"
+        electron = electron_runtime._copy_packaged_source(workspace)
+        main = electron / "src" / "main"
+        self.assertIn('"./framework-installer"', (main / "index.ts").read_text())
+        installer = (main / "framework-installer.ts").read_text()
+        for name in ("child-supervisor", "output-pump"):
+            self.assertIn(f"'./vendor/electromux/{name}'", installer)
+            self.assertTrue((main / "vendor" / "electromux" / f"{name}.ts").is_file())
+        self.assertTrue((electron / "src/inspector/ERUDA-LICENSE").is_file())
+
     def test_staged_component_runtime_dependency_resolves(self) -> None:
         workspace = self.home / "source-stage"
         electron_runtime._copy_packaged_source(workspace)
