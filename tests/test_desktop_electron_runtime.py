@@ -342,6 +342,9 @@ class DesktopElectronRuntimeTests(unittest.TestCase):
             self.assertIn(f"'./vendor/electromux/{name}'", installer)
             self.assertTrue((main / "vendor" / "electromux" / f"{name}.ts").is_file())
         self.assertTrue((electron / "src/inspector/ERUDA-LICENSE").is_file())
+        inspector = electron / "src/inspector"
+        self.assertIn('"./vendor/eruda.js"', (inspector / "mobile.ts").read_text())
+        self.assertTrue((inspector / "vendor/eruda.js").is_file())
 
     def test_staged_component_runtime_dependency_resolves(self) -> None:
         workspace = self.home / "source-stage"

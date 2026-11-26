@@ -45,6 +45,7 @@ SHARED_DIALOG_SOURCES: Final = (
 )
 SHARED_COMPONENT_DEPENDENCIES: Final = (
     SOURCE_ROOT.parent / "app" / "apps" / "code_te2" / "src" / "rpc" / "value-types.ts",
+    SOURCE_ROOT.parent / "app" / "apps" / "code_te2" / "main_page" / "frontend" / "secondary-panel-contracts.d.ts",
 )
 PACKAGE_JSON: Final = ELECTRON_SOURCE / "package.json"
 PACKAGE_LOCK: Final = ELECTRON_SOURCE / "package-lock.json"
@@ -60,6 +61,7 @@ ELECTRON_ROOT_INPUTS: Final = (
     "package.json",
     "package.mjs",
     "src/inspector/ERUDA-LICENSE",
+    "src/inspector/vendor/eruda.js",
     "tsconfig.json",
 )
 ELECTRON_SOURCE_SUFFIXES: Final = frozenset({".css", ".html", ".ts", ".tsx"})
