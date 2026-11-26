@@ -158,8 +158,7 @@ interface UiRefs {
   btnNew: HTMLButtonElement;
   btnRefresh: HTMLButtonElement;
   btnStop: HTMLButtonElement;
-  btnKill: HTMLButtonElement;
-  btnRemove: HTMLButtonElement;
+  exitPrompt: HTMLButtonElement;
   zoomOut: HTMLButtonElement;
   zoomIn: HTMLButtonElement;
   keyToggle: HTMLButtonElement;
@@ -715,8 +714,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     btnNew: getRequired(root, '#ta-btn-new'),
     btnRefresh: getRequired(root, '#ta-btn-refresh'),
     btnStop: getRequired(root, '#ta-btn-stop'),
-    btnKill: getRequired(root, '#ta-btn-kill'),
-    btnRemove: getRequired(root, '#ta-btn-remove'),
+    exitPrompt: getRequired(root, '#ta-exit-prompt'),
     zoomOut: getRequired(root, '#ta-zoom-out'),
     zoomIn: getRequired(root, '#ta-zoom-in'),
     keyToggle: getRequired(root, '#ta-key-toggle'),
@@ -766,6 +764,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     encoder: new TextEncoder(),
   };
   let initialSidebarStateApplied = false;
+  let finishedId: string | null = null;
+  let endingId: string | null = null;
   let lifecycleClient: TerminalLifecycleClient | null = null;
   let syncingVendoredCtrl = false;
   let cancelShiftPress = () => {};
@@ -788,7 +788,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.shells = snapshot.shells;
 
     const activeId = state.activeId;
-    if (activeId && !state.shells.some((item) => item.id === activeId)) {
+    if (snapshot.ready && activeId && activeId !== finishedId && !state.shells.some((item) => item.id === activeId)) {
       disposeSession();
       state.activeId = null;
       ui.title.textContent = 'No shell selected';
@@ -1290,6 +1290,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   function queueInput(data: string): void {
     if (!data) return;
+    if (finishedId) {
+      if (data === '\r' || data === '\n') leaveTerminal(finishedId);
+      return;
+    }
     // Preserve xterm event order without delaying typing or held navigation keys.
     // sendMessage drops disconnected input; nothing is queued for reconnect.
     sendMessage({ type: 'input', data: state.encoder.encode(data) });
@@ -1297,14 +1301,38 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   function clearSocket(): void {
     state.touchSelection?.cancelGesture?.();
-    if (state.ws) {
+    const socket = state.ws;
+    state.ws = null;
+    if (socket) {
       try {
-        state.ws.close(1000, 'dispose');
+        socket.close(1000, 'dispose');
       } catch {
         // ignore
       }
     }
-    state.ws = null;
+  }
+
+  function leaveTerminal(id: string): void {
+    if (state.activeId !== id) return;
+    disposeSession();
+    state.activeId = null;
+    ui.title.textContent = 'No shell selected';
+    setStatus('');
+    setMode('list');
+    closeDrawer();
+    renderShellList();
+    if (sidebarState.enabled) resetSidebarShellState(id);
+  }
+
+  function finishTerminal(reason: string): void {
+    const id = state.activeId;
+    if (!id || finishedId === id) return;
+    finishedId = id;
+    clearSocket();
+    setStatus(reason);
+    ui.btnStop.disabled = true;
+    ui.exitPrompt.hidden = false;
+    ui.exitPrompt.focus({preventScroll:true});
   }
 
   function setStatus(message: string): void {
@@ -1348,14 +1376,17 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
     if (frame.type === 'exit') {
       state.lastSeqApplied = Math.max(state.lastSeqApplied, frame.sequence);
-      setStatus(frame.reason || 'exited');
-      if (sidebarState.enabled) {
-        resetSidebarShellState(state.activeId || undefined);
-      }
+      finishTerminal(frame.reason || 'exited');
       return;
     }
 
     if (frame.type === 'error') {
+      if (frame.code === 'shell_exited') { finishTerminal('exited'); return; }
+      if (frame.code === 'broker_disconnected') {
+        state.ws?.reconnect();
+        return;
+      }
+      if (frame.fatal) clearSocket();
       const message = frame.message || 'Terminal socket error';
       setStatus(message);
       host.toast?.(message);
@@ -1383,6 +1414,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.ws = ws;
 
     ws.addEventListener('open', () => {
+      if (state.ws !== ws) return;
       const cols = getTerminalCols(state.term);
       const rows = getTerminalRows(state.term);
       const requestId = makeRequestId();
@@ -1401,22 +1433,27 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
     ws.addEventListener('message', (event: MessageEvent) => {
       void parseServerFrame(event.data).then((frame) => {
-        if (frame) handleServerFrame(frame);
+        if (frame && state.ws === ws) handleServerFrame(frame);
       });
     });
 
     ws.addEventListener('close', () => {
+      if (state.ws !== ws) return;
       state.touchSelection?.cancelGesture?.();
       setStatus('disconnected');
     });
 
     ws.addEventListener('error', () => {
+      if (state.ws !== ws) return;
       setStatus('socket error');
     });
   }
 
   let webglBinding: {dispose(): void} | null = null;
   function disposeSession(): void {
+    finishedId = null;
+    ui.exitPrompt.hidden = true;
+    ui.btnStop.disabled = false;
     emitTerminalImeIntent(false, 'dispose_session');
     state.wsDesiredId = null;
     state.attachRequestId = null;
@@ -1686,19 +1723,28 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     void publishSidebarShellState(id, { cwd: rec?.cwd });
   }
 
-  async function doAction(action: string): Promise<void> {
-    if (!state.activeId) return;
+  async function endShell(): Promise<void> {
+    const id = state.activeId;
+    if (!id || endingId || finishedId) return;
+    if (!await window.teUI.dialog.confirm('End this shell?')) return;
+    if (state.activeId !== id || endingId || finishedId) return;
+    endingId = id;
+    ui.btnStop.disabled = true;
     try {
       const result = await requireLifecycleClient().request<LifecycleShellMutationResult>(
         'shell.action',
-        { shell_id: state.activeId, action },
+        { shell_id: id, action: 'end' },
       );
+      leaveTerminal(id);
       applyShellSnapshot(result.snapshot);
     } catch (error) {
       console.error(error);
       await window.teUI.dialog.alert(
-        `Action failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not end shell: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      endingId = null;
+      if (state.activeId === id) ui.btnStop.disabled = finishedId === id;
     }
   }
 
@@ -1711,13 +1757,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         { shell_id: shellId },
       );
       if (state.activeId === shellId) {
-        disposeSession();
-        state.activeId = null;
-        ui.title.textContent = 'No shell selected';
-        setStatus('');
-        if (sidebarState.enabled) {
-          resetSidebarShellState(shellId);
-        }
+        leaveTerminal(shellId);
       }
       applyShellSnapshot(result.snapshot);
     } catch (error) {
@@ -1737,9 +1777,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   ui.btnNew.addEventListener('click', () => void createShell());
   ui.btnRefresh.addEventListener('click', () => void listShells(true));
-  ui.btnStop.addEventListener('click', () => void doAction('stop'));
-  ui.btnKill.addEventListener('click', () => void doAction('kill'));
-  ui.btnRemove.addEventListener('click', () => void removeShellById(state.activeId));
+  ui.btnStop.addEventListener('click', () => void endShell());
+  ui.exitPrompt.addEventListener('click', () => { if (finishedId) leaveTerminal(finishedId); });
   ui.btnMenu.addEventListener('click', openDrawer);
   ui.drawerOverlay.addEventListener('click', closeDrawer);
   ui.showExited.addEventListener('change', () => {

@@ -72,9 +72,12 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
           assert.equal(replay.modes.mouseTrackingMode, 'drag');
           assert.equal(replay._core.coreMouseService.activeEncoding, 'SGR');
           replay.dispose();
-          passed = true;
-          child.stdin.write(encodePipeFrame({ type: 'destroy' }));
+          child.stdin.write(encodePipeFrame({ type: 'input', data: Buffer.from('exit 7\n') }));
         });
+      } else if (message.type === 'exit') {
+        assert.equal(message.exit_code, 7);
+        assert.ok(message.sequence > markerSequence);
+        passed = true;
       }
     }
   });

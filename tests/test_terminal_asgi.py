@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import msgspec
@@ -26,6 +27,27 @@ def test_worker_selects_explicit_app_without_legacy_router():
     assert explicit_asgi_application(backend, "terminal") is backend.TE2_ASGI_APP
     assert not hasattr(backend, "SUBAPPS")
     assert not hasattr(backend, "terminal_bp")
+
+
+@pytest.mark.parametrize("needs_force", [False, True])
+def test_end_shell_escalates_only_if_same_shell_still_alive(monkeypatch: pytest.MonkeyPatch, needs_force: bool) -> None:
+    record = SimpleNamespace(id="s", label=backend.LABEL_PREFIX, status="running", pid=45,
+                             env_overrides={"TERMINAL_STREAM_PROTOCOL": backend.TERMINAL_STREAM_CODEC})
+    signals: list[bool] = []
+
+    async def terminate(shell_id: str, force: bool = False) -> None:
+        assert shell_id == "s"
+        signals.append(force)
+        if force or not needs_force:
+            record.status = "exited"
+
+    manager = SimpleNamespace(get_shell=AsyncMock(return_value=record), terminate_shell=terminate,
+                              describe=AsyncMock(side_effect=lambda rec: {"id": rec.id, "status": rec.status,
+                                                                          "stats": {"alive": rec.status == "running"}}))
+    monkeypatch.setattr(backend, "mgr", AsyncMock(return_value=manager))
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    assert asyncio.run(backend._perform_shell_action("s", "end"))["status"] == "exited"
+    assert signals == ([False, True] if needs_force else [False])
 
 
 @pytest.mark.parametrize("method,path,handler,payload", [

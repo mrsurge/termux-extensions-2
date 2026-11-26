@@ -559,7 +559,7 @@ async def _broadcast_live(session: TerminalSession, payload: JsonObject) -> None
     async with session.lock:
         stale: list[str] = []
         for conn_id, connection in session.connections.items():
-            if connection.state == "live":
+            if connection.state == "live" or payload.get("type") == "exit" or payload.get("code") == "broker_disconnected":
                 connection.queue.put_nowait(dict(payload))
                 continue
             connection.buffered_frames.append(dict(payload))
@@ -574,9 +574,9 @@ async def _broadcast_live(session: TerminalSession, payload: JsonObject) -> None
                 connection.queue.put_nowait(None)
                 stale.append(conn_id)
         for conn_id in stale:
-            connection = session.connections.pop(conn_id, None)
-            if connection is not None and connection.attach_request_id:
-                _ = session.pending_attach.pop(connection.attach_request_id, None)
+            removed = session.connections.pop(conn_id, None)
+            if removed is not None and removed.attach_request_id:
+                _ = session.pending_attach.pop(removed.attach_request_id, None)
 
 
 async def _route_checkpoint(session: TerminalSession, payload: JsonObject) -> None:
@@ -662,16 +662,21 @@ async def _session_output_loop(
         if not session.stop.is_set() and session.exit_payload is None:
             with suppress(Exception):
                 record = await manager.get_shell(session.shell_id)
-                async with session.lock:
-                    session.last_sequence += 1
-                    exit_payload: JsonObject = {
-                        "type": "exit",
-                        "sequence": session.last_sequence,
-                        "exit_code": record.exit_code if record else None,
-                        "reason": (record.status if record and record.status else "missing"),
-                    }
-                    session.exit_payload = dict(exit_payload)
-                await _broadcast_live(session, exit_payload)
+                if record and record.status == "running" and record.pid:
+                    await _broadcast_live(session, _error_frame(
+                        "broker_disconnected", "Terminal stream disconnected", fatal=False,
+                    ))
+                else:
+                    async with session.lock:
+                        session.last_sequence += 1
+                        exit_payload: JsonObject = {
+                            "type": "exit",
+                            "sequence": session.last_sequence,
+                            "exit_code": record.exit_code if record else None,
+                            "reason": (record.status if record and record.status else "missing"),
+                        }
+                        session.exit_payload = dict(exit_payload)
+                    await _broadcast_live(session, exit_payload)
         with suppress(Exception):
             await manager.unsubscribe_output_bytes(session.shell_id, session.output_subscription)
 
@@ -682,7 +687,7 @@ async def _get_or_create_session(shell_id: str) -> TerminalSession:
 
     async with _sessions_lock:
         existing = _sessions.get(shell_id)
-        if existing is not None and existing.exit_payload is None:
+        if existing is not None and existing.exit_payload is None and existing.reader_task and not existing.reader_task.done():
             return existing
 
         manager = await mgr()
@@ -959,7 +964,27 @@ async def _perform_shell_action(shell_id: str, action: str) -> JsonObject:
         current = await manager.get_shell(shell_id)
         if current is None or not _is_supported_terminal_record(current):
             raise KeyError(shell_id)
-        if safe_action in {"stop", "terminate"}:
+        if safe_action == "end":
+            pid = current.pid
+            if current.status == "running" and pid:
+                await manager.terminate_shell(shell_id, force=False)
+                for attempt in range(21):
+                    record = await manager.get_shell(shell_id)
+                    if record is None:
+                        raise KeyError(shell_id)
+                    details = await manager.describe(record)
+                    stats = _coerce_json_object(details.get("stats")) or {}
+                    if record.status != "running" or not record.pid or stats.get("alive") is False:
+                        return details
+                    if record.pid != pid or not _is_supported_terminal_record(record):
+                        raise RuntimeError("Shell instance changed while ending it")
+                    if attempt == 10 and stats.get("alive") is True:
+                        await manager.terminate_shell(shell_id, force=True)
+                    if attempt < 20:
+                        await asyncio.sleep(0.1)
+                raise RuntimeError("Shell termination was not confirmed")
+            return await manager.describe(current)
+        elif safe_action in {"stop", "terminate"}:
             record = await manager.terminate_shell(shell_id, force=False)
         elif safe_action in {"kill", "force"}:
             record = await manager.terminate_shell(shell_id, force=True)
@@ -1077,8 +1102,10 @@ async def terminal_ws(websocket: WebSocket) -> None:
                 rows=_coerce_positive_int(attach.get("rows"), DEFAULT_ROWS),
             )
         except (RuntimeError, ValueError) as exc:
+            record = await (await mgr()).get_shell(shell_id)
+            ended = record is None or (_is_supported_terminal_record(record) and record.status == "exited")
             await websocket.send_bytes(
-                pack_message(_error_frame("session_init_failed", str(exc), fatal=True))
+                pack_message(_error_frame("shell_exited" if ended else "session_init_failed", str(exc), fatal=True))
             )
             return
 

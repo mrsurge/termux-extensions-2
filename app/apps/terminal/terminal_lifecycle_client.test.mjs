@@ -13,9 +13,10 @@ function inputHarness() {
   assert.ok(start >= 0 && end > start);
   const frames = [];
   const state = { encoder: new TextEncoder(), ws: { readyState: 1, send: data => frames.push(decode(data)) } };
-  const context = vm.createContext({ state, WebSocket: { OPEN: 1 }, encodeMessagePack: encode });
+  const left = [];
+  const context = vm.createContext({ state, finishedId: null, leaveTerminal: id => left.push(id), WebSocket: { OPEN: 1 }, encodeMessagePack: encode });
   vm.runInContext(transformSync(source.slice(start, end) + '\nglobalThis.input = queueInput;', { loader: 'ts' }).code, context);
-  return { state, frames, input: context.input };
+  return { state, frames, left, context, input: context.input };
 }
 
 function presentationHarness(query = {}, shells = []) {
@@ -132,6 +133,14 @@ test('terminal input sends synchronously in event order, including held arrows a
   }
   input('');
   assert.equal(frames.length, chunks.length);
+});
+
+test('a finished shell ignores input and Enter dismisses without a pipe write', () => {
+  const { context, left, input, frames } = inputHarness();
+  context.finishedId = 'done';
+  input('x'); input('\r');
+  assert.deepEqual(frames, []);
+  assert.deepEqual(left, ['done']);
 });
 
 test('terminal disconnected input is dropped and never replays into a replacement socket', () => {
