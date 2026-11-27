@@ -517,7 +517,10 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   });
   drawer.querySelector('[data-terminal="maximize"]')!.addEventListener('click', () => {
     drawerResize.cancel();
-    drawer.classList.toggle('is-maximized'); scheduleResize();
+    const maximize = minimized || !drawer.classList.contains('is-maximized');
+    minimized = false;
+    drawer.classList.remove('is-minimized');
+    drawer.classList.toggle('is-maximized', maximize); scheduleResize();
   });
   drawer.querySelector('[data-terminal="close"]')!.addEventListener('click', async () => {
     const ui = window as unknown as { teUI: { dialog: { confirm(message: string): Promise<boolean> } } };

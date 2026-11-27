@@ -174,7 +174,9 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
   const { packObject, unpackObject } = await import('../app/static/js/file_explorer_codec.js');
   class Element {
     hidden = false; textContent = ''; dataset = {}; handlers = new Map(); children = [];
-    classList = { remove() {}, toggle() {} };
+    classes = new Set();
+    classList = { contains: name => this.classes.has(name), remove: name => this.classes.delete(name),
+      toggle: (name, force = !this.classes.has(name)) => force ? this.classes.add(name) : this.classes.delete(name) };
     addEventListener(name, handler) { this.handlers.set(name, handler); }
     removeEventListener(name) { this.handlers.delete(name); }
     get ownerDocument() { return globalThis.document; }
@@ -260,6 +262,7 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     assert.equal(streams.length, 1, 'real resize uses the existing control/output connection');
     assert.deepEqual(views[0].writes, ['A', new Uint8Array([66])], 'resize must not reset xterm or its checkpoint');
     await elements.get('[data-terminal="maximize"]').handlers.get('click')();
+    assert.ok(elements.get('.fx-terminal-drawer').classes.has('is-maximized'));
     await new Promise(resolve => setTimeout(resolve, 180));
     assert.equal(streams.length, 1, 'maximize keeps the healthy stream');
     const lock = elements.get('[data-terminal="directory-lock"]');

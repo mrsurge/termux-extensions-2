@@ -305,7 +305,22 @@
 [data-terminal="keys"].toggle { border-color: var(--primary); color: var(--primary); }
 .fx-terminal-drawer.is-minimized { flex: 0 0 auto; min-height: 0; }
 .fx-terminal-drawer.is-minimized .fx-terminal-viewport, .fx-terminal-drawer.is-minimized .fx-terminal-keys { display: none; }
-.fx-terminal-drawer.is-maximized:not(.is-minimized) { flex: 1 0 75%; }
+/* The shell already measures the area left above the IME, including when
+   Explorer is embedded. Do not size the drawer against the device screen. */
+.fx-app:has(> .fx-terminal-drawer:not([hidden]):not(.is-minimized)) {
+  height: var(--te-app-container-height, 100%);
+  min-height: 0;
+  box-sizing: border-box;
+}
+.fx-terminal-drawer:not([hidden]):not(.is-minimized) { flex-shrink: 1; }
+.fx-app:has(> .fx-terminal-drawer.is-maximized:not([hidden]):not(.is-minimized))
+  > :is(.fx-breadcrumbs-container,.fx-usage-header,.fx-name-filter,.fx-content,.fx-mobile-footer) {
+  display: none;
+}
+.fx-terminal-drawer.is-maximized:not(.is-minimized) {
+  flex: 1 1 0;
+  min-height: 0;
+}
 .fx-list-view,
 .fx-grid-view {
   background: var(--card, #111827);
