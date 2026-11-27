@@ -1477,10 +1477,10 @@ ${a}
   display: flex;
   align-items: center;
   gap: 8px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 .te2-mobile-editor-overlay-left {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   padding-block: 2px;
   overflow-x: auto;
@@ -1509,6 +1509,7 @@ ${a}
 }
 .te2-mobile-editor-overlay .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger,
 .fe-editor-container > .te2-mobile-second-window-trigger {
+  pointer-events: auto;
   flex: 0 0 44px;
   width: 44px;
   height: 44px;

@@ -161,6 +161,29 @@ the reuse points; this is a separate integration slice after shared-document and
 per-client placement semantics. Reuse the same tab/container behavior on mobile
 and desktop; extension panels do not require their own editor File menu.
 
+### Second-window follow-ups — 2026-11-27
+
+- **Remember the desktop Explorer and sidebar layout.** Restore each pane’s
+  open/collapsed state and last expanded width on page refresh from this
+  client’s localStorage. Reuse existing resize preferences; clamp restored
+  widths to the current viewport. Mobile layouts must neither apply nor
+  overwrite the desktop arrangement. Shared sidebar apps and project state
+  are outside this preference.
+
+- **Markdown preview from document tabs.** On Markdown tabs in either editor,
+  offer “Open preview in sidebar” and “Open preview in second window” for
+  supported destinations. Invoke code-server’s built-in Markdown Preview
+  extension for the right-clicked document (including a background tab), and
+  use the existing extension-panel placement system. Do not add a Markdown
+  renderer or move the source tab. Verify both destinations and that
+  non-Markdown tabs do not offer these actions.
+- **Mobile drawer toggle.** At the mobile breakpoint, when the second window
+  is docked in the drawer, make the “II” overlay button toggle its presentation.
+  If hidden or another drawer tab is active, show the second window; if already
+  showing, dismiss the drawer without closing documents or extension panels.
+  Verify that another tap restores the same selected tab and that desktop and
+  detached-window behavior are unchanged.
+
 ### Validation and implementation gates
 
 S1, S2 backend membership, direct mobile mounting, shared File-menu routing and

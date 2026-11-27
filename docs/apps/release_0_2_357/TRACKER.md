@@ -564,6 +564,16 @@ findings and validation scope: PLAN.md, "First priority: second editor area".
   support moving a live panel between sidebar and second pane on desktop and mobile.
   preserve surface identity, live state, messages, readiness, focus/visibility,
   retained contexts, disposal, native reparenting and project/WBA generation.
+- [x] Mobile editor overlay hit area: user live-tested that the gap before Save
+  passes touches through to Monaco.
+- [ ] Desktop-only Explorer/sidebar layout persistence: restore open/collapsed
+  state and widths after refresh on the same client; verify a narrower viewport
+  fits and a visit to the mobile breakpoint preserves the desktop arrangement.
+- [ ] Markdown document-tab context menus: open code-server’s built-in preview
+  for the clicked Markdown file in the sidebar or second window; verify both
+  destinations, including from a background tab.
+- [ ] Mobile breakpoint: make “II” show or dismiss the drawer-docked second
+  window; verify reopen restores its tabs and selection without closing content.
 - [ ] Later-slice strict type/build/tests and grouped live acceptance on
   Electron/desktop browser/mobile, multi-client placement/foreground, close/open,
   project switch/cold restore/reconnect and historical/extension content.
