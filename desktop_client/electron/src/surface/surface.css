@@ -76,7 +76,8 @@ body,
   cursor: pointer;
 }
 
-.surface-button:hover {
+:root[data-header-mouse] .surface-button:hover,
+.surface-button:active {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 

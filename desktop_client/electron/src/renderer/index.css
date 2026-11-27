@@ -13,7 +13,7 @@
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--background); color: var(--text); font: 13px system-ui, sans-serif; }
 button { min-width: 34px; height: 32px; border: 0; border-radius: 4px; padding: 0 9px; background: transparent; color: var(--text); font: inherit; cursor: default; }
-button:hover:not(:disabled) { background: var(--surface-hover); }
+:root[data-header-mouse] button:hover:not(:disabled), button:active:not(:disabled) { background: var(--surface-hover); }
 button:disabled { color: #616970; }
 .electron-app-region-drag { -webkit-app-region: drag; }
 .electron-app-region-no-drag, button { -webkit-app-region: no-drag; }
@@ -25,9 +25,9 @@ button:disabled { color: #616970; }
 .asset-version:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .asset-version:disabled { cursor: progress; }
 .framework-offline { flex: 0 1 auto; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--danger); background: rgba(185, 71, 71, 0.16); color: #ffb4b4; }
-.framework-offline:hover:not(:disabled) { background: rgba(185, 71, 71, 0.32); }
+:root[data-header-mouse] .framework-offline:hover:not(:disabled), .framework-offline:active:not(:disabled) { background: rgba(185, 71, 71, 0.32); }
 .zoom-reset { min-width: 52px; }
-.danger:hover:not(:disabled), .close-window:hover { background: var(--danger); color: white; }
+:root[data-header-mouse] .danger:hover:not(:disabled), :root[data-header-mouse] .close-window:hover, .danger:active:not(:disabled), .close-window:active { background: var(--danger); color: white; }
 .window-controls { height: 100%; padding-right: 4px; border-left: 1px solid var(--border); }
 .window-controls button { height: 100%; border-radius: 0; font-size: 16px; }
 .view-stack { position: relative; width: 100%; height: calc(100% - var(--header-height)); overflow: hidden; }

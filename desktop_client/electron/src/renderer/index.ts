@@ -11,6 +11,10 @@ import type {
 import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL } from "../shared/contracts";
 import { installChromiumScrollbarStyle } from "../shared/chromium-scrollbars";
 
+import { trackHeaderPointer } from "../shared/header-pointer";
+
+trackHeaderPointer();
+
 declare global {
   interface Window {
     te2Desktop: DesktopBridge;

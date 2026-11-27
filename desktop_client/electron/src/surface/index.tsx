@@ -9,6 +9,10 @@ import type {
   ElectronSidebarSurfaceDescriptor,
 } from "../shared/app-view-contracts";
 
+import { trackHeaderPointer } from "../shared/header-pointer";
+
+trackHeaderPointer();
+
 const bridge = window.te2DetachedSurface;
 if (!bridge) throw new Error("Detached Sidebar surface bridge is unavailable");
 
