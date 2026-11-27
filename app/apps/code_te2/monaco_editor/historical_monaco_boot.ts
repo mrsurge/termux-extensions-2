@@ -1,3 +1,4 @@
+import { observeFontLigatures } from './font_ligatures.ts';
 import type { RequestThemeCatalog } from '../src/theme_catalog.ts';
 import type * as Monaco from '../../../static/vendor/monaco-editor-core/esm/vs/editor/editor.api';
 import { loadMonaco } from '../../../static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js';
@@ -122,6 +123,8 @@ export async function bootHistoricalDiff(
     });
   };
   updatePreferences(getPreferences());
+  const stopObserving = observeFontLigatures(fontLigatures => view.updateAppearance({ fontLigatures }));
+  lifetime.signal.addEventListener('abort', stopObserving, {once:true});
   return { ...view, updatePreferences, dispose() {
     lifetime.abort();
     signal.removeEventListener('abort', abort);

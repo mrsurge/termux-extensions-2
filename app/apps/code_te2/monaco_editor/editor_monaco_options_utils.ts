@@ -1,3 +1,4 @@
+import { fontLigaturesEnabled } from './font_ligatures.ts';
 import { resolveMonacoThemeId } from './editor_theme_resolver_utils.ts';
 import { monacoThemeName } from './editor_theme_name_utils.ts';
 
@@ -127,7 +128,7 @@ export function buildMonacoOptionsFromPrefsState(
     fontSize,
     fontFamily,
     fontWeight: '200',
-    fontLigatures: true,
+    fontLigatures: fontLigaturesEnabled(),
     cursorStyle,
   };
 }

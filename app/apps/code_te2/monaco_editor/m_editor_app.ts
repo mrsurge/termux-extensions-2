@@ -1,3 +1,4 @@
+import { observeFontLigatures } from './font_ligatures.ts';
 import { isUnknownArray } from '../src/rpc/value-types.ts';
 import { localWordWrap } from '../src/local-word-wrap.ts';
 import type { WorkingEditorMount } from './editor_mount.ts';
@@ -244,6 +245,7 @@ interface MonacoRuntimeEditorLike {
 }
 
 interface MonacoRuntimeDiffEditorLike {
+  updateOptions?(options: { fontLigatures: boolean }): void;
   dispose?(): void;
   layout?(): void;
   setModel?(model: Record<string, unknown> | null): void;
@@ -467,6 +469,9 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
 
   let editor: MonacoRuntimeEditorLike | null = null;
   let diffEditor: MonacoRuntimeDiffEditorLike | null = null;
+  lifetime.addCleanup(observeFontLigatures(fontLigatures => {
+    (diffEditor ?? editor)?.updateOptions?.({ fontLigatures });
+  }));
   let model: MonacoRuntimeModelLike | null = null;
   let gitHeadModel: MonacoRuntimeModelLike | null = null;
   let gitDiskModel: MonacoRuntimeModelLike | null = null;

@@ -47,7 +47,7 @@ test('historical appearance shares font scaling and cannot enable mutation/intel
     autocompletion: true, showInlayHints: true, wordWrap: true, showLineNumbers: false,
     cursorStyle: 'block-outline',
   } });
-  assert.deepEqual(appearance, { fontSize: 21, fontFamily: 'custom', fontWeight: '200', fontLigatures: true,
+  assert.deepEqual(appearance, { fontSize: 21, fontFamily: 'custom', fontWeight: '200', fontLigatures: false,
     lineNumbers: 'off', wordWrap: 'on', cursorStyle: 'block-outline' });
   assert.equal(theme, 'github-light');
   assert.equal(historicalAppearance({}).appearance.fontSize, 12);

@@ -1,3 +1,4 @@
+import { fontLigaturesEnabled, setFontLigatures } from '../../../monaco_editor/font_ligatures.ts';
 import type { EditorViewState } from '../../../main.ts';
 import { settingsRequest, type SettingsRequest, type SettingsNotify, type ExtensionSummary, objectValue, configProperties, type ConfigProperty } from './settings-contracts.ts';
 // @ts-check
@@ -68,6 +69,15 @@ export function createSettingsBootstrap(deps: Dependencies) {
   let settingsConfigModalController: ReturnType<typeof createSettingsConfigModalController> | null = null;
 
   const requestThemeCatalog: RequestThemeCatalog = deps.requestThemeCatalog;
+  const fontSlot = deps.els.settingsModal.querySelector<HTMLElement>('#editor-settings-font-ligatures');
+  const fontSelect = fontSlot && createCustomSelectControl({ document: fontSlot.ownerDocument, ariaLabel: 'Font ligatures',
+    value: fontLigaturesEnabled() ? 'on' : 'off', options: [{value:'on', label:'On'}, {value:'off', label:'Off'}],
+    onChange(value) {
+      try { setFontLigatures(value === 'on'); }
+      catch { deps.toast('Could not save font ligatures on this client'); fontSelect?.setValue(fontLigaturesEnabled() ? 'on' : 'off'); }
+    },
+  });
+  if (fontSlot && fontSelect) fontSlot.replaceChildren(fontSelect.element);
   const touchSettings = deps.els.settingsModal.querySelector<HTMLElement>('#editor-touch-selection-settings');
   function touchSelect(selector: string, label: string, save: (enabled: boolean) => void) {
     const slot = touchSettings?.querySelector<HTMLElement>(selector);
@@ -126,6 +136,7 @@ export function createSettingsBootstrap(deps: Dependencies) {
   }
 
   async function refreshEditorSettingsModal() {
+    fontSelect?.setValue(fontLigaturesEnabled() ? 'on' : 'off');
     refreshHandleSettings();
     await deps.refreshTerminalDestinationSettings?.();
     return settingsRefreshController.refreshEditorSettingsModal();
