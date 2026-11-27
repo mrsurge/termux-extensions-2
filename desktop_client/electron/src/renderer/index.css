@@ -45,11 +45,6 @@ body:not([data-app-open="true"]) .app-only { display: none; }
   .header-title .asset-version { display: none; }
   .framework-offline { max-width: 170px; }
 }
-.action-icon { display: none; }
-@media (max-width: 719px) {
-  .action-label { display: none; }
-  .action-icon { display: inline-block; vertical-align: middle; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-}
 /* Below this, the compact button groups leave no useful title/drag area. */
 @media (max-width: 425px) {
   :root { --header-height: 76px; }

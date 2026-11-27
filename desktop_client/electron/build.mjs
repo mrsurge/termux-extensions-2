@@ -109,6 +109,7 @@ await Promise.all([
 await Promise.all([
   cp(resolve(root, "src/inspector/ERUDA-LICENSE"), resolve(dist, "ERUDA-LICENSE")),
   cp(resolve(root, "src/renderer/index.html"), resolve(renderer, "index.html")),
+  cp(resolve(root, "src/shared/header-actions.css"), resolve(renderer, "header-actions.css")),
   cp(resolve(root, "src/renderer/index.css"), resolve(renderer, "index.css")),
   cp(resolve(root, "src/dialog/index.html"), resolve(dialog, "index.html")),
   cp(resolve(root, "src/dialog/dialog.css"), resolve(dialog, "dialog.css")),

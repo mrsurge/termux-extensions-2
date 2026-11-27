@@ -22,6 +22,29 @@ function act(action: ElectronSidebarSurfaceAction): void {
   bridge.action(action);
 }
 
+const actionPaths = {
+  refresh: "M20 5v6h-6 M20 11a8 8 0 1 0-2 7",
+  devtools: "M3 4h18v16H3z M6 9l3 3-3 3 M12 15h5",
+  stop: "M6 6h12v12H6z",
+};
+
+function actionButton(action: keyof typeof actionPaths, label: string): Node {
+  const ns = "http://www.w3.org/2000/svg";
+  const icon = document.createElementNS(ns, "svg");
+  icon.setAttribute("class", "action-icon");
+  icon.setAttribute("aria-hidden", "true");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", actionPaths[action]);
+  icon.append(path);
+  return (
+    <button className={action === "stop" ? "surface-button danger" : "surface-button"}
+      type="button" title={label} aria-label={label} onClick={() => act(action)}>
+      <span className="action-label">{label}</span>{icon}
+    </button>
+  );
+}
+
 function SurfaceHeader(props: { descriptor: ElectronSidebarSurfaceDescriptor }): Node {
   const { descriptor } = props;
   const detail = [descriptor.profileId, descriptor.projectPath]
@@ -36,25 +59,9 @@ function SurfaceHeader(props: { descriptor: ElectronSidebarSurfaceDescriptor }):
         <span className="surface-detail" title={detail}>{detail}</span>
       </div>
       <nav className="surface-actions" aria-label="Detached surface tools">
-        <button className="surface-button" type="button" onClick={() => act("attach")}>
-          Attach
-        </button>
-        <button className="surface-button" type="button" onClick={() => act("refresh")}>
-          Refresh
-        </button>
-        <button className="surface-button" type="button" onClick={() => act("console")}>
-          Console
-        </button>
-        <button className="surface-button" type="button" onClick={() => act("devtools")}>
-          DevTools
-        </button>
-        {descriptor.profileId
-          ? (
-            <button className="surface-button danger" type="button" onClick={() => act("stop")}>
-              Stop
-            </button>
-          )
-          : null}
+        {actionButton("refresh", "Refresh")}
+        {actionButton("devtools", "DevTools")}
+        {descriptor.profileId ? actionButton("stop", "Stop") : null}
         <button
           className="surface-button"
           type="button"
@@ -74,11 +81,10 @@ function SurfaceHeader(props: { descriptor: ElectronSidebarSurfaceDescriptor }):
         <button
           className="surface-button close"
           type="button"
-          aria-label="Attach and close detached window"
+          title="Close window and reattach to sidebar"
+          aria-label="Close window and reattach to sidebar"
           onClick={() => act("attach")}
-        >
-          ✕
-        </button>
+        >×</button>
       </nav>
     </header>
   );
