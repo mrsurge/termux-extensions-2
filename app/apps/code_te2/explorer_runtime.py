@@ -542,6 +542,14 @@ class ExplorerDispatcher:
             msg_id,
         )
 
+    async def handle_watcher_getExclusions(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.handlers.watcher import watcher_exclusions_request
+        await watcher_exclusions_request(self._build_watcher_context(), payload, msg_id, save=False)
+
+    async def handle_watcher_setExclusions(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.handlers.watcher import watcher_exclusions_request
+        await watcher_exclusions_request(self._build_watcher_context(), payload, msg_id, save=True)
+
     async def handle_watcher_getConfig(
         self,
         payload: JsonObject,

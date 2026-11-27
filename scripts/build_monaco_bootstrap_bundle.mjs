@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { preserveRelativeGotoGutter, gateGotoPositionPreview } from './monaco_preserve_relative_gutter.mjs';
 import { addProblemMentionAction } from './monaco_problem_mentions.mjs';
 import { markInlayText, paintBlockPastInlay } from './monaco_inlay_cursor_stops.mjs';
+import { preserveMinimapCanvas } from './monaco_minimap_canvas.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +47,9 @@ function pluginResolveMonacoEntryAndContrib() {
   return {
     name: "te2-monaco-bootstrap-alias",
     setup(ctx) {
+      ctx.onLoad({ filter: /[/\\]viewParts[/\\]minimap[/\\]minimap\.js$/ }, ({ path }) => ({
+        contents: preserveMinimapCanvas(fs.readFileSync(path, 'utf8')), loader: 'js',
+      }));
       ctx.onLoad({ filter: /[/\\]contrib[/\\]inlayHints[/\\]browser[/\\]inlayHintsController\.js$/ }, ({ path }) => ({
         contents: markInlayText(fs.readFileSync(path, 'utf8')), loader: 'js',
       }));

@@ -123,17 +123,15 @@ def sync_vscode_watcher_settings(watcher_mode: str) -> None:
     if _USER_SETTINGS_PATH.exists():
         settings = _read_json_object(_USER_SETTINGS_PATH)
 
+    # Only manage the mode gate and lock suppression here. Project rules
+    # belong to the sidecar; never flatten them into shared user settings.
+    excludes = _json_object(settings.get("files.watcherExclude"))
     if watcher_mode in ("watchexec", "none"):
-        settings["files.watcherExclude"] = {"**": True}
+        excludes["**"] = True
     else:
-        # IPC mode: let VS Code's native watcher run, but always exclude
-        # git lock files — the upstream git poller creates transient
-        # index.lock files that cascade into watcher/change event storms.
-        settings["files.watcherExclude"] = {
-            "**/.git/index.lock": True,
-            "**/.git/index.lock+": True,
-            "**/.git/*.lock": True,
-        }
+        _ = excludes.pop("**", None)
+    excludes.update({"**/.git/index.lock": True, "**/.git/index.lock+": True, "**/.git/*.lock": True})
+    settings["files.watcherExclude"] = excludes
 
     _ = _USER_SETTINGS_PATH.write_text(
         _json.dumps(settings, indent=4) + "\n", encoding="utf-8"
@@ -417,7 +415,7 @@ async def _ensure_code_server_shell(
         try:
             from .project_sidecar import ProjectSidecar
             sc = ProjectSidecar.load_or_create(str(repo_root))
-            watcher = _json_object(sc.dump_raw().get("watcher", {}))
+            watcher = sc.watcher_config()
             wmode = str(watcher.get("mode", "ipc"))
             await asyncio.to_thread(sync_vscode_watcher_settings, wmode)
         except Exception as exc:

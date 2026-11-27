@@ -802,6 +802,7 @@ async def _ensure_workbench_adapter_shell(
                 "CODE_SERVER_USER_SETTINGS": str(
                     paths.code_server_user_settings_path
                 ),
+                "PROJECT_SIDECARS_DIR": str(paths.project_sidecars_dir),
                 "CODE_SERVER_EXTENSION_STORAGE": str(
                     paths.code_server_extension_storage_dir
                 ),

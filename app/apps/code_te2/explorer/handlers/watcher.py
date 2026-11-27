@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
 from typing import Awaitable, Callable, cast
@@ -21,6 +22,58 @@ from ...project_sidecar import ProjectSidecar
 
 logger = logging.getLogger(__name__)
 AdapterRpc = Callable[[str, dict[str, object] | None, float], Awaitable[object]]
+
+
+def _exclusions(value: object) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        raise ValueError("Expected a list of watcher patterns")
+    entries = cast(dict[object, object], value)
+    if len(entries) > 256:
+        raise ValueError("Use at most 256 watcher patterns")
+    result: dict[str, bool] = {}
+    for key, enabled in entries.items():
+        if (not isinstance(key, str) or not key.strip() or key != key.strip()
+                or len(key) > 1024 or not key.isprintable() or not isinstance(enabled, bool)):
+            raise ValueError("Each watcher rule needs a nonempty glob and an enabled checkbox")
+        result[key] = enabled
+    return result
+
+
+async def watcher_exclusions_request(context: ExplorerWatcherHandlerContext, payload: dict[str, object],
+                                     msg_id: str | None, *, save: bool) -> None:
+    from ...stores import get_history_store
+    from ...worker_services.event_bus import current_project_generation
+    from ..services.extension_restarts import schedule_code_server_and_adapter_restart
+    project = str(context.project_root)
+    generation = current_project_generation(project) or 0
+    if get_history_store().get_active_project() != project:
+        raise ValueError("Active project changed; reopen watcher settings")
+    sc = ProjectSidecar.load_or_create(project)
+    cfg = sc.watcher_config()
+    rules = _exclusions(cfg.get("exclusions", {}))
+    changed = False
+    if save:
+        if (payload.get("projectPath") != project or payload.get("generation") != generation
+                or _exclusions(payload.get("previous")) != rules):
+            raise ValueError("Project or exclusions changed; reopen watcher settings")
+        updated = _exclusions(payload.get("exclusions"))
+        changed = updated != rules
+        if changed:
+            sc.save_watcher_exclusions(updated)
+            rules = updated
+    inherited: dict[str, object] = {}
+    warning = ""
+    try:
+        settings: object = json.loads((context.project_root / ".vscode/settings.json").read_text(encoding="utf-8"))
+        inherited = _normalize_config_dict(_normalize_config_dict(settings).get("files.watcherExclude"))
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as exc:
+        warning = f"Could not read workspace settings: {exc}"
+    if changed:
+        schedule_code_server_and_adapter_restart(context.emit_personal, "watcher_exclusions")
+    await context.emit_personal("explorer.watcher.exclusions", {"projectPath": project, "generation": generation,
+        "exclusions": rules, "workspace": inherited, "warning": warning, "changed": changed}, msg_id)
 
 
 async def handle_watcher_raise_limit(

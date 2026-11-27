@@ -86,6 +86,8 @@ export const EXPLORER_RPC_METHODS = {
   searchRun: "explorer.search.run",
   searchReplace: "explorer.search.replace",
   watcherConfigGet: "explorer.watcher.config.get",
+  watcherExclusionsGet: "explorer.watcher.exclusions.get",
+  watcherExclusionsSet: "explorer.watcher.exclusions.set",
   watcherLimitRaise: "explorer.watcher.limit.raise",
   watcherModeSet: "explorer.watcher.mode.set",
 } as const;

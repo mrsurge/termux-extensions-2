@@ -569,6 +569,7 @@ export async function setupFileWatcher(runtime: LifecycleRuntime, workspaceRoot:
       const rootUri = runtime.uriForPath(String(workspaceRoot), authority);
       runtime.log(`[watcher] calling watch() sessionId=${sessionId} watchId=${watchId} uri=${JSON.stringify(rootUri)}`);
       const excludes = runtime.getWatcherExcludes(String(workspaceRoot));
+      runtime.log(`[watcher] recursive exclusions for ${workspaceRoot}: ${JSON.stringify(excludes)}`);
       await runtime.watcher.mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes }]);
       runtime.onEvent({ type: "watcher/subscribed", ts_ms: Date.now(), root: String(workspaceRoot) });
       runtime.log(`[watcher] watch() call returned OK — subscribed to ${workspaceRoot}`);

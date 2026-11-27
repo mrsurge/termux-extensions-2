@@ -23,7 +23,7 @@ def schedule_code_server_and_adapter_restart(emit_personal: EmitPersonal, reason
             print(f"[ext_restart] recovery failed (reason={reason}): {exc}", flush=True)
             try:
                 await emit_personal("explorer.error", {
-                    "error": f"Extension change succeeded, but intelligence restart failed: {exc}",
+                    "error": f"Change saved, but intelligence restart failed: {exc}",
                     "reason": reason,
                 })
             except Exception as notify_exc:

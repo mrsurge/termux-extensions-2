@@ -1,4 +1,5 @@
 import { isUnknownArray } from '../protocol/value-types.ts';
+import { createHash } from 'node:crypto';
 export interface RawExtensionConfigDefaults {
   contents: Record<string, unknown>;
   keys: string[];
@@ -351,6 +352,27 @@ export function buildConfigurationInitData(runtime: ConfigurationRuntime, folder
     } catch (e) {
       if (!isRecord(e) || e.code !== "ENOENT") {
         runtime.log(`[config] could not read workspace settings (${wsSettingsPath}): ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const dir = runtime.env.TE2_PROJECT_SIDECARS_DIR;
+    if (dir) {
+      // Python's ProjectSidecar.get_sidecar_path uses the canonical project path.
+      const file = createHash('sha1').update(folder).digest('hex') + '.json';
+      try {
+        const data: unknown = JSON.parse(runtime.readTextFileSync(runtime.joinPath(dir, file)));
+        const watcher = isRecord(data) ? data.watcher : null;
+        const rules = isRecord(watcher) ? watcher.exclusions : null;
+        if (isRecord(rules)) {
+          const enabled = Object.entries(rules).filter(([, value]) => value === true);
+          if (enabled.length) {
+            const files = isRecord(workspaceConfig.contents.files) ? workspaceConfig.contents.files : {};
+            files.watcherExclude = {...(isRecord(files.watcherExclude) ? files.watcherExclude : {}), ...Object.fromEntries(enabled)};
+            workspaceConfig.contents.files = files;
+            if (!workspaceConfig.keys.includes('files.watcherExclude')) workspaceConfig.keys.push('files.watcherExclude');
+          }
+        }
+      } catch (error) {
+        if (!isRecord(error) || error.code !== 'ENOENT') runtime.log('[config] could not read project watcher settings', String(error));
       }
     }
   }

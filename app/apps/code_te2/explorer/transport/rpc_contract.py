@@ -98,6 +98,8 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.search.run": "search:run",
     "explorer.search.replace": "search:replace",
     "explorer.watcher.config.get": "watcher:getConfig",
+    "explorer.watcher.exclusions.get": "watcher:getExclusions",
+    "explorer.watcher.exclusions.set": "watcher:setExclusions",
     "explorer.watcher.limit.raise": "watcher:raiseLimit",
     "explorer.watcher.mode.set": "watcher:setMode",
 }

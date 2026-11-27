@@ -49017,12 +49017,14 @@ var init_minimap2 = __esm({
         this._shadow.setHeight(this._model.options.minimapHeight);
         this._canvas.setWidth(this._model.options.canvasOuterWidth);
         this._canvas.setHeight(this._model.options.canvasOuterHeight);
-        this._canvas.domNode.width = this._model.options.canvasInnerWidth;
-        this._canvas.domNode.height = this._model.options.canvasInnerHeight;
         this._decorationsCanvas.setWidth(this._model.options.canvasOuterWidth);
         this._decorationsCanvas.setHeight(this._model.options.canvasOuterHeight);
-        this._decorationsCanvas.domNode.width = this._model.options.canvasInnerWidth;
-        this._decorationsCanvas.domNode.height = this._model.options.canvasInnerHeight;
+        if (this._decorationsCanvas.domNode.width !== this._model.options.canvasInnerWidth) {
+          this._decorationsCanvas.domNode.width = this._model.options.canvasInnerWidth;
+        }
+        if (this._decorationsCanvas.domNode.height !== this._model.options.canvasInnerHeight) {
+          this._decorationsCanvas.domNode.height = this._model.options.canvasInnerHeight;
+        }
         this._slider.setWidth(this._model.options.minimapWidth);
       }
       _getBuffer() {
@@ -49401,7 +49403,14 @@ var init_minimap2 = __esm({
         const dirtyY2 = _dirtyY2 === -1 ? imageData.height : _dirtyY2;
         const dirtyHeight = dirtyY2 - dirtyY1;
         const ctx = this._canvas.domNode.getContext("2d");
-        ctx.putImageData(imageData, 0, 0, 0, dirtyY1, imageData.width, dirtyHeight);
+        const canvas = ctx.canvas;
+        if (canvas.width !== imageData.width || canvas.height !== imageData.height) {
+          if (canvas.width !== imageData.width) canvas.width = imageData.width;
+          if (canvas.height !== imageData.height) canvas.height = imageData.height;
+          ctx.putImageData(imageData, 0, 0);
+        } else {
+          ctx.putImageData(imageData, 0, 0, 0, dirtyY1, imageData.width, dirtyHeight);
+        }
         return new RenderData(layout2, imageData, renderedLines);
       }
       static _renderUntouchedLines(target, topPaddingLineCount, startLineNumber, endLineNumber, minimapLineHeight, lastRenderData) {

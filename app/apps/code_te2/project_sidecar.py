@@ -258,6 +258,7 @@ class ProjectSidecar:
             },
             # File watcher configuration (project-scoped SSOT).
             "watcher": {
+                "exclusions": {},
                 # "ipc" (VS Code IPC, default) | "watchexec" (poll fallback) | "none" (lazy/manual)
                 "mode": "ipc",
                 # Storage type determines poll interval: "ssd" → 1500ms, "hdd" → 4500ms
@@ -370,6 +371,18 @@ class ProjectSidecar:
                 tmp_path.unlink(missing_ok=True)
             if sidecar_profile.ENABLED:
                 sidecar_profile.record("save.inclusive", perf_counter_ns() - save_started)
+
+    def watcher_config(self) -> JsonDict:
+        return _as_dict(self._data.get("watcher"))
+
+    def save_watcher_exclusions(self, rules: dict[str, bool]) -> None:
+        previous = self._data.get("watcher")
+        self._data["watcher"] = {**self.watcher_config(), "exclusions": rules}
+        try:
+            self.save()
+        except Exception:
+            self._data["watcher"] = previous
+            raise
 
     def dump_raw(self) -> JsonDict:
         """Return the raw in-memory sidecar state (debug endpoint helper)."""

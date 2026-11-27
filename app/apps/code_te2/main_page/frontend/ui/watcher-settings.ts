@@ -1,6 +1,7 @@
 
 import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
 import { notifyExplorerRpc } from '../../../src/explorer/rpc/client.ts';
+import { editWatcherExclusions } from './watcher-exclusions.ts';
 
 // ---------- Watcher modal & settings UI ----------
 // Extracted from main.js. Requires `host.toast` via init().
@@ -133,6 +134,12 @@ export function showWatcherLimitModal(message: string, limit?: number) {
 let _watcherConfig: WatcherConfig = { mode: 'ipc', storage_type: 'ssd', poll_interval_ms: 1500, watchexec_available: false };
 
 function _initWatcherSettingsUI() {
+  const edit = settingsQuery<HTMLButtonElement>('#watcher-edit-exclusions');
+  edit?.addEventListener('click', () => {
+    edit.disabled = true;
+    void editWatcherExclusions(edit, _toast).catch((error: unknown) => _toast(String(error)))
+      .finally(() => { edit.disabled = false; });
+  });
   const modeRadios = settingsQueryAll<HTMLInputElement>('input[name="watcher-mode"]');
   const storageRadios = settingsQueryAll<HTMLInputElement>('input[name="watcher-storage"]');
   const watchexecOpts = settingsQuery<HTMLElement>('#watcher-watchexec-opts');
