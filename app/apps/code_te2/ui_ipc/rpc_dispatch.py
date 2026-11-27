@@ -143,6 +143,28 @@ async def dispatch_ui_ipc_rpc_request(
         return await handle_diagnostics_export(params, source_name=source_name)
 
     if method == UI_IPC_RPC_METHOD_HOST_FILE_OPEN:
+        if "tabAction" in params:
+            from ..editor_renderer_bindings import registered_editor_renderer_binding
+            from ..open_state_backend import read_client_open_state
+            from ..stores import get_history_store
+            from ..worker_services.event_bus import current_project_generation
+            binding = registered_editor_renderer_binding(source_name)
+            project = get_history_store().get_active_project()
+            if (not binding or not project or params.get("projectPath") != project
+                    or params.get("projectGeneration") != (current_project_generation(project) or 0)):
+                raise ValueError("Tab no longer belongs to this project")
+            action = params["tabAction"]
+            if binding.area == "secondary" and action in ("openInMain", "moveToMain"):
+                placement = read_client_open_state(project, source_name, reason="tab_menu").get("editorPlacement")
+                if not placement or params.get("path") not in placement["paths"]:
+                    raise ValueError("Source tab is no longer open")
+                opened = await handle_host_open_request(params, source_name=binding.main_page_id,
+                                                        request_prefix="tab_open_main")
+                if action == "openInMain" or opened.get("surface") == "sidebar":
+                    return opened
+            elif binding.area != "primary" or action != "moveToSecond":
+                raise ValueError("Invalid tab destination")
+            return await handle_host_recent_file_close_request(params, source_name=source_name, move_only=True)
         return await handle_host_open_request(
             params,
             source_name=source_name,

@@ -14,8 +14,9 @@ interface LayoutPreferences {
 
 const EXPLORER_DEFAULT_WIDTH = 430;
 const AGENT_DEFAULT_WIDTH = 400;
-const SECONDARY_MIN_WIDTH = 320;
-const PRIMARY_MIN_WIDTH = 240;
+const PRIMARY_MIN_WIDTH = 200;
+const SECONDARY_MIN_WIDTH = PRIMARY_MIN_WIDTH;
+const SIDEBAR_MIN_WIDTH = 416;
 const PANEL_MIN_WIDTH = 0;
 const LAYOUT_PREFERENCES_KEY = 'code_te2_layout_prefs';
 const LEGACY_LAYOUT_PREFERENCES_KEY = 'code_cm6_layout_prefs';
@@ -141,22 +142,16 @@ function clampedPanelWidth(value: string | null | undefined): string | null {
   return `${clamp(parsed, PANEL_MIN_WIDTH, Math.floor(rootLayoutWidth()))}px`;
 }
 
-function fitPersistedSideWidthsToRoot(): void {
-  const rootWidth = Math.floor(rootLayoutWidth());
-  if (rootWidth <= 0) return;
-  const explorerWidth =
-    cssPixelProperty('--explorer-width') || EXPLORER_DEFAULT_WIDTH;
-  const agentWidth = cssPixelProperty('--agent-width') || AGENT_DEFAULT_WIDTH;
-  if (explorerWidth + agentWidth <= rootWidth) return;
-  document.documentElement.style.setProperty(
-    '--agent-width',
-    `${Math.max(PANEL_MIN_WIDTH, rootWidth - explorerWidth)}px`,
-  );
-}
-
 let disposeResizeManager: (() => void) | null = null;
 
 interface ResizeDrag {
+  gap: number;
+  span: number;
+  explorer: number;
+  sidebar: number;
+  explorerMin: number;
+  ratio: number | null;
+  close: 'explorer' | 'agent' | 'terminal' | null;
   handle: HTMLElement;
   pointerId: number;
   panel: Exclude<ResizePanel, null>;
@@ -202,8 +197,7 @@ export function initResizeManager(): () => void {
     return Math.max(0, toolbar.getBoundingClientRect().width -
       (parsePixelValue(getComputedStyle(root).getPropertyValue('--split-rail-size')) ?? 0));
   }
-  function projectSplit(): void {
-    const span = splitSpan();
+  function projectSplit(span = splitSpan()): void {
     if (!root || !span) return;
     const scale = Math.min(1, span / (PRIMARY_MIN_WIDTH + SECONDARY_MIN_WIDTH));
     ratio ??= clamp(secondaryDockWidth() ?? 480, SECONDARY_MIN_WIDTH * scale, span - PRIMARY_MIN_WIDTH * scale) / span;
@@ -213,8 +207,8 @@ export function initResizeManager(): () => void {
     root.style.setProperty('--secondary-share', ratio * 100 + 'fr');
     root.dataset.desktopSplit = '';
   }
-  const sizeObserver = toolbar ? new ResizeObserver(projectSplit) : null;
-  const modeObserver = toolbar ? new MutationObserver(projectSplit) : null;
+  const sizeObserver = toolbar ? new ResizeObserver(() => projectSplit()) : null;
+  const modeObserver = toolbar ? new MutationObserver(() => projectSplit()) : null;
   if (toolbar && root) {
     sizeObserver?.observe(toolbar);
     modeObserver?.observe(root, {attributes:true, attributeFilter:['class']});
@@ -222,11 +216,33 @@ export function initResizeManager(): () => void {
   }
   const handles = Array.from(document.querySelectorAll<HTMLElement>('.resize-handle'));
   let drag: ResizeDrag | null = null;
+  let frame = 0;
+  let pending: PointerEvent | null = null;
+  let lastMove: PointerEvent | null = null;
   let disposed = false;
 
-  const finish = (): void => {
+  const hint = document.createElement('div');
+  hint.className = 'fe-resize-close-hint';
+  hint.setAttribute('role','status');
+  hint.hidden = true;
+  root?.append(hint);
+  function preview(current: ResizeDrag, close: ResizeDrag['close']): void {
+    if (current.close === close) return;
+    current.close = close;
+    if (root) {
+      if (close) root.dataset.resizeClose = close;
+      else delete root.dataset.resizeClose;
+    }
+    hint.hidden = !close;
+    if (close) hint.textContent = 'Release to close ' + ({explorer:'Explorer',agent:'sidebar',terminal:'bottom panel'})[close];
+  }
+  const finish = (commit = false): void => {
     const current = drag;
     if (!current) return;
+    if (frame) window.cancelAnimationFrame(frame);
+    frame = 0;
+    pending = null;
+    lastMove = null;
     drag = null;
     current.handle.classList.remove('dragging');
     try {
@@ -235,6 +251,21 @@ export function initResizeManager(): () => void {
       }
     } catch { /* Capture may already be lost when the window is deactivated. */ }
     current.restoreInteraction();
+    const close = current.close;
+    preview(current, null);
+    const setWidth = (key: string, width: number) => document.documentElement.style.setProperty(key, width + 'px');
+    if (current.panel === 'agent' || current.panel === 'explorer') {
+      if ((!commit || close === 'explorer') && current.explorer) setWidth('--explorer-width',current.explorer);
+      if ((!commit || close === 'agent') && current.sidebar) setWidth('--agent-width',current.sidebar);
+    }
+    if (current.panel === 'terminal' && (!commit || close)) {
+      if (!dragPortraitDrawer(current.startSize)) setWidth('--terminal-height',current.startSize);
+    }
+    if (!commit && current.panel === 'secondary') {
+      ratio = current.ratio; ratioDirty = false;
+      root?.style.setProperty('--secondary-editor-dock-size',current.startSize+'px'); projectSplit();
+    }
+    if (commit && close) document.getElementById(({explorer:'fe-drawer-close',agent:'agent-close',terminal:'terminal-collapse'})[close])?.click();
     if (current.panel === 'terminal') finishPortraitDrag();
     if (current.panel === 'secondary') {
       if (ratioDirty && ratio !== null) {
@@ -245,7 +276,7 @@ export function initResizeManager(): () => void {
         detail: { dockSize: currentPanelWidth('secondary') },
       }));
     }
-    try { saveLayoutPreferences(); } catch {
+    try { if (commit) saveLayoutPreferences(); } catch {
       // Optional layout storage must not leave input capture or iframe guards active.
     }
   };
@@ -259,7 +290,15 @@ export function initResizeManager(): () => void {
     if (panel === 'terminal'
         && document.getElementById('terminal-drawer')?.classList.contains('terminal-drawer--collapsed')) return;
     const startSize = currentPanelWidth(panel);
-    drag = { handle, pointerId: event.pointerId, panel,
+    const footer = root?.querySelector<HTMLElement>('.fe-git-footer');
+    const buttons = Array.from(footer?.querySelectorAll<HTMLElement>('.fe-git-actions:not(.fe-git-actions-secondary) button') ?? []);
+    const pad = footer ? getComputedStyle(footer) : null;
+    const explorerMin = Math.ceil(buttons.reduce((s,b)=>s+b.getBoundingClientRect().width,0) +
+      (parseFloat(pad?.paddingLeft || '') || 0) + (parseFloat(pad?.paddingRight || '') || 0));
+    drag = { handle, pointerId: event.pointerId, panel, close:null, ratio,
+      span: panel === 'secondary' ? splitSpan() : 0,
+      gap: root ? parsePixelValue(getComputedStyle(root).getPropertyValue('--split-rail-size')) ?? 5 : 5,
+      explorer:effectiveExplorerWidthForMath(), sidebar:effectiveAgentWidthForMath(), explorerMin:explorerMin || 160,
       startPos: panel === 'terminal' ? event.clientY : event.clientX,
       startSize, restoreInteraction: suspendResizeInteraction(panel) };
     handle.classList.add('dragging');
@@ -274,16 +313,35 @@ export function initResizeManager(): () => void {
     event.preventDefault();
   };
 
-  const onMove = (event: PointerEvent): void => {
+  const applyMove = (event: PointerEvent): void => {
     const current = drag;
     if (!current || current.pointerId !== event.pointerId) return;
     const { panel, startPos, startSize } = current;
     if (panel === 'explorer' || panel === 'agent') {
       const delta = panel === 'explorer' ? event.clientX - startPos : startPos - event.clientX;
-      const width = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth(panel));
+      let width: number;
+      if (root?.classList.contains('layout-desktop')) {
+        const gap = current.gap;
+        const docked = root.classList.contains('te2-secondary-editor-docked');
+        const budget = Math.max(0,(root.clientWidth || rootLayoutWidth()) - PRIMARY_MIN_WIDTH -
+          (docked ? gap + (root.classList.contains('te2-secondary-editor-collapsed') ? 52 : SECONDARY_MIN_WIDTH) : 0));
+        const requested = startSize + delta;
+        const min = panel === 'agent' ? SIDEBAR_MIN_WIDTH : current.explorerMin;
+        let close: ResizeDrag['close'] = requested < min ? panel : null;
+        let other = panel === 'agent' ? current.explorer : current.sidebar;
+        if (!close && panel === 'agent' && other) {
+          other = Math.min(other, budget - 2 * gap - requested);
+          if (other < current.explorerMin) { close = 'explorer'; other = 0; }
+          if (other) document.documentElement.style.setProperty('--explorer-width', other+'px');
+        } else if (panel === 'agent' && current.explorer) {
+          document.documentElement.style.setProperty('--explorer-width',current.explorer+'px');
+        }
+        preview(current,close);
+        width = clamp(requested,0,Math.max(0,budget-gap-(other ? other+gap : 0)));
+      } else width = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth(panel));
       document.documentElement.style.setProperty(panel === 'explorer' ? '--explorer-width' : '--agent-width', `${width}px`);
     } else if (panel === 'secondary') {
-      const span = splitSpan();
+      const span = current.span;
       const scale = Math.min(1, span / (PRIMARY_MIN_WIDTH + SECONDARY_MIN_WIDTH));
       const requested = startSize + startPos - event.clientX;
       const width = span ? clamp(requested, SECONDARY_MIN_WIDTH * scale, span - PRIMARY_MIN_WIDTH * scale)
@@ -291,7 +349,7 @@ export function initResizeManager(): () => void {
       if (span && scale === 1) {
         ratio = width / span;
         ratioDirty = true;
-        projectSplit();
+        projectSplit(span);
       }
       document.querySelector<HTMLElement>('.fe-root')?.style.setProperty('--secondary-editor-dock-size', `${width}px`);
       window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize', {
@@ -303,18 +361,35 @@ export function initResizeManager(): () => void {
         return;
       }
       const requested = startSize + startPos - event.clientY;
-      if (!dragPortraitDrawer(requested)) {
-        const height = resizedDrawerHeight(requested, 150, 800);
+      preview(current,requested < 30 ? 'terminal' : null);
+      if (!current.close && !dragPortraitDrawer(requested)) {
+        const height = resizedDrawerHeight(requested, 30, 800);
         document.documentElement.style.setProperty('--terminal-height', `${height}px`);
       }
     }
-    // Existing Monaco/terminal/native placement observers consume the resize event.
-    window.dispatchEvent(new Event('resize'));
+  };
+  const notifyPlacement = () => window.dispatchEvent(new Event('code-te2:pane-bounds-changed'));
+  const flush = (): void => {
+    frame = 0;
+    const move = pending;
+    pending = null;
+    if (move) { applyMove(move); notifyPlacement(); }
+  };
+  const onMove = (event: PointerEvent): void => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
+    lastMove = event;
+    pending = event;
+    if (!frame) frame = window.requestAnimationFrame(flush);
   };
 
   const onEnd = (event: PointerEvent): void => {
-    if (drag?.pointerId === event.pointerId) finish();
+    if (drag?.pointerId !== event.pointerId) return;
+    if (event.type === 'pointerup' && lastMove) {
+      if (lastMove.clientX !== event.clientX || lastMove.clientY !== event.clientY) pending = event;
+      if (pending) { window.cancelAnimationFrame(frame); flush(); }
+    }
+    finish(event.type === 'pointerup');
   };
   const onVisibility = (): void => { if (document.hidden) finish(); };
   handles.forEach(handle => handle.addEventListener('pointerdown', onStart));
@@ -323,13 +398,15 @@ export function initResizeManager(): () => void {
   window.addEventListener('pointercancel', onEnd, true);
   window.addEventListener('lostpointercapture', onEnd, true);
   document.addEventListener('visibilitychange', onVisibility);
-  window.addEventListener('blur', finish);
+  const cancel = (): void => finish();
+  window.addEventListener('blur', cancel);
   window.addEventListener('pagehide', dispose, { once: true });
 
   function dispose(): void {
     if (disposed) return;
     disposed = true;
     finish();
+    hint.remove();
     disposePortrait();
     sizeObserver?.disconnect();
     modeObserver?.disconnect();
@@ -339,7 +416,7 @@ export function initResizeManager(): () => void {
     window.removeEventListener('pointercancel', onEnd, true);
     window.removeEventListener('lostpointercapture', onEnd, true);
     document.removeEventListener('visibilitychange', onVisibility);
-    window.removeEventListener('blur', finish);
+    window.removeEventListener('blur', cancel);
     window.removeEventListener('pagehide', dispose);
     if (disposeResizeManager === dispose) disposeResizeManager = null;
   }
@@ -381,7 +458,6 @@ export function loadLayoutPreferences(): void {
     if (agentWidth) {
       document.documentElement.style.setProperty('--agent-width', agentWidth);
     }
-    fitPersistedSideWidthsToRoot();
     if (prefs.terminalHeight) {
       document.documentElement.style.setProperty('--terminal-height', prefs.terminalHeight);
     }

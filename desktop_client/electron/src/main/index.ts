@@ -388,6 +388,7 @@ async function handleAppViewControl(
       "set_second_editor_mode",
       "minimize_second_window", "toggle_maximize_second_window",
       "second_editor_ready",
+      "open_sidebar_menu",
       "secondary_panel_snapshot", "secondary_panel_placement", "secondary_panel_action",
       "set_docked_editor_history",
     ].includes(command)
@@ -621,12 +622,13 @@ async function handleAppViewControl(
   }
   if (command === "open_sidebar_menu") {
     const request = validateElectronSidebarMenuRequest(payload);
-    const window = mainWindow;
+    const window = role === "secondary" ? secondaryEditorRegistry?.ownerWindow(event.sender) : mainWindow;
     if (!window || window.isDestroyed()) {
       throw new Error("Sidebar menu host is unavailable");
     }
-    const bounds = appViewBounds();
-    const zoom = Math.max(0.25, appView?.webContents.getZoomFactor() || 1);
+    const bounds = role === "secondary" ? secondaryEditorRegistry?.panelHostBounds() : appViewBounds();
+    if (!bounds) throw new Error("Editor menu host is unavailable");
+    const zoom = Math.max(0.25, event.sender.getZoomFactor());
     const x = Math.max(
       bounds.x,
       Math.min(bounds.x + bounds.width, bounds.x + Math.round(request.x * zoom)),
@@ -678,6 +680,17 @@ async function handleAppViewControl(
       throw new Error("Secondary panel host unavailable");
     const action = payload.action;
     if (action === "files") { detachedSurfaceRegistry.selectFiles(); return; }
+    if (action === "menu") {
+      const ref = validateElectronSidebarSurfaceReference(payload);
+      const registry = detachedSurfaceRegistry;
+      const matches = () => registry.panelSnapshot().panels.some(p => p.surfaceId === ref.surfaceId && p.presentationId === ref.presentationId);
+      if (!matches()) return;
+      Menu.buildFromTemplate([
+        {label: "Return to sidebar", click: () => { if (matches()) registry.panelAction("return", ref.surfaceId, ref.presentationId || "", true); }},
+        {label: "Close panel", click: () => registry.requestPanelClose(ref.surfaceId, ref.presentationId || "")},
+      ]).popup({window: BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined});
+      return;
+    }
     if (action !== "select" && action !== "return" && !(action === "transfer" && role === "primary"))
       throw new Error("Invalid secondary panel action");
     const ref = validateElectronSidebarSurfaceReference(payload);

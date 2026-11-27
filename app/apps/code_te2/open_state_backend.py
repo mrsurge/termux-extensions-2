@@ -358,9 +358,13 @@ def close_client_area(
         }
 
 
+class DestinationTabNotOpen(ValueError):
+    pass
+
+
 def close_client_presentation(
     project_path: str, file_path: str, client_id: str, *,
-    expected_revision: int, expected_generation: int,
+    expected_revision: int, expected_generation: int, move_only: bool = False,
 ) -> ClientCloseResult:
     """One locked mutation; consent/discard remain with their existing owners."""
     from .worker_services.event_bus import current_project_generation
@@ -374,9 +378,16 @@ def close_client_presentation(
         sidecar = ProjectSidecar.load_or_create(project)
         sidecar.reload()
         state = sidecar.read_editor_open_state()
-        state.require_revision(expected_revision)
+        if move_only:
+            placement = state.placement(binding.main_page_id)
+            if path not in placement.paths(binding.area):
+                raise ValueError("Source tab is no longer open")
+            if path not in placement.paths("secondary" if binding.area == "primary" else "primary"):
+                raise DestinationTabNotOpen("Destination has not opened the tab")
+        else:
+            state.require_revision(expected_revision)
         transition = state.close_presentation(binding.main_page_id, path, binding.area,
-                                              expected_revision=expected_revision)
+                                              expected_revision=state.revision)
         if transition.kind == "document":
             _, changed = sidecar.remove_recent_file(path)
         else:

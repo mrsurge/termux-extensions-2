@@ -122,6 +122,10 @@
     /* Two 1px pane outlines extend into this track, leaving a connected 3px gap. */
     --split-rail-size: 5px;
     --pane-radius: 4px;
+    --side-budget: calc(100% - 200px - var(--secondary-reserve, 0px) - var(--secondary-gap, 0px) - var(--explorer-gap, var(--split-rail-size)) - var(--sidebar-gap, var(--split-rail-size)));
+    --sidebar-min-width: 416px;
+    --explorer-track: clamp(0px, var(--explorer-width-effective), var(--side-budget) - var(--sidebar-reserve, var(--sidebar-min-width)));
+    --sidebar-track: clamp(0px, max(var(--sidebar-min-width), var(--agent-width-effective)), var(--side-budget) - var(--explorer-track));
     --pane-stroke: color-mix(in srgb, var(--te2-code-foreground, var(--fg)) 38%, var(--bg));
     /* Keep the outside pixel of the pane outlines inside the clipped grid. */
     box-sizing: border-box;
@@ -140,11 +144,13 @@
   }
 
   .fe-root.layout-desktop.te2-secondary-editor-docked {
+    --secondary-reserve: 200px;
     --secondary-gap: var(--split-rail-size);
-    --secondary-editor-width-effective: var(--secondary-editor-dock-size);
+    --secondary-editor-width-effective: clamp(0px, var(--secondary-editor-dock-size), 100% - var(--explorer-track) - var(--sidebar-track) - var(--explorer-gap, var(--split-rail-size)) - var(--sidebar-gap, var(--split-rail-size)) - var(--secondary-gap) - 200px);
   }
 
   .fe-root.layout-desktop.te2-secondary-editor-collapsed {
+    --secondary-reserve: 52px;
     --secondary-editor-width-effective: 52px;
   }
   .fe-root.layout-desktop.te2-secondary-editor-docked:not(.te2-secondary-editor-collapsed)[data-desktop-split] {
@@ -238,7 +244,7 @@
 
   /* Adjust grid when sidebar is closed */
   .layout-desktop:has(.agent-drawer:not(.open)) {
-     --sidebar-track: 0px; --sidebar-gap: 0px;
+     --sidebar-track: 0px; --sidebar-gap: 0px; --sidebar-reserve: 0px;
   }
 
   .layout-desktop:has(.terminal-drawer.open:not(.terminal-drawer--collapsed):not(.fullscreen)) {
@@ -276,6 +282,18 @@
   }
   .layout-desktop .resize-handle::before {
     content: none;
+  }
+  .fe-root.layout-desktop[data-resize-close="explorer"] { --explorer-track: 0px; --explorer-gap: 0px; }
+  .fe-root.layout-desktop[data-resize-close="agent"] { --sidebar-track: 0px; --sidebar-gap: 0px; }
+  .fe-root[data-resize-close="explorer"] .fe-drawer,
+  .fe-root[data-resize-close="agent"] .agent-drawer { visibility: hidden; }
+  .fe-root[data-resize-close="terminal"] .terminal-drawer {
+    height: 2px !important; max-height: 2px !important; min-height: 0 !important; overflow: hidden;
+  }
+  .fe-resize-close-hint:not([hidden]) {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 1800;
+    background: var(--card); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 8px; pointer-events: none;
   }
   :is(.hc-black,.hc-light) .fe-root.layout-desktop {
     --pane-stroke: var(--te2-code-foreground, var(--fg));
@@ -2055,6 +2073,18 @@
     font-size: 0.8rem;
     padding: 5px 10px;
   }
+  .fe-tree-root > .fe-tree-text::after {
+    content: var(--project-head-label, '');
+    color: var(--fg-dim);
+    white-space: pre;
+  }
+  .fe-git-footer .fe-git-row { flex-wrap: nowrap; }
+  .fe-git-footer .fe-git-summary {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .fe-git-footer .fe-git-actions:not(.fe-git-actions-secondary) { justify-content: space-between; gap: 0; }
+  .fe-git-footer .fe-git-actions button { white-space: nowrap; }
+  .fe-git-actions-secondary #fe-git-base-btn { flex: 0 1 auto; min-width: 0; text-overflow: ellipsis; overflow: hidden; }
 
   /* Sidebar drawer */
   .agent-drawer {

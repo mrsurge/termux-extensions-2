@@ -51,7 +51,7 @@ test('mounts resolve their own parts and reject missing parts instead of borrowi
   } finally { win.happyDOM.abort(); }
 });
 
-test('layout observes only its explicit mount and debug updates never target the other editor', () => {
+test('each runtime uses its explicit mount and debug updates never target the other editor', () => {
   const win = new Window();
   const restore = installGlobals(win);
   try {
@@ -63,8 +63,8 @@ test('layout observes only its explicit mount and debug updates never target the
       getEditorContainer: () => mount.editor, getEditor: () => null, getDiffEditor: () => null,
     });
     const first = ui(a), second = ui(b);
-    first.ensureLayoutObserver(); second.ensureLayoutObserver();
-    assert.deepEqual(observed, [a.editor, b.editor]);
+    assert.equal(first.getEditorContainer(), a.editor); assert.equal(second.getEditorContainer(), b.editor);
+    assert.deepEqual(observed, []);
     const debug = mount => api.createEditorDebugRuntime({ getDebugElement: () => mount.debug, getEditor: () => null });
     const ad = debug(a), bd = debug(b);
     ad.updateDebug('primary-only'); const previous = a.debug.textContent;

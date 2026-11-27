@@ -950,7 +950,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     }
     root.style.setProperty(
       '--secondary-editor-dock-size',
-      `${Math.max(320, Math.min(1200, Number(presentation.dockSize) || 480))}px`,
+      `${Math.max(200, Math.min(1200, Number(presentation.dockSize) || 480))}px`,
     );
     publishSecondaryEditorPlacement();
   }
@@ -1001,6 +1001,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     })();
   };
   window.addEventListener('resize', handleSecondaryPlacementChange);
+  window.addEventListener('code-te2:pane-bounds-changed', handleSecondaryPlacementChange);
   window.addEventListener('code-te2:secondary-editor-resize-end', handleSecondaryResizeEnd);
   document.addEventListener('visibilitychange', handleSecondaryPlacementChange);
   const unsubscribeSecondEditorCommands = electronSecondEditor?.onSecondEditorCommand?.(
@@ -1034,6 +1035,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     window.removeEventListener('code-te2:reveal-secondary-drawer', revealSecondaryDrawer);
     stopDock();
     window.removeEventListener('resize', handleSecondaryPlacementChange);
+    window.removeEventListener('code-te2:pane-bounds-changed', handleSecondaryPlacementChange);
     window.removeEventListener('code-te2:secondary-editor-resize-end', handleSecondaryResizeEnd);
     window.removeEventListener('code-te2:adapter-state', handleSecondaryAdapterState);
     document.removeEventListener('visibilitychange', handleSecondaryPlacementChange);
@@ -1074,7 +1076,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     }
   }
 
-  async function openInSecondWindow(targetPath = currentPath, historyTicket?: string): Promise<void> {
+  async function openInSecondWindow(targetPath = currentPath, historyTicket?: string, onOpened?: () => Promise<void>): Promise<void> {
     const electronAvailable = typeof electronSecondEditor?.openSecondEditor === 'function';
     if (!electronAvailable && !mobileSecondEditor.supported) {
       host.toast('A second editor window is unavailable in this client');
@@ -1106,6 +1108,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       } else {
         await mobileSecondEditor.open(cachedProjectRoot, targetPath, historyTicket);
       }
+      await onOpened?.();
     } catch (error) {
       host.toast(`Second window failed: ${(error as Error)?.message || String(error)}`);
     }
@@ -1149,11 +1152,14 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     orderScope: `primary:${clientId}`,
     formatFileNameDisplay: (name: string) => formatFileNameDisplay(name),
     openFile: (path: string, options?: { keyboard: boolean }) => openFile(path, options?.keyboard ? { focus: true, placeCursor: true } : {}),
-    openInSecondWindow: (
+    openInOtherWindow: (
       typeof electronSecondEditor?.openSecondEditor === 'function'
       || mobileSecondEditor.supported
     )
-      ? (path: string) => openInSecondWindow(path)
+      ? (path, move, projectPath, projectGeneration, revision) => openInSecondWindow(path, undefined, move ? async () => {
+        await uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostFileOpen,
+          { path, projectPath, projectGeneration, revision, tabAction: 'moveToSecond' }, 12_000);
+      } : undefined)
       : undefined,
     closeRecentFile: (path: string, revision: number, projectPath: string, projectGeneration: number) => uiIpcConnections.requestUiIpc(
       UI_IPC_RPC_METHODS.hostRecentFileClose,

@@ -172,12 +172,13 @@ test('extension tab actions target the same native presentation and selecting fi
       publish({panels:[panel],active:panel.surfaceId});
       await f.settle(()=>placements.length>0);
       assert.deepEqual(placements.at(-1),['preview','native:preview',{x:20,y:30,width:300,height:400}]);
-      root.querySelector('.te2-secondary-panel-tabs [role="tab"]').click();
-      root.querySelector('.te2-secondary-panel-tabs [title="Editor"]').click();
-      root.querySelector('.te2-secondary-panel-tabs [title="Return to sidebar"]').click();
-      assert.deepEqual(actions,[['select','preview','native:preview'],['files'],['return','preview','native:preview']]);
+      const tab=root.querySelector('.fe-file-tabs-track > .te2-panel-tab');
+      tab.click();
+      tab.dispatchEvent(new f.win.MouseEvent('contextmenu',{bubbles:true,cancelable:true}));
+      assert.deepEqual(actions,[['select','preview','native:preview'],['menu','preview','native:preview']]);
+      assert.equal(root.querySelector('.te2-secondary-panel-tabs'),null);
       publish({panels:[],active:''});
-      assert.equal(root.querySelector('.te2-secondary-panel-tabs').hidden,true);
+      assert.equal(root.querySelector('.te2-panel-tab'),null);
     }finally{
       runtime?.dispose();
       globals.forEach((key,i)=>{if(saved[i])Object.defineProperty(globalThis,key,saved[i]);else delete globalThis[key];});

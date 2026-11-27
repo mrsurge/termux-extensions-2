@@ -67,7 +67,6 @@ interface EditorLifecycleDeps {
   syncReadOnlyInputMode(editor: MonacoEditorLike): void;
   onEditorConfigChanged(editor: MonacoEditorLike): void;
   updateDebug(extra: string): void;
-  ensureLayoutObserver(): void;
   bindEditorHostActionHooks(): void;
   installMirrorPublisher(): void;
   installScrollPublisher(): void;
@@ -132,7 +131,6 @@ function applySharedPlainEditorSetup(
   deps.ensureTouchSelection(options.touchReason);
   deps.syncReadOnlyInputMode(editor);
   bindEditorConfiguration(deps, editor);
-  deps.ensureLayoutObserver();
 }
 
 export function disposeDiffEditorOnly(deps: EditorLifecycleDeps): void {
@@ -348,7 +346,6 @@ export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiff
   if (originalEditor) deps.syncReadOnlyInputMode(originalEditor);
   deps.syncReadOnlyInputMode(modifiedEditor);
   bindEditorConfiguration(deps, modifiedEditor);
-  deps.ensureLayoutObserver();
   deps.layoutEditors();
   restoreEditorViewState(modifiedEditor, savedScrollTop, savedPosition);
   deps.bindEditorHostActionHooks();

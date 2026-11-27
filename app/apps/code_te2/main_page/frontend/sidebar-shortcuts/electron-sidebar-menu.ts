@@ -31,9 +31,14 @@ export async function openElectronSidebarMenu(
   const electron = bridge();
   if (!electron) throw new Error("Electron Sidebar menu bridge is unavailable");
   const rect = anchor.getBoundingClientRect();
+  return openElectronMenuAt(rect.left, rect.bottom + 4, items);
+}
+
+export async function openElectronMenuAt(x: number, y: number, items: ElectronSidebarMenuItem[]): Promise<string | null> {
+  const electron = bridge();
+  if (!electron) throw new Error("Electron menu bridge is unavailable");
   const result = await electron.openSidebarMenu({
-    x: rect.left,
-    y: rect.bottom + 4,
+    x, y,
     items,
   });
   return typeof result?.selectedId === "string" ? result.selectedId : null;

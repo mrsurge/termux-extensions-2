@@ -479,6 +479,28 @@ test('file tabs render bounded decorations and active close opens its successor'
   }
 });
 
+test('Electron secondary tab uses the native menu and moves the clicked document to main', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController } = await importFileTabs();
+    let request;
+    window.te2Electron = {openSidebarMenu: async payload => { request = payload; return {selectedId: 'move'}; }};
+    const track = new FakeElement(), actions = [];
+    const tabs = createFileTabsController({viewport: new FakeElement(), track, otherWindow: 'Main',
+      formatFileNameDisplay: name => name, openFile: async () => {}, closeRecentFile: async () => {},
+      resetToNewFile() {}, openInOtherWindow: async (...args) => actions.push(args)});
+    tabs.broadcastOpenState({projectPath: '/workspace', projectGeneration: 2, revision: 3,
+      recents: [{path:'/workspace/a', exists:true}, {path:'/workspace/b', exists:true}]});
+    const event = new Event('contextmenu', {cancelable:true});
+    Object.assign(event, {clientX:120, clientY:30});
+    track.children[1].dispatchEvent(event);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(request.items.map(item => item.label), ['Open in Main Window', 'Move to Main Window']);
+    assert.deepEqual(actions, [['/workspace/b', true, '/workspace', 2, 3]]);
+    assert.equal(document.body.children.length, 0);
+  } finally { dom.restore(); }
+});
+
 test('file tab context menu opens the selected tab in the second editor', async () => {
   const dom = installDom();
   try {
@@ -492,7 +514,7 @@ test('file tab context menu opens the selected tab in the second editor', async 
       track,
       formatFileNameDisplay: (value) => value,
       openFile: async () => {},
-      openInSecondWindow: async (filePath) => openedSecond.push(filePath),
+      openInOtherWindow: async (filePath) => openedSecond.push(filePath),
       closeRecentFile: async () => {},
       resetToNewFile: () => {},
     });
@@ -516,6 +538,7 @@ test('file tab context menu opens the selected tab in the second editor', async 
     assert.equal(globalThis.document.body.children.length, 1);
     const menu = globalThis.document.body.children[0];
     assert.equal(menu.children[0].textContent, 'Open in Second Window');
+    assert.equal(menu.children[1].textContent, 'Move to Second Window');
     menu.children[0].click();
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(openedSecond, ['/workspace/b.go']);

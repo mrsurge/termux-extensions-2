@@ -80,15 +80,13 @@ export function formatExplorerBranchLabel(
     return { text: '(no commits)', title: 'Git repository has no commits' };
   }
   if (status.detached === true) {
-    const short = status.head?.short || status.head?.full?.slice(0, 7) || '?';
     return {
-      text: `HEAD @ ${short}`,
+      text: 'Detached HEAD',
       title: status.head?.full || 'Detached HEAD',
     };
   }
   if (status.branch) {
-    const short = status.head?.short || status.head?.full?.slice(0, 7) || '';
-    const text = short ? `${status.branch} @ ${short}` : status.branch;
+    const text = status.branch;
     const title = status.head?.full
       ? `${status.branch} @ ${status.head.full}`
       : status.branch;
@@ -184,7 +182,10 @@ export function createExplorerChromeController(
 
   function renderBranchLabel(): void {
     if (!branchLabelEl) return;
-    const label = formatExplorerBranchLabel(deps.getGitStatus());
+    const status = deps.getGitStatus();
+    const hash = status?.head?.short || status?.head?.full?.slice(0, 7) || '';
+    branchLabelEl.closest<HTMLElement>('#fe-drawer')?.style.setProperty('--project-head-label', JSON.stringify(hash ? '  ' + hash : ''));
+    const label = formatExplorerBranchLabel(status);
     branchLabelEl.textContent = label.text;
     branchLabelEl.title = label.title;
     branchLabelEl.classList.remove('fe-label-missing');

@@ -137,6 +137,21 @@ class EditorPresentationCutoverTests(unittest.IsolatedAsyncioTestCase):
             close_client_presentation(self.project, self.path, A, expected_revision=latest["revision"], expected_generation=8)
         self.assertEqual(len(latest["recents"]), 2)
 
+    def test_move_requires_peer_ownership_and_never_closes_document(self) -> None:
+        write_client_document_open(self.project, self.path, A)
+        write_client_document_open(self.project, self.path, T)
+        with self.assertRaisesRegex(ValueError, "Destination"):
+            close_client_presentation(self.project, self.path, A, expected_revision=0,
+                                      expected_generation=9, move_only=True)
+        for origin, destination in ((A, S), (S, A)):
+            write_client_document_open(self.project, self.path, destination)
+            result = close_client_presentation(self.project, self.path, origin, expected_revision=0,
+                                               expected_generation=9, move_only=True)
+            self.assertEqual(result["kind"], "presentation")
+            for renderer, present in ((origin, False), (destination, True), (T, True)):
+                state = read_client_open_state(self.project, renderer, reason="test")
+                self.assertEqual(self.path in state["editorPlacement"]["paths"], present)
+
     def test_open_projection_and_decorations_are_not_limited_by_mru(self) -> None:
         for index in range(20):
             path = str(Path(self.project) / f"file-{index}.cpp")

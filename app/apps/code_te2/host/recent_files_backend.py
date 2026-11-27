@@ -1,12 +1,15 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
+
 from ..open_state_backend import (
     read_sidecar_open_state,
     remove_sidecar_recent_file,
     write_client_foreground,
     close_client_presentation,
     close_client_area,
+    DestinationTabNotOpen,
 )
 from ..open_state_events import (
     publish_client_foreground_changed,
@@ -14,7 +17,7 @@ from ..open_state_events import (
     publish_open_state_changed,
 )
 from ..stores import get_history_store
-from ..worker_services.event_bus import current_project_generation
+from ..worker_services.event_bus import WorkerEvent, current_project_generation, subscribe, unsubscribe
 from .secondary_content_backend import close_secondary_content
 from ..editor_renderer_bindings import registered_editor_renderer_binding
 
@@ -32,6 +35,7 @@ async def handle_host_recent_file_close_request(
     params: JsonObject,
     *,
     source_name: str,
+    move_only: bool = False,
 ) -> JsonObject:
     """Remove one project-sidecar recent entry and publish its new state."""
     history = get_history_store()
@@ -48,8 +52,27 @@ async def handle_host_recent_file_close_request(
         if (not isinstance(revision, int) or isinstance(revision, bool)
                 or not isinstance(generation, int) or isinstance(generation, bool)):
             raise ValueError("updated_editor_assets_required_for_tab_close")
-        result = close_client_presentation(project_root, path, source_name,
-                                           expected_revision=revision, expected_generation=generation)
+        changed = asyncio.Event()
+        async def on_open(event: WorkerEvent) -> None:
+            if event["project_root"] == project_root:
+                changed.set()
+        if move_only:
+            subscribe("OpenStateChanged", on_open)
+        try:
+            async with asyncio.timeout(8):
+                while True:
+                    changed.clear()
+                    try:
+                        result = close_client_presentation(project_root, path, source_name,
+                            expected_revision=revision, expected_generation=generation, move_only=move_only)
+                        break
+                    except DestinationTabNotOpen:
+                        await changed.wait()
+        except TimeoutError as exc:
+            raise ValueError("Destination did not confirm the file; source tab was kept") from exc
+        finally:
+            if move_only:
+                unsubscribe("OpenStateChanged", on_open)
         source = f"{source_name}:presentation_close"
         if result["kind"] == "document":
             _ = history.remove_file(project_root, path)
@@ -63,6 +86,8 @@ async def handle_host_recent_file_close_request(
                                                         project_generation=generation, project_editor_snapshot=True)
         return {"removed": True, "kind": result["kind"], "openState": dict(result["openState"]),
                 "successor": result["successor"], "clientForeground": dict(result["clientForeground"])}
+    if move_only:
+        raise ValueError("editor_renderer_association_required")
     removed, open_state, affected_foregrounds = remove_sidecar_recent_file(
         project_root,
         path,

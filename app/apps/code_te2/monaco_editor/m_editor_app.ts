@@ -540,9 +540,6 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   var uiEditorRuntime = createEditorUiEditorRuntime({
     getEditorContainer: () => options.mount.editor,
     updatePreference: (payload) => editorRpcCall("editor.preference.update", payload),
-    getWindow: function () {
-      return window;
-    },
     getDocument: function () {
       return options.mount.root.ownerDocument;
     },
@@ -764,7 +761,6 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
   var shouldDropDuplicateEditorOpen = prefRuntime.shouldDropDuplicateEditorOpen;
   var getEditorContainer = uiEditorRuntime.getEditorContainer;
   var _layoutEditors = uiEditorRuntime.layoutEditors;
-  var ensureLayoutObserver = uiEditorRuntime.ensureLayoutObserver;
   var _forceSemanticHighlighting = uiEditorRuntime.forceSemanticHighlighting;
   var _installMarkerNavBindingsRuntime =
     uiEditorRuntime.installMarkerNavBindings;
@@ -1856,7 +1852,6 @@ export function startWorkingEditorRuntime(options: WorkingEditorBootOptions): Wo
     syncReadOnlyInputMode: _syncReadOnlyInputMode,
     onEditorConfigChanged: _onEditorConfigChanged,
     updateDebug: updateDebug,
-    ensureLayoutObserver: ensureLayoutObserver,
     bindEditorHostActionHooks: bindEditorHostActionHooks,
     installMirrorPublisher: installMirrorPublisher,
     installScrollPublisher: installScrollPublisher,

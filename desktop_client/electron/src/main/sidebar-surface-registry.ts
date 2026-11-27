@@ -90,6 +90,11 @@ export class DetachedSidebarSurfaceRegistry {
     this.#options.panelsChanged?.(this.panelSnapshot());
   }
 
+  requestPanelClose(id: string, presentationId: string): void {
+    if (this.#matchingEntry(id, presentationId)?.transferred)
+      this.#options.panelsChanged?.({ ...this.panelSnapshot(), closeRequestedFor: id });
+  }
+
   panelAction(action: "transfer" | "return" | "select", id: string, presentationId: string, revealReturn = false): void {
     const entry = this.#matchingEntry(id, presentationId);
     if (!entry?.persistent || entry.window || !presentationId || (action !== "transfer" && !entry.transferred))

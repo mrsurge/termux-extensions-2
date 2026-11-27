@@ -124,7 +124,9 @@ export function createExplorerDiffBaseController(
 
   function updateButtons(): void {
     if (!gitBaseButton) return;
-    gitBaseButton.textContent = `${formatDiffBaseLabel(gitDiffBase, true)} ▾`;
+    gitBaseButton.textContent = (gitDiffBase.commit?.subject ||
+      (gitDiffBase.mode === 'none' ? 'No Git' : gitDiffBase.ref === 'HEAD' ? 'HEAD' : 'Selected commit')) + ' ▾';
+    gitBaseButton.title = formatDiffBaseLabel(gitDiffBase, true);
     gitBaseButton.disabled = gitDiffBase.mode === 'none';
     gitBaseButton.classList.toggle('comparison-historical', gitDiffBase.ref !== 'HEAD');
     document.querySelectorAll('#fe-search-base-btn').forEach(button => {

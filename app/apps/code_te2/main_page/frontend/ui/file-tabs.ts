@@ -1,4 +1,5 @@
 import { isUnknownArray } from '../../../src/rpc/value-types.ts';
+import { hasElectronSidebarMenu, openElectronMenuAt } from '../sidebar-shortcuts/electron-sidebar-menu.ts';
 import { getIcon as getFileIcon, renderIcon } from '/static/js/file_icons.js';
 
 interface RecentFileEntry {
@@ -18,11 +19,13 @@ interface FileTabDecoration {
 }
 
 interface FileTabsControllerDeps {
+  afterRender?(): void;
   viewport: HTMLElement;
   track: HTMLElement;
   formatFileNameDisplay: (name: string) => string;
   openFile: (path: string, options?: { keyboard: boolean }) => Promise<unknown>;
-  openInSecondWindow?: (path: string) => Promise<unknown>;
+  otherWindow?: 'Main' | 'Second';
+  openInOtherWindow?: (path: string, move: boolean, projectPath: string, projectGeneration: number, revision: number) => Promise<unknown>;
   closeRecentFile: (path: string, revision: number, projectPath: string, projectGeneration: number) => Promise<unknown>;
   onError?: (message: string) => void;
   resetToNewFile: () => void;
@@ -300,23 +303,37 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   }
 
   function openContextMenu(entry: RecentFileEntry, clientX: number, clientY: number): void {
-    if (disposed || !entry.exists || !deps.openInSecondWindow) return;
+    const send = deps.openInOtherWindow;
+    if (disposed || !entry.exists || !send) return;
     closeContextMenu();
+    const project = projectPath, generation = projectGeneration;
+    const destination = deps.otherWindow ?? 'Second';
+    const items = [
+      {type: 'item' as const, id: 'open', label: `Open in ${destination} Window`, enabled: true},
+      {type: 'item' as const, id: 'move', label: `Move to ${destination} Window`, enabled: true},
+    ];
+    const report = (error: unknown) => deps.onError?.(error instanceof Error ? error.message : String(error));
+    const select = async (id: string | null) => {
+      if ((id !== 'open' && id !== 'move') || disposed || project !== projectPath || generation !== projectGeneration
+        || !recents.some(candidate => candidate.exists && candidate.path === entry.path)) return;
+      await send(entry.path, id === 'move', project, generation, openRevision);
+    };
+    if (hasElectronSidebarMenu()) {
+      void openElectronMenuAt(clientX, clientY, items).then(select).catch(report);
+      return;
+    }
     const menu = document.createElement('div');
     menu.className = 'fe-file-tab-context-menu';
     menu.setAttribute('role', 'menu');
     menu.setAttribute('aria-label', `Actions for ${entry.label}`);
-    const openSecond = document.createElement('button');
-    openSecond.type = 'button';
-    openSecond.setAttribute('role', 'menuitem');
-    openSecond.textContent = 'Open in Second Window';
-    openSecond.addEventListener('click', () => {
-      closeContextMenu();
-      void deps.openInSecondWindow?.(entry.path).catch((error: unknown) => {
-        console.error('[FileTabs] Failed to open tab in second window:', error);
-      });
-    });
-    menu.appendChild(openSecond);
+    for (const item of items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      button.textContent = item.label;
+      button.addEventListener('click', () => { closeContextMenu(); void select(item.id).catch(report); });
+      menu.appendChild(button);
+    }
     document.body.appendChild(menu);
     activeContextMenu = menu;
 
@@ -327,7 +344,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     const rightEdge = Math.min(viewportWidth - 8, tabsRect.right || viewportWidth - 8);
     menu.style.left = `${Math.max(8, Math.min(clientX, rightEdge - menuRect.width))}px`;
     menu.style.top = `${Math.max(8, Math.min(clientY, viewportHeight - menuRect.height - 8))}px`;
-    openSecond.focus();
+    (menu.firstElementChild as HTMLButtonElement | null)?.focus();
 
     const dismissPointer = (event: PointerEvent) => {
       if (event.target instanceof Node && menu.contains(event.target)) return;
@@ -452,6 +469,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       empty.className = 'fe-file-tabs-empty';
       empty.textContent = 'No recent files';
       deps.track.appendChild(empty);
+      deps.afterRender?.();
       return;
     }
 
@@ -512,7 +530,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
         void openEntry(entry);
       });
       tab.addEventListener('contextmenu', (event) => {
-        if (!entry.exists || !deps.openInSecondWindow) return;
+        if (!entry.exists || !deps.openInOtherWindow) return;
         event.preventDefault();
         event.stopPropagation();
         openContextMenu(entry, event.clientX, event.clientY);
@@ -532,6 +550,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       });
       deps.track.appendChild(tab);
     });
+    deps.afterRender?.();
   }
 
   function refreshOpenState(state: unknown): void {

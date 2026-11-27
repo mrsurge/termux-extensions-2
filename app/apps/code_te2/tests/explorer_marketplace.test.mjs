@@ -501,7 +501,7 @@ test("branch label formatter covers repository lifecycle states", async () => {
       head: { full: "0123456789abcdef", short: "0123456" },
     }),
     {
-      text: "HEAD @ 0123456",
+      text: "Detached HEAD",
       title: "0123456789abcdef",
     },
   );
@@ -513,7 +513,7 @@ test("branch label formatter covers repository lifecycle states", async () => {
       head: { full: "fedcba9876543210", short: "fedcba9" },
     }),
     {
-      text: "feature/open-vsx @ fedcba9",
+      text: "feature/open-vsx",
       title: "feature/open-vsx @ fedcba9876543210",
     },
   );

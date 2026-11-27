@@ -3,11 +3,8 @@ import type { SecondaryPanelBridge, SecondaryPanelSnapshot } from './secondary-p
 export function installSecondaryPanelTabs(root: HTMLElement, bridge: SecondaryPanelBridge, report: (message: string) => void) {
   const header = root.querySelector<HTMLElement>('.te2-secondary-editor-header')!;
   const body = root.querySelector<HTMLElement>('.te2-secondary-editor-body')!;
-  const strip = document.createElement('div');
-  strip.className = 'te2-secondary-panel-tabs';
-  strip.setAttribute('role', 'tablist');
-  strip.setAttribute('aria-label', 'Extension panels');
-  header.querySelector('.te2-secondary-file-tabs')?.after(strip);
+  const strip = header.querySelector<HTMLElement>('.te2-secondary-file-tabs .fe-file-tabs-track')!;
+  const panelTabs = new Map<string, HTMLDivElement>();
   let state: SecondaryPanelSnapshot = { panels: [], active: '' };
   let stopped = false;
   let frame = 0;
@@ -32,27 +29,46 @@ export function installSecondaryPanelTabs(root: HTMLElement, bridge: SecondaryPa
       void bridge.placeSecondaryPanel(panel.surfaceId, panel.presentationId, bounds).catch(fail);
     });
   }
-  function button(label: string, action: () => void) {
-    const el = document.createElement('button');
-    el.type = 'button'; el.textContent = label; el.title = label;
-    el.addEventListener('click', action);
-    strip.append(el);
-    return el;
+  function syncTabs() {
+    for (const [id, tab] of panelTabs) {
+      if (!state.panels.some(p => p.presentationId === id)) { tab.remove(); panelTabs.delete(id); }
+    }
+    for (const tab of strip.querySelectorAll<HTMLElement>('.fe-file-tab[data-path]')) {
+      if (tab.classList.contains('active')) tab.dataset.fileCurrent = '';
+      const current = tab.hasAttribute('data-file-current');
+      tab.classList.toggle('active',current && !state.active);
+      tab.setAttribute('aria-selected',String(current && !state.active));
+    }
+    for (const p of state.panels) {
+      let el = panelTabs.get(p.presentationId);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'fe-file-tab te2-panel-tab'; el.setAttribute('role','tab');
+        el.tabIndex = 0;
+        const label = document.createElement('span');
+        label.className = 'fe-file-tab-label';
+        el.append(label);
+        const menu = () => void bridge.secondaryPanelAction('menu',p.surfaceId,p.presentationId).catch(fail);
+        el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); menu(); });
+        el.addEventListener('keydown', e => {
+          if(e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); menu(); }
+          else if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el?.click(); }
+        });
+        el.addEventListener('click', () => void bridge.secondaryPanelAction('select',p.surfaceId,p.presentationId).catch(fail));
+        panelTabs.set(p.presentationId, el);
+      }
+      if (el.firstElementChild && el.firstElementChild.textContent !== p.label) el.firstElementChild.textContent = p.label;
+      el.title = p.label;
+      el.classList.toggle('active',state.active === p.surfaceId);
+      el.setAttribute('aria-selected', String(state.active === p.surfaceId));
+      if (el.parentElement !== strip) strip.append(el);
+    }
   }
   function render(next: SecondaryPanelSnapshot) {
     if (stopped) return;
     revision++;
     state = next;
-    strip.replaceChildren();
-    strip.hidden = !state.panels.length;
-    if (state.active) button('Editor', files);
-    for (const p of state.panels) {
-      const el = button(p.label, () => void bridge.secondaryPanelAction('select', p.surfaceId, p.presentationId).catch(fail));
-      el.setAttribute('role', 'tab');
-      el.setAttribute('aria-selected', String(state.active === p.surfaceId));
-      if (state.active === p.surfaceId) button('Return to sidebar', () =>
-        void bridge.secondaryPanelAction('return', p.surfaceId, p.presentationId).catch(fail));
-    }
+    syncTabs();
     lastPlacement = '';
     schedule();
   }
@@ -71,14 +87,13 @@ export function installSecondaryPanelTabs(root: HTMLElement, bridge: SecondaryPa
   document.addEventListener('transitionend', schedule);
   document.addEventListener('visibilitychange', schedule);
   window.addEventListener('resize', schedule);
-  const fileTabs = header.querySelector('.te2-secondary-file-tabs');
-  fileTabs?.addEventListener('click', files, true);
-  return { files, populated: () => !!state.panels.length, dispose() {
+  window.addEventListener('code-te2:pane-bounds-changed', schedule);
+  return { files, syncTabs, populated: () => !!state.panels.length, dispose() {
     stopped = true; unsubscribe(); resize.disconnect(); observer.disconnect();
-    cancelAnimationFrame(frame); strip.remove();
-    fileTabs?.removeEventListener('click', files, true);
+    cancelAnimationFrame(frame); for (const tab of panelTabs.values()) tab.remove();
     document.removeEventListener('visibilitychange', schedule);
     document.removeEventListener('transitionend', schedule);
     window.removeEventListener('resize', schedule);
+    window.removeEventListener('code-te2:pane-bounds-changed', schedule);
   } };
 }

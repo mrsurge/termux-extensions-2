@@ -188,9 +188,9 @@ const STYLE = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.te2-secondary-panel-tabs { display: flex; min-width: 0; max-width: 65%; overflow-x: auto; }
-.te2-secondary-panel-tabs button { white-space: nowrap; }
-.te2-secondary-panel-tabs [aria-selected='true'] { border-bottom-color: #58a6ff; }
+.te2-secondary-file-tabs .te2-panel-tab { color: var(--explorer-active-file-accent, #8cc8ff); grid-template-columns: minmax(0,1fr); }
+.te2-secondary-file-tabs .te2-panel-tab[aria-selected='true'] { border-bottom-color: #58a6ff; }
+.te2-secondary-file-tabs:has(.te2-panel-tab) .fe-file-tabs-empty { display: none; }
 .te2-secondary-file-tabs {
   flex: 1 1 auto;
   min-width: 0;
@@ -592,11 +592,19 @@ export async function bootSecondaryEditorRuntime(
   let replacementPending = false;
   const tabIdentity = options.rendererIdentity ?? getCodeTe2SocketIdentity();
   const tabs = createFileTabsController({
+    afterRender: () => panels?.syncTabs(),
     viewport: tabViewport,
     track: tabTrack,
     orderScope: `secondary:${tabIdentity.mainPageClientInstanceId}`,
     isActive: () => !contentLifecycle.historical && isEditorInputOwner(editorFrame),
     formatFileNameDisplay: name => name,
+    otherWindow: 'Main',
+    openInOtherWindow: async (path, move, projectPath, projectGeneration, revision) => {
+      if (disposed || contentLifecycle.historical) return;
+      await connection.request(UI_IPC_RPC_METHODS.hostFileOpen,
+        { path, projectPath, projectGeneration, revision, focus: true, tabAction: move ? 'moveToMain' : 'openInMain' }, 12_000);
+      if (!disposed) await requestHostState();
+    },
     openFile: async path => {
       panels?.files();
       if (disposed || contentLifecycle.historical) return;

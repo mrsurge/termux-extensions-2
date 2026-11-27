@@ -8,7 +8,6 @@ import { installProblemMentionBinding } from './editor_problem_mention_runtime.t
 
 interface EditorUiEditorRuntimeDeps {
   updatePreference(payload: Record<string, unknown>): Promise<unknown>;
-  getWindow(): Window;
   getDocument(): Document;
   getEditorContainer(): HTMLElement | null;
   getMonaco(): unknown;
@@ -30,7 +29,6 @@ interface EditorUiEditorRuntimeDeps {
 type DirectionLike = unknown;
 
 export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
-  let layoutObserver: ResizeObserver | null = null;
   let disposed = false;
   let lastKnownReadOnly: boolean | null = null;
   let transientReadOnlyDepth = 0;
@@ -56,22 +54,6 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
     try { if (editor && editor.layout) editor.layout(); } catch (_) {}
   }
 
-  function ensureLayoutObserver(): void {
-    try {
-      if (disposed || layoutObserver) return;
-      const win = deps.getWindow() as Window & { ResizeObserver?: typeof ResizeObserver };
-      if (!win.ResizeObserver) return;
-      const container = getEditorContainer();
-      if (!container) return;
-      layoutObserver = new win.ResizeObserver(() => {
-        layoutEditors();
-      });
-      layoutObserver.observe(container);
-      try {
-        deps.getWindow().addEventListener('resize', layoutEditors);
-      } catch (_) {}
-    } catch (_) {}
-  }
 
   function getThemeService(): unknown {
     try {
@@ -193,13 +175,9 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
     dispose(): void {
       if (disposed) return;
       disposed = true;
-      layoutObserver?.disconnect();
-      layoutObserver = null;
-      deps.getWindow().removeEventListener('resize', layoutEditors);
     },
     getEditorContainer,
     layoutEditors,
-    ensureLayoutObserver,
     forceSemanticHighlighting,
     installMarkerNavBindings: installMarkerNavBindingsRuntime,
     ensureTouchSelection,

@@ -5503,8 +5503,12 @@ export function initSidebarShortcuts(
     if (electronBridge && !_electronSurfaceEventsUnsubscribe) {
       if (electronBridge.onSecondaryPanels && electronBridge.secondaryPanelSnapshot) {
         let revision = 0;
-        const update = (state: { panels: { surfaceId: string }[]; returnedSurfaceId?: string }) => {
+        const update = (state: { panels: { surfaceId: string }[]; returnedSurfaceId?: string; closeRequestedFor?: string }) => {
           revision++;
+          if (state.closeRequestedFor && _hydrated) {
+            const sc = _collectVisibleShortcuts(_latestUiPrefs || {}).find(s => _surfaceIdForShortcut(s) === state.closeRequestedFor);
+            if (sc) void _runHeaderIconMenuAction(sc, 'extension-close').catch((e: unknown) => toast(errorMessage(e, 'Could not close extension panel')));
+          }
           const next = new Set(state.panels.map(p => p.surfaceId));
           if (next.size === _secondaryPanels.size && [...next].every(id => _secondaryPanels.has(id))) return;
           _secondaryPanels = next;
@@ -5583,6 +5587,7 @@ export function initSidebarShortcuts(
         });
       });
       window.addEventListener("resize", _scheduleElectronNativeSurfacePlacement);
+      window.addEventListener("code-te2:pane-bounds-changed", _scheduleElectronNativeSurfacePlacement);
       document.addEventListener(
         "visibilitychange",
         _scheduleElectronNativeSurfacePlacement,
@@ -5591,6 +5596,7 @@ export function initSidebarShortcuts(
         "beforeunload",
         () => {
           _nativeSurfaceResizeObserver?.disconnect();
+          window.removeEventListener("code-te2:pane-bounds-changed", _scheduleElectronNativeSurfacePlacement);
           _nativeSurfaceMutationObserver?.disconnect();
         },
         { once: true },

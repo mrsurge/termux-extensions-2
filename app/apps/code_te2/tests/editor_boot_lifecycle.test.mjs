@@ -145,35 +145,13 @@ test('host-action runtime unsubscribes once and fences callbacks already queued 
   assert.deepEqual(win, before);
 });
 
-test('UI runtime disconnects its observer and removes resize handling permanently', async () => {
+test('explicit editor layout remains available for lifecycle transitions until disposal', async () => {
   const { createEditorUiEditorRuntime } = await load('monaco_editor/editor_ui_editor_runtime.ts');
-  let observes = 0, disconnects = 0, layouts = 0;
-  const listeners = new Set();
-  let observerCallback;
-  const win = {
-    ResizeObserver: class {
-      constructor(callback) { observerCallback = callback; }
-      observe() { observes++; }
-      disconnect() { disconnects++; }
-    },
-    addEventListener: (_name, listener) => listeners.add(listener),
-    removeEventListener: (_name, listener) => listeners.delete(listener),
-  };
-  const runtime = createEditorUiEditorRuntime({
-    getWindow: () => win, getEditorContainer: () => ({}),
-    getEditor: () => ({ layout: () => layouts++ }), getDiffEditor: () => null,
-  });
-  runtime.ensureLayoutObserver(); runtime.ensureLayoutObserver();
-  assert.equal(observes, 1);
-  assert.equal(listeners.size, 1);
-  observerCallback();
-  assert.equal(layouts, 1);
-  runtime.dispose(); runtime.dispose(); runtime.ensureLayoutObserver();
-  observerCallback(); runtime.layoutEditors();
-  assert.equal(disconnects, 1);
-  assert.equal(listeners.size, 0);
-  assert.equal(layouts, 1);
-  assert.equal(observes, 1);
+  let layouts = 0;
+  const runtime = createEditorUiEditorRuntime({getEditor: () => ({layout: () => layouts++}), getDiffEditor: () => null});
+  assert.equal(layouts, 0);
+  runtime.layoutEditors(); assert.equal(layouts, 1);
+  runtime.dispose(); runtime.layoutEditors(); assert.equal(layouts, 1);
 });
 
 test('working boot is explicit, not an import side effect or shared snapshot mailbox', async () => {
