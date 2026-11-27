@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "jsx": "react",
+    "jsxFactory": "jsx",
+    "allowImportingTsExtensions": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,

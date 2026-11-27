@@ -1069,26 +1069,6 @@
   #editor-frame .monaco-editor {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
-  #editor-frame .monaco-editor .te2-symbol-target-highlight {
-    background-color: transparent;
-    border: 1px solid var(--vscode-editor-symbolHighlightBorder, var(--vscode-editorCursor-foreground));
-    box-sizing: border-box;
-    pointer-events: none;
-  }
-  #editor-frame .monaco-editor .te2-navigation-result-highlight {
-    background-color: color-mix(
-      in srgb,
-      var(--vscode-editor-findMatchHighlightBackground, #58a6ff) 42%,
-      transparent
-    );
-    border-bottom: 1px solid color-mix(
-      in srgb,
-      var(--vscode-editor-findMatchHighlightBorder, #58a6ff) 62%,
-      transparent
-    );
-    box-sizing: border-box;
-    pointer-events: none;
-  }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
   .cm-empty-anchor { 

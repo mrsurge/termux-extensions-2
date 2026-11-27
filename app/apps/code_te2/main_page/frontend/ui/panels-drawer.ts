@@ -11,7 +11,6 @@ interface Dependencies {  createTerminalDrawer: typeof import('../host-terminal-
   hostToast: (msg: string) => void,
   setFontScale: (preset: string) => Promise<unknown>,
   triggerEditorSearchPanel: (reason: string, opts?: { replace?: boolean }) => Promise<unknown>,
-  openFile: (path: string, options?: import('../file-ops/open-flow.ts').OpenFileOptions) => Promise<unknown>,
   jumpToCurrentFileLine: (line: number) => Promise<unknown>,
   requestCodeInspectorCommand: (payload: Record<string, unknown>) => Promise<unknown>,
   emitImeIntent?: (active: boolean, params?: Record<string, unknown>) => void,
@@ -34,7 +33,7 @@ export function initPanelsAndDrawer(deps: Dependencies) {
     openDrawer: () => terminal.openDrawer(),
     closeDrawer: () => terminal.close(),
     requestCommand: (payload: Record<string, unknown>) => deps.requestCodeInspectorCommand(payload),
-    openFile: (path: string, options?: Record<string, unknown>) => deps.openFile(path, options),
+    reportError: message => deps.hostToast(message),
   });
 
   const consoleCollapseBtn = document.getElementById('console-collapse-btn');

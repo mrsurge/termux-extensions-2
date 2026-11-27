@@ -34,7 +34,7 @@ test('symbol row navigates without reloading; twisty independently expands child
   const ids = ['container', 'header', 'target', 'target-symbol', 'target-path', 'target-separator', 'direction', 'summary', 'tree', 'empty', 'clear-highlights', 'collapse'];
   for (const id of ids) { const el = document.createElement('div'); el.id = `code-inspector-${id}`; document.body.append(el); }
   const opens = [];
-  const panel = createCodeInspectorPanel({ openDrawer() {}, closeDrawer() {}, requestCommand: async () => {}, openFile: async (...args) => opens.push(args) });
+  const panel = createCodeInspectorPanel({ openDrawer() {}, closeDrawer() {}, requestCommand: async action => opens.push(action), reportError: assert.fail });
   try {
     const data = documentSymbolTree([{ name: 'Parent', kind: 4, range, children: [{ name: 'child', kind: 5, range }] }], '/workspace/file.py');
     panel.hydrate({ requestId: 'symbols1', status: 'ready', mode: 'symbols', target: { path: '/workspace/file.py' }, summary: { label: 'Document symbols', count: 2 }, tree: data.tree });
@@ -43,14 +43,6 @@ test('symbol row navigates without reloading; twisty independently expands child
     row.querySelector('.code-inspector-twisty').click();
     assert.equal(opens.length, 0); assert.equal(document.querySelectorAll('.code-inspector-row').length, 2);
     document.querySelectorAll('.code-inspector-row')[1].click();
-    assert.deepEqual(opens[0], ['/workspace/file.py', {
-      forceRefresh: false,
-      line: 8,
-      column: 6,
-      focus: false,
-      scrollY: 'center',
-      placeCursor: true,
-      symbolRange: range,
-    }]);
+    assert.deepEqual(opens[0], {action:'navigate',requestId:'symbols1',nodeId:'symbol:2'});
   } finally { panel.destroy(); win.happyDOM.abort(); }
 });

@@ -1,4 +1,5 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
+import { bindTerminalProfiles } from './terminal-profiles';
 import { bindTerminalContextMenu } from '../../../libs/terminal_runtime/terminal_context_menu';
 import { bindTerminalCursor } from '../../../libs/terminal_runtime/terminal_cursor';
 import { loadTerminalWebgl, attachTerminalWebgl } from '../../../libs/terminal_runtime/terminal_webgl';
@@ -156,7 +157,6 @@ interface UiRefs {
   drawerOverlay: HTMLElement;
   btnMenu: HTMLButtonElement;
   btnNew: HTMLButtonElement;
-  btnRefresh: HTMLButtonElement;
   btnStop: HTMLButtonElement;
   exitPrompt: HTMLButtonElement;
   zoomOut: HTMLButtonElement;
@@ -712,7 +712,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     drawerOverlay: getRequired(root, '#ta-drawer-overlay'),
     btnMenu: getRequired(root, '#ta-btn-menu'),
     btnNew: getRequired(root, '#ta-btn-new'),
-    btnRefresh: getRequired(root, '#ta-btn-refresh'),
     btnStop: getRequired(root, '#ta-btn-stop'),
     exitPrompt: getRequired(root, '#ta-exit-prompt'),
     zoomOut: getRequired(root, '#ta-zoom-out'),
@@ -880,12 +879,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
   }
 
-  async function createShell(): Promise<void> {
+  async function createShell(profileId?: string): Promise<void> {
     try {
       const cwd = await resolveNewShellCwd();
       const data = await requireLifecycleClient().request<LifecycleShellMutationResult>(
         'shell.create',
-        { cwd },
+        { cwd, profile_id: profileId },
       );
       applyShellSnapshot(data.snapshot);
       await selectShell(data.shell_id);
@@ -1526,12 +1525,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     resetSidebarShellState(requestedShellId);
   }
 
-  async function listShells(resync = false): Promise<void> {
-    const data = await requireLifecycleClient().request<LifecycleSnapshotResult>(
-      resync ? 'shells.resync' : 'shells.get',
-    );
-    applyShellSnapshot(data.snapshot);
-  }
 
   function formatUptime(seconds?: number): string {
     if (!seconds || seconds < 1) return 'new';
@@ -1775,8 +1768,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     refocusTerm();
   }, { passive: true });
 
-  ui.btnNew.addEventListener('click', () => void createShell());
-  ui.btnRefresh.addEventListener('click', () => void listShells(true));
+  bindTerminalProfiles(root, ui.btnNew, (method, params) => requireLifecycleClient().request<unknown>(method, params),
+    createShell, message => { void window.teUI.dialog.alert(message); });
   ui.btnStop.addEventListener('click', () => void endShell());
   ui.exitPrompt.addEventListener('click', () => { if (finishedId) leaveTerminal(finishedId); });
   ui.btnMenu.addEventListener('click', openDrawer);

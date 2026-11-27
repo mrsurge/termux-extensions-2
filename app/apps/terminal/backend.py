@@ -25,6 +25,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from app.libs.pipe_protocol import PipeEnvelope
 
 from .request_dtos import CreateShellRequest, ShellInputRequest, ShellResizeRequest, ShellActionRequest, decode_request
+from .profiles import launch_profile
 
 from framework_shells import get_manager as _manager
 from framework_shells.orchestrator import Orchestrator
@@ -509,8 +510,10 @@ async def _ensure_live_broker_io(shell_id: str) -> bool:
 
 async def _create_shell_record(payload: CreateShellRequest | None = None) -> JsonObject:
     request = payload or CreateShellRequest()
-    shell_cmd = _coerce_shell_command(request.shell)
-    cwd = _normalize_cwd(request.cwd)
+    # Explicit legacy commands bypass the configured default.
+    profile = launch_profile(request.profile_id) if request.shell is None else None
+    shell_cmd = [profile.executable, *profile.args] if profile else _coerce_shell_command(request.shell)
+    cwd = _normalize_cwd((profile.cwd if profile else "") or request.cwd)
     cols = max(1, request.cols)
     rows = max(1, request.rows)
 

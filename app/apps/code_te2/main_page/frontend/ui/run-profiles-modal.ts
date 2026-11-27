@@ -1,4 +1,5 @@
 import { isUnknownArray } from '../../../src/rpc/value-types.ts';
+import { installProfilePaneLayout, profileMinibar } from '../../../../../static/js/profile-pane-layout.ts';
 import {
   createDeclarativeForm,
   createDeclarativeModalShell,
@@ -121,6 +122,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
   let config: UnknownRecord = { version: 1, profiles: [] };
   let profiles: UnknownRecord[] = [];
   let selectedIndex = -1;
+  let setMinibar: ReturnType<typeof profileMinibar> | undefined;
 
   function ensureShell(): void {
     if (shell) return;
@@ -133,6 +135,8 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
       fields: [],
     });
 
+    installProfilePaneLayout(document);
+    shell.root.classList.add('te-profile-manager');
     const meta = document.createElement("div");
     meta.className = "run-profiles-meta";
     pathEl = meta;
@@ -164,6 +168,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
     listEl.className = "run-profiles-list-items";
     listPane.appendChild(listActions);
     listPane.appendChild(listEl);
+    setMinibar = profileMinibar(listPane);
 
     const editorPane = document.createElement("div");
     editorPane.className = "run-profiles-editor";
@@ -223,6 +228,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
 
   function renderProfileList(): void {
     if (!listEl) return;
+    setMinibar?.(selectedIndex >= 0 ? profileId(profiles[selectedIndex], `Profile ${selectedIndex+1}`) : '');
     listEl.innerHTML = "";
     profiles.forEach((profile, index) => {
       const item = document.createElement("button");
@@ -267,6 +273,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
 
   function selectProfile(index: number): void {
     selectedIndex = index >= 0 && index < profiles.length ? index : -1;
+    setMinibar?.('', true);
     renderProfileList();
     renderForm();
   }

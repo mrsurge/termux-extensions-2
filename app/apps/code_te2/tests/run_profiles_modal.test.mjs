@@ -21,6 +21,26 @@ async function loadDeclarativeForm() {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
+test("shared profile minibar starts collapsed, retains expansion on label refresh, and collapses on selection", async () => {
+  const result = await build({entryPoints:[resolve(import.meta.dirname, "../../../static/js/profile-pane-layout.ts")],
+    bundle:true,format:"esm",write:false});
+  const { profileMinibar, installProfilePaneLayout } = await import(
+    `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString("base64")}`);
+  const win = new Window();
+  try {
+    const doc=win.document,pane=doc.createElement("div");
+    installProfilePaneLayout(doc);installProfilePaneLayout(doc);
+    assert.equal(doc.querySelectorAll("#te-profile-pane-layout").length,1);
+    const select=profileMinibar(pane),button=pane.querySelector("button");
+    assert.equal(button.getAttribute("aria-expanded"),"false");
+    button.click();select("Bash");
+    assert.equal(button.getAttribute("aria-expanded"),"true");
+    select("Fish",true);
+    assert.match(button.textContent,/Fish/);
+    assert.equal(button.getAttribute("aria-expanded"),"false");
+  } finally { win.happyDOM.abort(); }
+});
+
 test("labeled port list edits and removes auxiliary service routes", async () => {
   const { createDeclarativeForm } = await loadDeclarativeForm();
   const window = new Window({ url: "http://127.0.0.1/app/test" });

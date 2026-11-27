@@ -129,6 +129,13 @@
   }
   .drawer-open #ta-drawer-overlay { display: block; }
   .ta-list-scroll { max-height: calc(100vh - 120px); overflow: auto; }
+  /* The standalone PTY uses the viewport's real scrollbar for scrollback. */
+  .terminal-app :is(#ta-list-container, .ta-list-scroll, .xterm-viewport),
+  .ta-profile-dialog :is(.fe-modal-body, .run-profiles-list-items, .run-profiles-editor),
+  .ta-profile-menu {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.58) transparent;
+  }
   .ta-list-controls {
     display: flex;
     align-items: center;
@@ -213,14 +220,35 @@
     width: 100%;
     height: 100%;
   }
+  .mode-terminal #ta-new-with-profile { display:none }
+  #ta-list-container .section-header, #ta-list-container .ta-launch-actions { flex-wrap:wrap }
+  .ta-profile-dialog {position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;background:rgb(0 0 0 / .5)}
+  .ta-profile-dialog.show {display:flex}
+  .ta-profile-dialog .fe-modal-card {box-sizing:border-box;display:flex;flex-direction:column;width:min(940px,94vw);max-height:86dvh;overflow:hidden;color:var(--foreground);background:var(--card);border:1px solid var(--border);border-radius:10px}
+  #ta-profile-picker .fe-modal-card {width:min(440px,94vw)}
+  .ta-profile-dialog .fe-modal-header,.ta-profile-dialog .declarative-modal-footer {display:flex;flex:none;align-items:center;gap:8px;padding:10px 12px}
+  .ta-profile-dialog .fe-modal-header {border-bottom:1px solid var(--border)}
+  .ta-profile-dialog .declarative-modal-footer {justify-content:flex-end;border-top:1px solid var(--border)}
+  .ta-profile-dialog .fe-modal-body {padding:16px 20px;overflow:auto}
+  .ta-profile-dialog .fe-btn {background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:4px;padding:5px 8px;cursor:pointer}
+  .ta-profile-fields,.ta-profile-fields label {display:grid; gap:6px}
+  .ta-profile-fields input:not([type=checkbox]),.ta-profile-fields textarea {box-sizing:border-box;width:100%;font:inherit;color:inherit;background:var(--background);border:1px solid var(--border);border-radius:6px;padding:6px}
+  .ta-profile-picker button {display:block;width:100%;text-align:start}
+  .fe-dropdown.ta-profile-menu {position:fixed;inset:auto;margin:0;padding:0;min-width:180px;max-width:90vw;max-height:80dvh;overflow:auto;color:var(--foreground,#e5e7eb);background:var(--card,#0b0f1a);border:1px solid var(--border,#333);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .ta-profile-menu .fe-dd-item {display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:8px 12px;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;font-size:.9rem;text-align:start;cursor:pointer}
+  .ta-profile-menu .fe-dd-item:is(:hover,:focus-visible) {background:rgba(255,255,255,.06)}
+  .ta-profile-menu .fe-dd-item[data-checkable] {position:relative;padding-left:32px}
+  .ta-profile-menu .fe-menu-item-checked {color:var(--primary,#3b82f6)}
+  .ta-profile-menu .fe-menu-item-checked::before {content:'✓';position:absolute;left:12px;width:1em;text-align:center}
 </style>
 <div class="terminal-app" style="display:flex; flex-direction:column; gap:0;">
   <div id="ta-list-container" class="ta-list-container">
     <div class="section-header">
       <h3 class="section-title">Terminal</h3>
-      <div style="display:flex; gap:8px; align-items:center;">
+      <div class="ta-launch-actions" style="display:flex; gap:8px; align-items:center;">
         <button id="ta-btn-new" class="app-btn">New Terminal</button>
-        <button id="ta-btn-refresh" class="app-btn">Refresh</button>
+        <button id="ta-new-with-profile" class="app-btn">New with profile…</button>
+        <button id="ta-profiles" class="app-btn">Profiles…</button>
       </div>
     </div>
     <div class="ta-list-scroll">

@@ -1666,7 +1666,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     hostToast: (msg: string) => host.toast(msg),
     setFontScale: (preset: string) => fontScaleController.setFontScale(preset),
     triggerEditorSearchPanel: (reason: string, opts?: UnknownRecord) => searchPanelController.triggerEditorSearchPanel(reason, opts),
-    openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
     jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
     requestCodeInspectorCommand: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostCodeInspectorCommand, payload),
     emitImeIntent: (active: boolean, params: UnknownRecord = {}) => {

@@ -41,6 +41,18 @@ async def publish_code_inspector_projection(
             "current": get_code_inspector_projection(),
         }
 
+    current = peek_code_inspector_projection()
+    project_root = _active_project()
+    generation = current_project_generation(project_root)
+    if current and current["requestId"] == projection["requestId"] and (
+        current.get("originRenderer", source_client) != source_client
+        or current.get("originProject", project_root) != project_root
+        or current.get("originGeneration", generation) != generation
+    ):
+        return {"ok": False, "accepted": False, "reason": "stale_projection"}
+    projection["originRenderer"] = source_client
+    projection["originProject"] = project_root
+    projection["originGeneration"] = generation
     previous = replace_code_inspector_projection(projection)
     if (
         previous is not None
@@ -48,7 +60,6 @@ async def publish_code_inspector_projection(
         and previous["requestId"] != projection["requestId"]
     ):
         await _release_projection(previous, reason="replaced")
-    project_root = _active_project()
     await publish_worker_event(
         build_event(
             "CodeInspectorChanged",
@@ -100,7 +111,7 @@ async def handle_code_inspector_command(
     source_name: str,
 ) -> JsonObject:
     action = str(params.get("action") or "")
-    if action not in {"direction", "expand", "release", "clearHighlights"}:
+    if action not in {"navigate", "direction", "expand", "release", "clearHighlights"}:
         raise ValueError("unsupported_code_inspector_action")
     if action == "direction" and params.get("direction") not in {
         "incoming",
@@ -115,13 +126,46 @@ async def handle_code_inspector_command(
     if request_id != projection["requestId"]:
         raise ValueError("stale_code_inspector_request")
 
+    if action == "navigate":
+        from .host.file_ops_backend import handle_host_open_request
+        from .host.editor_menu_target import select_editor_menu_renderer
+        from .editor_renderer_bindings import registered_editor_renderer_binding
+        from .monaco_editor.editor_client_registry import connected_editor_client_instance_ids
+        project = _active_project()
+        if (not project or projection.get("originProject") != project
+                or projection.get("originGeneration") != current_project_generation(project)):
+            raise ValueError("Inspector project changed; inspect again")
+        target = select_editor_menu_renderer(source_name)
+        origin = registered_editor_renderer_binding(projection.get("originRenderer", ""))
+        if origin and origin.main_page_id == target.main_page_id:
+            if origin.renderer_id not in connected_editor_client_instance_ids():
+                raise ValueError("Inspector editor disconnected; inspect again")
+            target = origin
+        node_id = _required_text(params.get("nodeId"), "nodeId")
+        pending = list(projection["tree"])
+        while pending:
+            node = _json_object(pending.pop())
+            if node.get("id") == node_id:
+                path = _required_text(node.get("path"), "path")
+                position = _json_object(node.get("selectionRange")) or _json_object(node.get("range"))
+                nav: JsonObject = {"path": path, "line": position.get("startLineNumber", 1),
+                    "column": position.get("startColumn", 1), "focus": False, "scroll_y": "center", "place_cursor": True}
+                if node.get("type") == "symbol":
+                    nav["symbol_range"] = node.get("range")
+                await handle_host_open_request(nav, source_name=target.renderer_id, request_prefix="inspector")
+                return {"ok": True, "requestId": request_id}
+            children = node.get("children")
+            if isinstance(children, list):
+                pending.extend(cast(list[object], children))
+        raise ValueError("Inspector result is no longer present")
+
     payload: JsonObject = dict(params)
     payload["source"] = source_name
     payload["projection"] = cast(
         JsonObject,
         cast(object, copy_code_inspector_projection(projection)),
     )
-    await _emit_editor_command(payload)
+    await _emit_editor_command(payload, projection.get("originRenderer"))
     return {"ok": True, "requestId": request_id, "action": action}
 
 
@@ -204,14 +248,17 @@ def _active_project() -> str | None:
     return project if isinstance(project, str) and project else None
 
 
-async def _emit_editor_command(payload: JsonObject) -> None:
+async def _emit_editor_command(payload: JsonObject, renderer_id: str | None) -> None:
+    from .client_presentation import client_presentation_room
     from .monaco_editor.editor_socketio import EDITOR_SIO
+    if not renderer_id:
+        raise ValueError("Inspector editor unavailable; inspect again")
 
     async def _emit(event_name: str, notification_payload: object) -> None:
         await EDITOR_SIO.emit(  # pyright: ignore[reportUnknownMemberType]
             event_name,
             notification_payload,
-            room="code_te2",
+            room=client_presentation_room(renderer_id),
             namespace="/rpc/editor",
         )
 
@@ -239,7 +286,7 @@ async def _release_projection(
                     JsonObject,
                     cast(object, copy_code_inspector_projection(projection)),
                 ),
-            }
+            }, projection.get("originRenderer")
         )
     except Exception as exc:
         logger.debug("[code_inspector] hierarchy release failed: %s", exc)

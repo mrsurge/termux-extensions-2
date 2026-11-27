@@ -7,6 +7,7 @@ import msgspec
 
 
 class CreateShellRequest(msgspec.Struct, kw_only=True):
+    profile_id: str | None = None
     shell: str | list[str] | None = None
     cwd: str = "~"
     cols: int = 80

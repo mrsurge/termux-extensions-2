@@ -43,7 +43,7 @@ function presentationHarness(query = {}, shells = []) {
     URL, console: { error() {} },
   });
   const functions = section('  function initializePresentation()', '  function openDrawer()')
-    + section('  async function applyInitialSidebarShellState()', '  async function listShells(');
+    + section('  async function applyInitialSidebarShellState()', '  function formatUptime(');
   vm.runInContext(transformSync(functions + '\nglobalThis.presentation = { initializePresentation, applyInitialSidebarShellState };', { loader: 'ts' }).code, context);
   return { context, modes, selected, resets, requests, statuses, ui, ...context.presentation };
 }

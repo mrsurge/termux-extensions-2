@@ -743,7 +743,7 @@ test("uses no-focus result jumps and tail-preserving path markup", async () => {
     ),
   ]);
 
-  assert.match(source, /focus:\s*false,\s*scrollY:\s*'center'/);
+  assert.match(source, /action:\s*'navigate'/);
   assert.doesNotMatch(source, /splitPathForDisplay/);
   assert.match(template, /\.code-inspector-path\s*\{[^}]*text-overflow:\s*ellipsis[^}]*direction:\s*rtl/s);
   assert.match(template, /\.code-inspector-direction\s*\{[^}]*display:\s*inline-flex/s);

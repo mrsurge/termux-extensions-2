@@ -42,6 +42,26 @@ const INLINE_EDITOR_MARKUP = `
   </div>
 `;
 const INLINE_EDITOR_HOST_STYLE = `
+[data-te2-working-editor-host] .monaco-editor .te2-symbol-target-highlight {
+  background-color: transparent;
+  border: 1px solid var(--vscode-editor-symbolHighlightBorder, var(--vscode-editorCursor-foreground));
+  box-sizing: border-box;
+  pointer-events: none;
+}
+[data-te2-working-editor-host] .monaco-editor .te2-navigation-result-highlight {
+  background-color: color-mix(
+    in srgb,
+    var(--vscode-editor-findMatchHighlightBackground, #58a6ff) 42%,
+    transparent
+  );
+  border-bottom: 1px solid color-mix(
+    in srgb,
+    var(--vscode-editor-findMatchHighlightBorder, #58a6ff) 62%,
+    transparent
+  );
+  box-sizing: border-box;
+  pointer-events: none;
+}
 [data-te2-working-editor-host] .monaco-editor .find-widget {
   z-index: 300;
 }

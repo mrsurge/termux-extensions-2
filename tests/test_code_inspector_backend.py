@@ -28,6 +28,32 @@ def projection(
 
 
 class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_result_navigation_stays_with_origin_or_clicking_clients_pane(self) -> None:
+        from app.apps.code_te2.editor_renderer_bindings import EditorRendererBinding
+        owner = EditorRendererBinding("secondary-A", "main-A", "secondary")
+        local = EditorRendererBinding("main-A", "main-A", "primary")
+        remote = EditorRendererBinding("secondary-B", "main-B", "secondary")
+        item = projection(revision=1)
+        item["tree"] = [{"id":"parent","children":[{"id":"child","type":"symbol","path":"/workspace/a",
+            "selectionRange":{"startLineNumber":8,"startColumn":6},"range":{"startLineNumber":3}}]}]
+        nav = {"action":"navigate","requestId":"request-1","nodeId":"child","path":"/wrong"}
+        opened = AsyncMock()
+        with (
+            patch.object(code_inspector_backend, "publish_worker_event", AsyncMock()),
+            patch.object(code_inspector_backend, "_active_project", return_value="/workspace"),
+            patch.object(code_inspector_backend, "current_project_generation", return_value=3),
+            patch("app.apps.code_te2.editor_renderer_bindings.registered_editor_renderer_binding",return_value=owner),
+            patch("app.apps.code_te2.monaco_editor.editor_client_registry.connected_editor_client_instance_ids",return_value=(owner.renderer_id,)),
+            patch("app.apps.code_te2.host.editor_menu_target.select_editor_menu_renderer",side_effect=[local,remote]),
+            patch("app.apps.code_te2.host.file_ops_backend.handle_host_open_request",opened),
+        ):
+            await code_inspector_backend.publish_code_inspector_projection({"projection":item},source_client=owner.renderer_id)
+            for client,expected in ((local.main_page_id,owner.renderer_id),(remote.main_page_id,remote.renderer_id)):
+                await code_inspector_backend.handle_code_inspector_command(nav,source_name=client)
+                opened.assert_awaited_with({"path":"/workspace/a","line":8,"column":6,"focus":False,
+                    "scroll_y":"center","place_cursor":True,"symbol_range":{"startLineNumber":3}},
+                    source_name=expected,request_prefix="inspector")
+
     def test_symbols_projection_mode(self) -> None:
         value = projection()
         value["mode"] = "symbols"

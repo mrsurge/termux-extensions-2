@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 CodeInspectorStatus = Literal["loading", "ready", "empty", "unsupported", "error"]
 CodeInspectorMode = Literal["references", "implementations", "callHierarchy", "symbols"]
@@ -10,6 +10,9 @@ JsonObject = dict[str, object]
 
 
 class CodeInspectorProjection(TypedDict):
+    originRenderer: NotRequired[str]
+    originProject: NotRequired[str | None]
+    originGeneration: NotRequired[int | None]
     revision: int
     requestId: str
     requestSequence: int

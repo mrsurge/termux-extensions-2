@@ -57,6 +57,8 @@ test("every active modal family has a stable surface id", async () => {
     "code-te2.watcher-limit",
     "code-te2.projects-debug",
     "code-te2.run-profiles",
+    "terminal.profiles",
+    "terminal.profile-picker",
     "code-te2.new-project",
     "code-te2.editor-settings",
     "code-te2.agent-shortcuts",

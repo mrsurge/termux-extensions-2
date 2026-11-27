@@ -5,6 +5,26 @@ import { installTeDialog } from './te_dialog.mjs';
 if (!window.teUI) window.teUI = {};
 installTeDialog(window);
 
+// Only TE2-owned documents opt in. Child apps load their own copy of te_ui;
+// never walk the DOM of an embedded extension or third-party site.
+if (!document.querySelector('style[data-te2-chromium-scrollbars]')) {
+  const style = document.createElement('style');
+  style.dataset.te2ChromiumScrollbars = 'true';
+  style.textContent = `
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.58) transparent;
+}
+
+.xterm-viewport,
+.monaco-scrollable-element {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+`;
+  (document.head || document.documentElement).appendChild(style);
+}
+
 (() => {
   const STYLE_ID = 'te-notifications-style';
   const TOAST_CONTAINER_ID = 'te-toast-container';

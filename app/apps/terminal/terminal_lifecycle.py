@@ -443,6 +443,9 @@ class TerminalLifecycleNamespace(socketio.AsyncNamespace):
     async def _dispatch(self, method: str, params: JsonObject) -> object:
         if method == "shells.get":
             return {"snapshot": await _store.snapshot()}
+        if method in ("profiles.get", "profiles.save"):
+            from .profiles import read_profiles, save_profiles
+            return read_profiles() if method == "profiles.get" else save_profiles(params)
         if method == "shells.resync":
             return {"snapshot": await refresh_terminal_shell_snapshot()}
 

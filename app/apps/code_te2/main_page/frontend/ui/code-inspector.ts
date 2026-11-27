@@ -6,18 +6,7 @@ interface CodeInspectorPanelDeps {
   openDrawer(): void;
   closeDrawer(): void;
   requestCommand(payload: JsonObject): Promise<unknown>;
-  openFile(
-    path: string,
-    options?: {
-      forceRefresh?: boolean;
-      line?: number;
-      column?: number;
-      focus?: boolean;
-      scrollY?: string;
-      placeCursor?: boolean;
-      symbolRange?: JsonObject;
-    },
-  ): Promise<unknown>;
+  reportError(message: string): void;
 }
 
 interface CodeInspectorPanelController {
@@ -73,24 +62,6 @@ function projectionFromEvent(event: Event): JsonObject | null {
   return isRecord(projection) ? projection : null;
 }
 
-function locationFromNode(node: JsonObject): {
-  path: string;
-  line: number;
-  column: number;
-} | null {
-  const path = asString(node.path);
-  if (!path) return null;
-  const range = isRecord(node.selectionRange)
-    ? node.selectionRange
-    : isRecord(node.range)
-      ? node.range
-      : {};
-  return {
-    path,
-    line: asPositiveInt(range.startLineNumber),
-    column: asPositiveInt(range.startColumn),
-  };
-}
 
 function statusMessage(projection: JsonObject | null): string {
   if (!projection) return 'Choose a code navigation action from the editor context menu.';
@@ -226,18 +197,9 @@ export function createCodeInspectorPanel(
         render();
         return;
       }
-      const location = locationFromNode(node);
-      if (!location) return;
-      void deps.openFile(location.path, {
-        // A symbol jump is navigation, not a forced reload of its draft/model.
-        forceRefresh: nodeType !== 'symbol',
-        line: location.line,
-        column: location.column,
-        focus: false,
-        scrollY: 'center',
-        placeCursor: true,
-        ...(nodeType === 'symbol' && isRecord(node.range) ? { symbolRange: node.range } : {}),
-      });
+      if (!projection || !id || !asString(node.path)) return;
+      void deps.requestCommand({ action: 'navigate', requestId: projection.requestId, nodeId: id })
+        .catch((error: unknown) => deps.reportError(error instanceof Error ? error.message : 'Inspector navigation failed'));
     });
 
     item.append(row);
