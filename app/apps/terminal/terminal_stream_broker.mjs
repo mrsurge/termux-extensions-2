@@ -1,4 +1,5 @@
 import process from 'node:process';
+import { realpathSync } from 'node:fs';
 import {
   asBytes,
   encodePipeFrame,
@@ -75,6 +76,25 @@ const scrollback = parsePositiveInt(process.env.TERMINAL_STREAM_SCROLLBACK, DEFA
 // This PTY is served by xterm.js, not the terminal (e.g. tmux) hosting TE2.
 const termName = DEFAULT_TERM;
 const env = { ...process.env, TERM: termName, COLORTERM: 'truecolor' };
+if (env.TERMINAL_STREAM_CHILD_PATH !== undefined) env.PATH = env.TERMINAL_STREAM_CHILD_PATH;
+if (env.VIRTUAL_ENV && env.TERMINAL_STREAM_WORKER_PREFIX) {
+  // An independently activated user environment is not ours to deactivate.
+  let ours = env.VIRTUAL_ENV === env.TERMINAL_STREAM_WORKER_PREFIX;
+  if (!ours) {
+    try { ours = realpathSync(env.VIRTUAL_ENV) === realpathSync(env.TERMINAL_STREAM_WORKER_PREFIX); }
+    catch { /* A stale or unrelated activation marker is not proof of ownership. */ }
+  }
+  if (ours) {
+    delete env.VIRTUAL_ENV;
+    delete env.VIRTUAL_ENV_PROMPT;
+    delete env._OLD_VIRTUAL_PATH;
+    delete env._OLD_VIRTUAL_PS1;
+    delete env._OLD_VIRTUAL_PYTHONHOME;
+  }
+}
+for (const key of Object.keys(env)) {
+  if (key.startsWith('TERMINAL_STREAM_') || key === 'TE2_TERMINAL_LAUNCH_ID') delete env[key];
+}
 
 const stateTerminal = new HeadlessTerminal({
   cols,

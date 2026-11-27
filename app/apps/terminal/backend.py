@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import sys
 import time
 from typing import Literal, Protocol, Self, TypeAlias, cast
 from urllib import request as urllib_request
@@ -376,11 +377,25 @@ def _worker_message(raw: object) -> JsonObject | None:
     return None
 
 
+def _child_shell_path() -> str:
+    # Start before node_toolchain_env prepends the broker's private Node.
+    path = os.environ.get("PATH", os.defpath)
+    if sys.prefix == sys.base_prefix:
+        return path
+    runtime_bin = os.path.realpath(os.path.join(sys.prefix, "bin"))
+    return os.pathsep.join(part for part in path.split(os.pathsep)
+                           if not part or os.path.realpath(part) != runtime_bin)
+
+
 def _default_shell_command() -> list[str]:
-    shell_env = os.environ.get("SHELL") or ""
-    if os.path.basename(shell_env).endswith("bash") or shutil.which("bash"):
-        return ["bash", "-l", "-i"]
-    return ["sh", "-i"]
+    path = _child_shell_path()
+    preferred = os.environ.get("SHELL", "")
+    executable = shutil.which(preferred, path=path) if preferred else None
+    executable = executable or shutil.which("bash", path=path) or shutil.which("sh", path=path) or "sh"
+    name = os.path.basename(executable)
+    if name in {"bash", "zsh", "fish"}:
+        return [executable, "-l", "-i"]
+    return [executable, "-i"] if name in {"sh", "dash", "ash", "ksh"} else [executable]
 
 
 def _coerce_shell_command(raw: str | Sequence[str] | None) -> list[str]:
@@ -516,6 +531,8 @@ async def _create_shell_record(payload: CreateShellRequest | None = None) -> Jso
                 "BROKER_ENTRY": str(BROKER_ENTRY),
                 "NODE_BIN": str(node_runtime.node_binary),
                 "NODE_PATH": node_runtime.executable_path,
+                "CHILD_PATH": _child_shell_path(),
+                "WORKER_PREFIX": sys.prefix if sys.prefix != sys.base_prefix else "",
                 "NODE_RUNTIME_ROOT": str(node_runtime.root),
                 "CWD": cwd,
                 "COLS": str(cols),

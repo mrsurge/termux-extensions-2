@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -27,6 +28,21 @@ def test_worker_selects_explicit_app_without_legacy_router():
     assert explicit_asgi_application(backend, "terminal") is backend.TE2_ASGI_APP
     assert not hasattr(backend, "SUBAPPS")
     assert not hasattr(backend, "terminal_bp")
+
+
+def test_shell_path_and_selection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "prefix", "/runtime/venv")
+    monkeypatch.setattr(sys, "base_prefix", "/usr")
+    for name in ("sh", "bash"):
+        binary = tmp_path / name
+        binary.touch(mode=0o755)
+    monkeypatch.setenv("PATH", f"/runtime/venv/bin:/termux/prefix/bin:{tmp_path}:/runtime/venv/bin")
+    assert backend._child_shell_path() == f"/termux/prefix/bin:{tmp_path}"
+    monkeypatch.setenv("SHELL", str(tmp_path / "sh"))
+    assert backend._default_shell_command() == [str(tmp_path / "sh"), "-i"]
+    monkeypatch.setenv("SHELL", "/nonexistent/te2-shell")
+    assert backend._default_shell_command() == [str(tmp_path / "bash"), "-l", "-i"]
+    assert backend._coerce_shell_command(["custom", "--flag"]) == ["custom", "--flag"]
 
 
 @pytest.mark.parametrize("needs_force", [False, True])
