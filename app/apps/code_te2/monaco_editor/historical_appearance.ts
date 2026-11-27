@@ -23,6 +23,7 @@ export function historicalAppearance(preferences: unknown) {
   // Appearance is an allowlist: preferences cannot enable writes or providers.
   const appearance: Monaco.editor.IEditorOptions = {
     fontSize: Number(options.fontSize), fontFamily: String(options.fontFamily),
+    fontWeight: String(options.fontWeight),
     fontLigatures: true, lineNumbers: options.lineNumbers === 'off' ? 'off' : 'on',
     cursorStyle,
     wordWrap: options.wordWrap === 'on' ? 'on' : 'off',

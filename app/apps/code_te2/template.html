@@ -6,12 +6,26 @@
 <link rel="stylesheet" href="/apps/code_te2/static/dist/explorer.css" />
 <link rel="stylesheet" href="/apps/code_te2/static/dist/host.css" />
 <link rel="stylesheet" href="/static/vendor/codicons/codicon.css" />
-<link rel="preload" href="/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/static/fonts/jetbrains/webfonts/JetBrainsMono-ExtraLight.woff2" as="font" type="font/woff2" crossorigin />
 <style>
   .editor-input-setting { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px; }
   #editor-touch-selection-settings .editor-input-setting { margin-top:8px; }
   .editor-input-setting > strong { flex:1; min-width:0; font-weight:600; }
   .editor-input-setting > [data-touch-setting] { width:150px; }
+  @font-face {
+    font-family: 'JetBrains Mono Nerd';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-ExtraLight.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 200;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono Nerd';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-ExtraLightItalic.woff2') format('woff2');
+    font-style: italic;
+    font-weight: 200;
+    font-display: swap;
+  }
   @font-face {
     font-family: 'JetBrains Mono Nerd';
     src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2');
@@ -107,6 +121,7 @@
   .fe-root.layout-desktop {
     /* Two 1px pane outlines extend into this track, leaving a connected 3px gap. */
     --split-rail-size: 5px;
+    --pane-radius: 4px;
     --pane-stroke: color-mix(in srgb, var(--te2-code-foreground, var(--fg)) 38%, var(--bg));
     /* Keep the outside pixel of the pane outlines inside the clipped grid. */
     box-sizing: border-box;
@@ -236,8 +251,20 @@
   .layout-desktop :is(.fe-toolbar,.fe-drawer,.terminal-drawer.open,.agent-drawer.open),
   .layout-desktop.te2-secondary-editor-docked .te2-secondary-editor-host,
   .fe-root.layout-desktop::after {
-    border-radius: 4px;
+    border-radius: var(--pane-radius);
     outline: 1px solid var(--pane-stroke);
+  }
+  /* Round the surfaces that actually paint at the frame, not just its
+     outline. The primary tab scrollport already clips its moving tabs;
+     the Explorer header must keep overflow visible for its menus. */
+  .layout-desktop :is(.fe-file-tabs, .fe-drawer-head),
+  .layout-desktop.te2-secondary-editor-docked .te2-secondary-editor-host :is(#second-editor-container, .te2-secondary-editor, .te2-secondary-editor-header) {
+    border-top-left-radius: var(--pane-radius);
+    border-top-right-radius: var(--pane-radius);
+  }
+  .layout-desktop .fe-drawer :is(.fe-drawer-body, .fe-git-footer) {
+    border-bottom-left-radius: var(--pane-radius);
+    border-bottom-right-radius: var(--pane-radius);
   }
   /* Frame the primary tabs and editor together without clipping editor overlays. */
   .fe-root.layout-desktop::after {

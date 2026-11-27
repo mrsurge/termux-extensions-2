@@ -126,6 +126,7 @@ export function buildMonacoOptionsFromPrefsState(
     tabCompletion: autocompletion ? 'on' : 'off',
     fontSize,
     fontFamily,
+    fontWeight: '200',
     fontLigatures: true,
     cursorStyle,
   };
