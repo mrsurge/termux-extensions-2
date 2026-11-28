@@ -111,7 +111,7 @@ const pty = nodePty.spawn(file, args, {
   cols,
   rows,
   cwd,
-  env,
+  env: { ...env, ...JSON.parse(process.env.TERMINAL_STREAM_SHELL_ENV_JSON || '{}') },
 });
 
 const inputDecoder = new PipeFrameDecoder();

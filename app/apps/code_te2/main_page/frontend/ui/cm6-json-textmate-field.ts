@@ -120,6 +120,7 @@ export interface JsonTextmateFieldHandle {
 }
 
 export interface JsonTextmateFieldOptions {
+  disableAutoCapitalize?: boolean;
   value: unknown;
   rows?: number;
   placeholder?: string;
@@ -675,6 +676,7 @@ export function createJsonTextmateField(
   if (options.className) host.classList.add(options.className);
 
   const textarea = document.createElement("textarea");
+  if (options.disableAutoCapitalize) textarea.setAttribute("autocapitalize", "off");
   textarea.className =
     "declarative-input declarative-monospace cm6-json-textmate-fallback";
   textarea.rows = options.rows || 8;
@@ -771,6 +773,7 @@ export function createJsonTextmateField(
         }),
         parent: host,
       });
+      if (options.disableAutoCapitalize) host.querySelector(".cm-content")?.setAttribute("autocapitalize", "off");
       const measurementsSettled = await waitForValidEditorMeasurement(
         view,
         host,

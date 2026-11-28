@@ -57,12 +57,14 @@ test("labeled port list edits and removes auxiliary service routes", async () =>
       maxItems: 8,
     }],
   }, { additionalPorts: [] }, {
+    disableAutoCapitalize: true,
     onChange(values) { current = values; },
   });
 
   host.querySelector(".declarative-labeled-port-add")?.click();
   const inputs = host.querySelectorAll("input");
   assert.equal(inputs.length, 2);
+  assert.ok([...inputs].every(input => input.getAttribute("autocapitalize") === "off"));
   inputs[0].value = "5173";
   inputs[0].dispatchEvent(new window.Event("input", { bubbles: true }));
   inputs[1].value = "Vite / HMR";

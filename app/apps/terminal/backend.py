@@ -542,6 +542,7 @@ async def _create_shell_record(payload: CreateShellRequest | None = None) -> Jso
                 "ROWS": str(rows),
                 "SCROLLBACK": str(DEFAULT_SCROLLBACK),
                 "SHELL_CMD_JSON": json.dumps(shell_cmd),
+                "SHELL_ENV_JSON": json.dumps(profile.env) if profile else "{}",
                 "LAUNCH_ID": request.launch_id,
             },
             label=label,

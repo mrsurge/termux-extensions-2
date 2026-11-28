@@ -373,6 +373,7 @@ function createFieldControl(
   values: Record<string, unknown>,
   onValue: (key: string, value: unknown) => void,
   document: Document,
+  disableAutoCapitalize: boolean,
 ): FieldControlHandle {
   const current = fieldValue(field, values);
 
@@ -428,6 +429,7 @@ function createFieldControl(
         const row = document.createElement("div");
         row.className = "declarative-labeled-port-row";
         const portInput = document.createElement("input");
+        if (disableAutoCapitalize) portInput.setAttribute("autocapitalize", "off");
         portInput.className = "declarative-input";
         portInput.type = "number";
         portInput.min = "1";
@@ -442,6 +444,7 @@ function createFieldControl(
           publish();
         });
         const labelInput = document.createElement("input");
+        if (disableAutoCapitalize) labelInput.setAttribute("autocapitalize", "off");
         labelInput.className = "declarative-input";
         labelInput.type = "text";
         labelInput.placeholder = field.secondaryPlaceholder || "Service label";
@@ -481,6 +484,7 @@ function createFieldControl(
   if (field.kind === "jsonTextmate") {
     let control: JsonTextmateFieldHandle | null = null;
     control = createJsonTextmateField({
+      disableAutoCapitalize,
       value: formatValue(current),
       rows: field.rows || 8,
       placeholder: field.placeholder || "",
@@ -505,6 +509,7 @@ function createFieldControl(
     field.kind === "stringList"
   ) {
     const textarea = document.createElement("textarea");
+    if (disableAutoCapitalize) textarea.setAttribute("autocapitalize", "off");
     textarea.className = "declarative-input declarative-textarea";
     textarea.rows = field.rows || (field.kind === "json" ? 8 : 4);
     textarea.spellcheck = false;
@@ -545,6 +550,7 @@ function createFieldControl(
   }
 
   const input = document.createElement("input");
+  if (disableAutoCapitalize) input.setAttribute("autocapitalize", "off");
   input.className = "declarative-input";
   input.type = field.kind === "number" ? "number" : "text";
   input.placeholder = field.placeholder || "";
@@ -563,7 +569,7 @@ export function createDeclarativeForm(
   container: HTMLElement,
   contract: DeclarativeFormContract,
   initialValues: Record<string, unknown>,
-  options: { onChange?: (values: Record<string, unknown>) => void } = {},
+  options: { onChange?: (values: Record<string, unknown>) => void; disableAutoCapitalize?: boolean } = {},
 ): DeclarativeFormHandle {
   const document = container.ownerDocument;
   let values = cloneValues(initialValues);
@@ -596,7 +602,7 @@ export function createDeclarativeForm(
       row.appendChild(createFieldLabel(field, document));
       const desc = createFieldDescription(field, document);
       if (desc) row.appendChild(desc);
-      const control = createFieldControl(field, values, setValue, document);
+      const control = createFieldControl(field, values, setValue, document, options.disableAutoCapitalize === true && field.key !== "name");
       row.appendChild(control.element);
       if (control.destroy) controlCleanups.push(control.destroy);
       container.appendChild(row);

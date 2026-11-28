@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import tempfile
 from pathlib import Path
 import threading
@@ -21,6 +23,22 @@ class Profile(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
     args: list[str]
     cwd: str
     enabled: bool = True
+    env: dict[str, str] = msgspec.field(default_factory=dict)
+
+
+class CommandProfile(msgspec.Struct, forbid_unknown_fields=True):
+    id: str
+    name: str
+    command: str
+    cwd: str
+    enabled: bool
+    env: dict[str, str]
+
+
+class CommandProfiles(msgspec.Struct, forbid_unknown_fields=True):
+    revision: int
+    default: str
+    profiles: list[CommandProfile]
 
 
 class Profiles(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
@@ -42,11 +60,42 @@ def read_profiles() -> Profiles:
 
 def save_profiles(params: dict[str, object]) -> Profiles:
     proposed = msgspec.convert(params, type=Profiles)
+    return _save(proposed)
+
+
+def command_profiles(settings: Profiles) -> CommandProfiles:
+    return CommandProfiles(settings.revision, settings.default, [
+        CommandProfile(p.id, p.name, shlex.join([p.executable, *p.args]), p.cwd, p.enabled, p.env)
+        for p in settings.profiles
+    ])
+
+
+def save_command_profiles(params: dict[str, object]) -> Profiles:
+    draft = msgspec.convert(params, type=CommandProfiles)
+    profiles: list[Profile] = []
+    for p in draft.profiles:
+        try:
+            argv = shlex.split(p.command)
+        except ValueError as exc:
+            raise ValueError(f"{p.name}: invalid command: {exc}") from exc
+        if not argv:
+            raise ValueError(f"{p.name}: command is required")
+        profiles.append(Profile(p.id, p.name, argv[0], argv[1:], p.cwd, p.enabled, p.env))
+    return _save(Profiles(draft.revision, draft.default, profiles))
+
+
+def _save(proposed: Profiles) -> Profiles:
     ids = {SYSTEM}
     active = {SYSTEM}
     if len(proposed.profiles) > 100:
         raise ValueError("Too many terminal profiles")
     for p in proposed.profiles:
+        if len(p.env) > 128 or any(
+            not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,127}", key)
+            or len(value) > 4096 or "\x00" in value
+            for key, value in p.env.items()
+        ):
+            raise ValueError(f"{p.name}: invalid environment variable name or value")
         if (p.id in ids or not p.id or len(p.id) > 80 or not p.name.strip() or len(p.name) > 120
                 or not p.executable.strip() or len(p.executable) > 4096 or len(p.args) > 128
                 or any(len(s) > 4096 or "\x00" in s for s in (p.cwd, p.executable, *p.args))):

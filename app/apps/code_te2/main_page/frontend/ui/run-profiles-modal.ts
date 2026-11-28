@@ -183,6 +183,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
     summary.textContent = "Raw JSON";
     details.appendChild(summary);
     rawJsonEditor = createJsonTextmateField({
+      disableAutoCapitalize: true,
       value: "",
       rows: 10,
       className: "run-profiles-json",
@@ -258,6 +259,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
     emptyEl.style.display = hasProfile ? "none" : "";
     if (!hasProfile) return;
     formHandle = createDeclarativeForm(formEl, contract, profile, {
+      disableAutoCapitalize: true,
       onChange(values) {
         profiles[selectedIndex] = values;
         syncRawJson();

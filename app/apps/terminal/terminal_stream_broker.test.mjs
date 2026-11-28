@@ -21,6 +21,7 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
       TERMINAL_STREAM_SCROLLBACK: '5000',
       TERMINAL_STREAM_CWD: process.cwd(),
       TERMINAL_STREAM_SHELL_CMD_JSON: JSON.stringify(['sh', '-i']),
+      TERMINAL_STREAM_SHELL_ENV_JSON: JSON.stringify({ PROFILE_TEST: '$HOME literal' }),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -46,11 +47,11 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
       } else if (message.type === 'checkpoint' && message.request_id === 'first') {
         child.stdin.write(encodePipeFrame({
           type: 'input',
-          data: Buffer.from("printf '\\033[?1002h\\033[?1006h__TE2_SMOKE__:%s\\n' \"$TERM\"\n"),
+          data: Buffer.from("printf '\\033[?1002h\\033[?1006h__TE2_SMOKE__:%s:%s\\n' \"$TERM\" \"$PROFILE_TEST\"\n"),
         }));
       } else if (message.type === 'output') {
         output += Buffer.from(message.data).toString('utf8');
-        if (!requestedReconnect && output.includes('__TE2_SMOKE__:xterm-256color')) {
+        if (!requestedReconnect && output.includes('__TE2_SMOKE__:xterm-256color:$HOME literal')) {
           markerSequence = message.sequence;
           requestedReconnect = true;
           child.stdin.write(encodePipeFrame({

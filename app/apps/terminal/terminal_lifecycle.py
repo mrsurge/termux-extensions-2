@@ -444,7 +444,10 @@ class TerminalLifecycleNamespace(socketio.AsyncNamespace):
         if method == "shells.get":
             return {"snapshot": await _store.snapshot()}
         if method in ("profiles.get", "profiles.save"):
-            from .profiles import read_profiles, save_profiles
+            from .profiles import command_profiles, read_profiles, save_command_profiles, save_profiles
+            if params.get("format") == "command":
+                data = {k: v for k, v in params.items() if k != "format"}
+                return command_profiles(read_profiles() if method == "profiles.get" else save_command_profiles(data))
             return read_profiles() if method == "profiles.get" else save_profiles(params)
         if method == "shells.resync":
             return {"snapshot": await refresh_terminal_shell_snapshot()}

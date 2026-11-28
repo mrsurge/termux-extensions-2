@@ -1,15 +1,15 @@
 import { createModalFrame } from '../../code_te2/main_page/frontend/ui/modal-kit/modal-frame';
 import { installProfilePaneLayout, profileMinibar } from '../../../static/js/profile-pane-layout';
 
-interface Profile { id:string; name:string; executable:string; args:string[]; cwd:string; enabled:boolean }
+interface Profile { id:string; name:string; command:string; env:Record<string,string>; cwd:string; enabled:boolean }
 interface Settings {revision:number; default:string; profiles:Profile[]}
 type Request = (method:string, params?:Record<string,unknown>)=>Promise<unknown>;
 const system='system';
 function array(v:unknown):v is unknown[]{return Array.isArray(v);}
 function record(v:unknown):v is Record<string,unknown>{return typeof v==='object' && v!==null && !array(v);}
 function profile(v:unknown):v is Profile {
-  return record(v) && typeof v.id==='string' && typeof v.name==='string' && typeof v.executable==='string'
-    && typeof v.cwd==='string' && typeof v.enabled==='boolean' && array(v.args) && v.args.every(a=>typeof a==='string');
+  return record(v) && typeof v.id==='string' && typeof v.name==='string' && typeof v.command==='string'
+    && typeof v.cwd==='string' && typeof v.enabled==='boolean' && record(v.env) && Object.values(v.env).every(a=>typeof a==='string');
 }
 function parse(v:unknown):Settings {
   if (!record(v)||typeof v.revision!=='number'||typeof v.default!=='string'||!array(v.profiles)||!v.profiles.every(profile))
@@ -46,51 +46,75 @@ export function bindTerminalProfiles(root:HTMLElement, newButton:HTMLButtonEleme
     const form=doc.createElement('form');
     form.className='run-profiles-editor';
     form.innerHTML=`<div class="ta-profile-fields">
-      <label>Name<input data-name maxlength="120"></label><label>Executable<input data-exec placeholder="/path/to/shell"></label>
-      <label>Arguments (one per line)<textarea data-args rows="3" placeholder="-l"></textarea></label>
-      <label>Starting directory (optional)<input data-cwd placeholder="Use current launch directory"></label>
+      <label>Name<input data-name maxlength="120"></label>
+      <label>Command<textarea data-command autocapitalize="off" rows="1" placeholder="bash --rcfile .venv/bin/activate -i"></textarea></label>
+      <label>Starting directory (optional)<input data-cwd autocapitalize="off" placeholder="Use current launch directory"></label>
+      <details data-env><summary>Environment (optional)</summary><div data-rows></div></details>
       <label><span><input type="checkbox" data-enabled> Available for launch</span></label></div>
       <label><input type="checkbox" data-default> Default for New Terminal</label>
       <p data-note role="status"></p>`;
     layout.append(pane,form);frame.body.append(layout);
-    const args=form.querySelector('textarea')!;
+    const command=form.querySelector('textarea')!;
+    const environment=form.querySelector<HTMLDetailsElement>('[data-env]')!;
+    const rows=form.querySelector<HTMLElement>('[data-rows]')!;
+    function envRow(key='',value=''){
+      const row=doc.createElement('div');row.className='ta-env-row';
+      const k=doc.createElement('input'),v=doc.createElement('input');
+      k.setAttribute('autocapitalize','off');v.setAttribute('autocapitalize','off');
+      k.placeholder='Name';k.setAttribute('aria-label','Environment variable name');k.value=key;
+      v.placeholder='Value';v.setAttribute('aria-label','Environment variable value');v.value=value;
+      row.append(k,v,button('Remove',()=>row.remove()));rows.append(row);return k;
+    }
+    environment.append(button('Add variable',()=>envRow().focus()));
     const input=(k:string)=>form.querySelector<HTMLInputElement>(`[data-${k}]`)!;
-    const name=input('name'),exe=input('exec'),cwd=input('cwd'),enabled=input('enabled'),def=input('default');
+    const name=input('name'),cwd=input('cwd'),enabled=input('enabled'),def=input('default');
     const note=form.querySelector<HTMLElement>('[data-note]')!;
     let editing:Profile|undefined;
     function show(id:string){
       editing=s.profiles.find(p=>p.id===id);
       caption(editing?.name??'System default',true);
       list.replaceChildren(...[{id:system,name:'System default'},...s.profiles].map(p=>{
-        const b=button(p.name,()=>{update();show(p.id);});
+        const b=button(p.name,()=>{if(update())show(p.id);});
         b.className='run-profiles-list-item';b.classList.toggle('is-active',id===p.id);
         b.setAttribute('aria-pressed',String(id===p.id));return b;}));
-      name.value=editing?.name??'System default';exe.value=editing?.executable??'';args.value=editing?.args.join('\n')??'';
+      name.value=editing?.name??'System default';command.value=editing?.command??'';
+      rows.replaceChildren();for(const [k,v] of Object.entries(editing?.env??{}))envRow(k,v);
+      environment.hidden=!editing;environment.open=rows.childElementCount>0;
       cwd.value=editing?.cwd??'';enabled.checked=editing?.enabled??true;def.checked=s.default===id;
-      for(const field of [name,exe,args,cwd,enabled])field.disabled=!editing;
+      for(const field of [name,command,cwd,enabled])field.disabled=!editing;
       def.disabled=def.checked||!enabled.checked;del.disabled=!editing;
       note.textContent=editing?'Changes apply to future shells.':'Uses the existing system shell and login behavior.';
     }
     function update(){
-      if(editing)Object.assign(editing,{name:name.value.trim(),executable:exe.value.trim(),args:args.value?args.value.split('\n'):[],cwd:cwd.value.trim(),enabled:enabled.checked});
+      const pairs=new Map<string,string>();
+      for(const row of rows.children){
+        const [k,v]=row.querySelectorAll('input');
+        if(!k.value&&!v.value)continue;
+        if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k.value)||pairs.has(k.value)){
+          environment.open=true;k.focus();note.textContent='Use a valid, unique environment variable name.';return false;
+        }
+        pairs.set(k.value,v.value);
+      }
+      if(editing)Object.assign(editing,{name:name.value.trim(),command:command.value,env:Object.fromEntries(pairs),cwd:cwd.value.trim(),enabled:enabled.checked});
       const id=editing?.id??system;
       if(def.checked&&enabled.checked)s.default=id;
       if(!enabled.checked&&s.default===id)s.default=system;
+      return true;
     }
     enabled.onchange=()=>{def.disabled=!enabled.checked;if(!enabled.checked)def.checked=false;};
-    const add=button('Add profile',()=>{update();const id=Array.from(crypto.getRandomValues(new Uint32Array(4)),v=>v.toString(16).padStart(8,'0')).join('');
-      s.profiles.push({id,name:'New profile',executable:'',args:[],cwd:'',enabled:true});show(id);exe.focus();});
+    const add=button('Add profile',()=>{if(!update())return;const id=Array.from(crypto.getRandomValues(new Uint32Array(4)),v=>v.toString(16).padStart(8,'0')).join('');
+      s.profiles.push({id,name:'New profile',command:'',env:{},cwd:'',enabled:true});show(id);command.focus();});
     const del=button('Remove',()=>{if(!editing)return;s.profiles=s.profiles.filter(p=>p.id!==editing?.id);if(s.default===editing.id)s.default=system;show(system);});
     const save=button('Save',()=>form.requestSubmit());
-    form.onsubmit=async e=>{e.preventDefault();if(save.disabled)return;update();
-      const invalid=s.profiles.find(p=>!p.name||!p.executable);if(invalid){show(invalid.id);note.textContent='Name and executable are required.';return;}
-      save.disabled=true;try{await rpc('profiles.save',{...s});if(active===d)remove();}catch(err){note.textContent=String(err);save.disabled=false;}};
+    form.onsubmit=async e=>{e.preventDefault();if(save.disabled||!update())return;
+      const invalid=s.profiles.find(p=>!p.name||!p.command.trim());if(invalid){show(invalid.id);note.textContent='Name and command are required.';return;}
+      save.disabled=true;try{await rpc('profiles.save',{...s,format:'command'});if(active===d)remove();}catch(err){note.textContent=String(err);save.disabled=false;}};
     tools.append(add,del);frame.footer.append(button('Cancel',remove),save);show(system);
   }
   async function open(kind:'manage'|'pick'|'menu',point?:{x:number;y:number}){
     if(loading||active)return;loading=true;
     try{
-      const s=parse(await rpc('profiles.get'));
+      const s=parse(await rpc('profiles.get',{format:'command'}));
       if(kind==='manage'){manager(s);return;}
       const options=[{id:system,name:'System default'},...s.profiles.filter(p=>p.enabled)];
       const picker=kind==='pick'?modal('New terminal with profile','profile-picker'):null;
