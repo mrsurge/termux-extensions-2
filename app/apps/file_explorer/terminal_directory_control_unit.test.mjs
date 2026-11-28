@@ -26,6 +26,18 @@ function fixture() {
   };
 }
 
+test('non-Bash shell keeps normal input and declines directory tracking without issuing commands', async () => {
+  const f = fixture();
+  try {
+    assert.deepEqual(f.control.shell(['/bin/zsh','-l','-i']), ['/bin/zsh','-l','-i']);
+    assert.deepEqual(f.control.environment(), {});
+    assert.equal(f.control.snapshot().state, 'unavailable');
+    await assert.rejects(f.control.request({request_id:'test', path:'/somewhere'}), /unavailable/);
+    f.control.input('hello');
+    assert.deepEqual(f.inputs, ['hello']);
+  } finally { f.close(); }
+});
+
 test('late idle event cannot clear a newer partial input', () => {
   const f = fixture();
   try {

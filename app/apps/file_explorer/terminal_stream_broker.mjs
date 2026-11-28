@@ -22,7 +22,7 @@ let outputQueue = Promise.resolve();
 const control = new DirectoryControl(process.env.TERMINAL_STREAM_CONTROL_ROOT, sendFrame);
 const logPath = path.join(control.root, 'output.raw');
 const log = fs.openSync(logPath, 'wx', 0o600);
-const [file, ...args] = control.shell();
+const [file, ...args] = control.shell(JSON.parse(process.env.TERMINAL_STREAM_SHELL_CMD_JSON));
 const pty = nodePty.spawn(file, args, { name: 'xterm-256color', cols, rows,
   cwd: process.env.TERMINAL_STREAM_CWD || process.cwd(),
   env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...control.environment() } });
@@ -62,6 +62,8 @@ async function command(message) {
       outputOffset: offset, logPath, cols, rows, directoryTracking: control.snapshot() });
   } else if (message.type === 'ping') {
     await sendFrame({ type: 'pong', request_id: message.request_id });
+  } else if (message.type === 'directory.request' && control.state === 'unsupported') {
+    await sendFrame({type:'directory.result', request_id:message.request_id, state:'unavailable'});
   } else if (message.type === 'directory.request') await control.request(message);
   else if (message.type === 'directory.cancel') await control.cancel();
   else if (message.type === 'destroy') pty.kill();

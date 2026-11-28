@@ -189,7 +189,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     if (!directoryStatus) return;
     directoryStatus.textContent = value?.state === 'pending' ? 'Waiting for terminal directory change'
       : value?.state === 'error' ? 'Terminal directory change failed'
-      : value?.state === 'unavailable' ? 'Directory tracking needs a newly started terminal'
+      : value?.state === 'unavailable' ? 'Directory tracking unavailable for this terminal (requires a Bash session)'
       : value?.state === 'starting' ? 'Waiting for terminal directory tracking'
       : '';
   }

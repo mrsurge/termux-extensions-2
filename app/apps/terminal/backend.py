@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import re
 import shlex
-import shutil
+from app.libs.system_shell import system_shell_command
 import sys
 import time
 from typing import Literal, Protocol, Self, TypeAlias, cast
@@ -389,14 +389,7 @@ def _child_shell_path() -> str:
 
 
 def _default_shell_command() -> list[str]:
-    path = _child_shell_path()
-    preferred = os.environ.get("SHELL", "")
-    executable = shutil.which(preferred, path=path) if preferred else None
-    executable = executable or shutil.which("bash", path=path) or shutil.which("sh", path=path) or "sh"
-    name = os.path.basename(executable)
-    if name in {"bash", "zsh", "fish"}:
-        return [executable, "-l", "-i"]
-    return [executable, "-i"] if name in {"sh", "dash", "ash", "ksh"} else [executable]
+    return system_shell_command(_child_shell_path())
 
 
 def _coerce_shell_command(raw: str | Sequence[str] | None) -> list[str]:

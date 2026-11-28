@@ -3,6 +3,7 @@
 import os
 import hashlib
 import shlex
+from app.libs.system_shell import system_shell_command
 from pathlib import Path
 from typing import cast
 
@@ -82,7 +83,7 @@ async def create_editor_shell(
     
     Args:
         cwd: Working directory for the shell (defaults to current project or home)
-        shell_cmd: Custom shell command (defaults to bash -l -i)
+        shell_cmd: Custom shell command (defaults to the user's system shell)
     
     Returns:
         dict: Shell session info including ID
@@ -92,7 +93,7 @@ async def create_editor_shell(
 
     mgr = await get_manager()
     
-    shell_cmd_value: ShellCommand = shell_cmd if shell_cmd is not None else ['bash', '-l', '-i']
+    shell_cmd_value: ShellCommand = shell_cmd if shell_cmd is not None else system_shell_command()
     cwd_value = cwd or os.path.expanduser('~')
     
     label = _terminal_label(project_path, sequence=sequence)

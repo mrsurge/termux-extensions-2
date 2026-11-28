@@ -25,11 +25,19 @@ export class DirectoryControl {
     this.writeRequest('', 'cancel', '');
   }
 
-  shell() {
-    return ['bash', '--init-file', fileURLToPath(new URL('./shellspec/directory_control.bash', import.meta.url)), '-i'];
+  shell(argv) {
+    if (!Array.isArray(argv) || !argv.length || !argv.every(arg => typeof arg === 'string') || !argv[0]) {
+      throw new Error('Invalid File Explorer shell command');
+    }
+    if (path.basename(argv[0]) !== 'bash') {
+      this.state = 'unsupported';
+      return argv;
+    }
+    return [argv[0], '--init-file', fileURLToPath(new URL('./shellspec/directory_control.bash', import.meta.url)), '-i'];
   }
 
   environment() {
+    if (this.state === 'unsupported') return {};
     return { TERMINAL_DIRECTORY_ROOT: this.root, TERMINAL_DIRECTORY_NONCE: this.nonce };
   }
 
@@ -39,6 +47,7 @@ export class DirectoryControl {
   }
 
   observe(data) {
+    if (this.state === 'unsupported') return;
     const text = this.oscTail + data;
     const pattern = /\x1b\]777;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
     let match;
@@ -159,6 +168,7 @@ export class DirectoryControl {
   }
 
   input(data) {
+    if (this.state === 'unsupported') { this.pty.write(data); return; }
     if (this.pending?.wake) {
       const bytes = Buffer.byteLength(data);
       if (this.heldBytes + bytes > 65536) throw new Error('shell-control input queue full');

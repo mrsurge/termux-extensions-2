@@ -352,32 +352,28 @@ machinery before defining scope/defaults, persistence and per-terminal overrides
 Keep shell creation and durable configuration backend-owned. These are TE2
 terminal profiles, not VS Code extension-contributed terminal profiles.
 
-### Shell-execution run profiles and command-palette commands
+### Terminal and Play: .357 release cut
 
-Transferred user requirements from the deferred .356 section (2026-10-25):
+1. Standalone Terminal: allow a confirmed project's sidecar to select one of
+   the existing global profiles as its default. Fall back to global default,
+   then system shell. Never change projects implicitly or restart existing PTYs.
+2. New File Explorer and editor drawer sessions honor the system shell. Preserve
+   tab/project cwd. Bash-specific Explorer tracking is unavailable in other shells.
+3. One new Run Profiles type, **Run in editor terminal**: reuse Custom's applicable
+   configuration, file matching and save consent, but target the invoking client's
+   active editor terminal. Never write into a busy or unverified prompt or replay
+   later. Existing Custom, managed process lifecycle and Page Preview stay intact.
+4. Optional **Use custom shell** on this type only. Match the current project's
+   live editor sessions by shell launch executable and ordered argv, not display
+   name. Foreground an idle match, or launch and await readiness if none exists.
+   A busy match is not permission to interrupt, duplicate, or queue work.
+5. For the new runner, expand %f (invoking file) and %d (its directory) from the
+   Play request, not whatever has focus later. Preserve spaces and shell
+   metacharacters as literal argument data; test literal percent and cancellation.
 
-- Add a shell-execution run-profile type: execute the configured command in the
-  running editor terminal, or create/open one when necessary, reusing the same
-  execution/terminal ownership as built-in Python/Node/GCC runners. This is not
-  a new web-server/preview profile or another shell backend.
-- Preserve current-file substitutions `%` and `%<` (extensionless counterpart),
-  including `gcc % -o %< && ./%<`. Support additional arguments appended to the
-  command tail. Add explicit `.desktop`-style `%f` current-file support; audit
-  and agree any additional field-code subset rather than implying full desktop
-  entry compatibility. Define literal-percent escaping, argument/token handling,
-  shell versus argv semantics and quoting for spaces/Unicode/metacharacters;
-  do not interpret arbitrary file paths or placeholder contents as shell code.
-  Reuse existing runner substitutions, cwd/path and dispatch helpers.
-- Add a root command-palette option accepting a shell command for that same
-  editor-terminal path. Typing/preview must not execute; explicit acceptance
-  executes, cancellation does nothing.
-- Whenever a user action invokes the editor terminal (including these profiles,
-  palette commands and existing terminal-open actions), reveal it and transfer
-  keyboard focus after readiness. Exact-client ownership remains authoritative;
-  background state/restoration must not steal focus.
-- Preserve run/save/draft consent, disconnected/no-replay behavior, existing
-  terminal reuse and creation/readiness. Validate substitutions, trailing args,
-  explicit acceptance/cancel and desktop/mobile focus before live acceptance.
+**Deferred to [0.2.358](../release_0_2_358/PLAN.md):** the wider shared catalog,
+project-authored terminal profiles, command palette, and other unlisted
+terminal/profile enhancements. No new terminal service or PTY migration.
 
 ### Third-party second-root app package installation UX
 

@@ -51,6 +51,7 @@ def test_adapter_real_broker_idle_directory_and_checkpoint(tmp_path):
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ, 'HOME': str(tmp_path), 'TERMINAL_STREAM_CWD': str(tmp_path),
+                 'TERMINAL_STREAM_SHELL_CMD_JSON': '["bash"]',
                  'TERMINAL_STREAM_DIRECTORY_CONTROL': '1', 'TERMINAL_STREAM_CONTROL_ROOT': str(tmp_path)},
         )
         queue = asyncio.Queue()

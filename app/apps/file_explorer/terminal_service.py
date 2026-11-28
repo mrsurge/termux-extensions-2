@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from app.libs.system_shell import system_shell_command
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Protocol, cast
@@ -61,7 +63,7 @@ async def launch(manager: Manager, tab: TabRecord) -> dict[str, object]:
             ctx={'APP_ID': 'file_explorer', 'CWD': tab['path'], 'BROKER_ENTRY': str(terminal_root / 'terminal_stream_broker.mjs'),
                  'NODE_BIN': str(runtime.node_binary), 'NODE_PATH': runtime.executable_path,
                  'NODE_RUNTIME_ROOT': str(runtime.root), 'COLS': '80', 'ROWS': '24',
-                 'LAUNCH_ID': tab['id']},
+                 'LAUNCH_ID': tab['id'], 'SHELL_CMD_JSON': json.dumps(system_shell_command())},
             label=label(tab['id']), wait_ready=False,
             subgroups_overrides=['file_explorer', 'tab:' + tab['id']],
             env_overrides={'TERM': 'xterm-256color',

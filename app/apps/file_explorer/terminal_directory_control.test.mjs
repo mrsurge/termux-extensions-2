@@ -20,7 +20,7 @@ test('opt-in broker coordinates idle cd, partial input and busy builtins without
   const child = spawn(process.execPath, ['terminal_stream_broker.mjs'], {
     cwd: process.cwd(),
     env: { ...process.env, HOME: root, TERMINAL_STREAM_CWD: root,
-      TERMINAL_STREAM_DIRECTORY_CONTROL: '1', TERMINAL_STREAM_CONTROL_ROOT: root },
+      TERMINAL_STREAM_SHELL_CMD_JSON: '["bash"]', TERMINAL_STREAM_DIRECTORY_CONTROL: '1', TERMINAL_STREAM_CONTROL_ROOT: root },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const decoder = new PipeFrameDecoder();
@@ -181,7 +181,7 @@ for (const starship of [false, true]) {
       fs.writeFileSync(config, "format = '$directory$character'\nadd_newline = false\n[directory]\ntruncation_length = 0\ntruncate_to_repo = false\n");
       const child = spawn(process.execPath, ['terminal_stream_broker.mjs'], {
         env: { ...process.env, HOME: root, STARSHIP_CONFIG: config, TERMINAL_STREAM_CWD: root,
-          TERMINAL_STREAM_DIRECTORY_CONTROL: '1', TERMINAL_STREAM_CONTROL_ROOT: root },
+          TERMINAL_STREAM_SHELL_CMD_JSON: '["bash"]', TERMINAL_STREAM_DIRECTORY_CONTROL: '1', TERMINAL_STREAM_CONTROL_ROOT: root },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       const decoder = new PipeFrameDecoder();

@@ -828,12 +828,19 @@ deferred shell-execution section is carried from .356, not the entire old plan.
   inheritance issue and test real shell/Python/PATH identity on Termux/Linux.
   Keep the terminal worker in TE2’s venv; the interactive shell it spawns should
   use the user’s login environment unless the user explicitly activates a venv.
-- [ ] Audit and approve terminal profile modal schema, persistence/defaults and
-  backend-owned application across supported terminal surfaces; implement/test.
-- [ ] Audit current run-profile substitution/dispatch, define supported field
-  codes/quoting and implement approved shell profile plus palette command entry.
-- [ ] Validate terminal reuse/create/readiness, trailing args, acceptance/cancel,
-  run/save/draft guards and exact-client terminal focus on desktop/mobile.
+- [x] Standalone global Terminal Profiles shipped on the development branch:
+  single Command, literal environment overrides, global default and picker;
+  live accepted through `e3bbf1c9`. No cross-surface sharing implied.
+- [ ] Standalone Terminal project-default reference to an existing profile; verify
+  missing/disabled/no-project fallback and stale-project rejection.
+- [ ] System-shell selection in File Explorer and editor drawer: implementation
+  in first slice; live Linux/Termux acceptance pending.
+- [ ] One Custom-like Play type targeting an idle editor terminal, preserving
+  consent, focus, existing managed runners and no replay.
+- [ ] Optional custom shell: project-scoped executable + argv match, foreground
+  idle match or create and await readiness; refuse busy matches.
+- [ ] Implement and test literal-path %f / %d substitutions on Play.
+- [→] Broader sharing and palette scope moved to the .358 plan.
 - [ ] Audit existing package/archive/picker/launcher integration; approve the
   install UX and package-validation/atomic-install/registry-refresh contract.
 - [ ] Implement user-consented file/ZIP app installation and open flow; test

@@ -13,6 +13,7 @@ shells:
       TERM: xterm-256color
       PATH: ${ctx:NODE_PATH}
       TERMINAL_STREAM_CWD: ${ctx:CWD}
+      TERMINAL_STREAM_SHELL_CMD_JSON: ${ctx:SHELL_CMD_JSON}
       TERMINAL_STREAM_COLS: ${ctx:COLS}
       TERMINAL_STREAM_ROWS: ${ctx:ROWS}
       TERMINAL_STREAM_PROTOCOL: msgpack-v1

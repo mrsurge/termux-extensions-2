@@ -128,7 +128,9 @@ change. Only an explicit navigation to a different directory does so while locke
 Unlock cancels any unconsumed request and leaves CWD alone; re-lock only arms
 future navigation. A shell action already consumed before unlock cannot be undone.
 
-New terminals use this app's `shellspec/directory_control.bash` init file.
+New terminals honor the user's system shell. Only Bash uses this app's
+`shellspec/directory_control.bash` init file. Other shells still open in the
+tab directory, but do not automatically follow subsequent navigation.
 It sources /etc/profile and the first readable normal login profile, then chains
 the user's scalar/array PROMPT_COMMAND while preserving command exit status.
 This follows Code Server's approach: login profiles run, but Bash's actual
