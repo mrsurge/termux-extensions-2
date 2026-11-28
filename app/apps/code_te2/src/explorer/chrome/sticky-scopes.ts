@@ -672,20 +672,13 @@ export function createExplorerStickyScopes({
 
     // Match the source node's horizontal geometry (indent + width) so
     // sticky rows line up with their real DOM counterparts.
-    const bodyRect = drawerBodyEl.getBoundingClientRect();
+    const bodyRect = container!.getBoundingClientRect();
     const srcRect = srcLi.getBoundingClientRect();
     if (isElementVisibleRect(bodyRect) && isElementVisibleRect(srcRect)) {
       const left = srcRect.left - bodyRect.left;
       const right = bodyRect.right - srcRect.right;
-      let leftPx = Math.max(0, left);
-      let rightPx = Math.max(0, right);
-      // Deeply indented scopes can accumulate a 1px rounding drift vs the
-      // underlying tree cards. Nudge slot+underlay left for slot 5+ so the
-      // underlay properly masks the scrolling content behind rounded corners.
-      if (depth >= 4) {
-        leftPx = Math.max(0, leftPx - 0.5);
-        rightPx = Math.max(0, rightPx - 0.4);
-      }
+      const leftPx = Math.max(0, left);
+      const rightPx = Math.max(0, right);
       slotEl.style.left = `${leftPx}px`;
       slotEl.style.right = `${rightPx}px`;
       underlayEl.style.left = `${leftPx}px`;
@@ -812,6 +805,7 @@ export function createExplorerStickyScopes({
 
     let cumulativePush = 0;
     let bottomTranslateY = 0;
+    let shadowDepth = 0;
     for (let depth = 0; depth < stickySourceGroups.length; depth++) {
       const underlayEl = stickyUnderlays[depth];
       const slotEl = stickySlots[depth];
@@ -819,7 +813,6 @@ export function createExplorerStickyScopes({
       if (!slotEl || !srcLi || !underlayEl) continue;
 
       const isBottomSlot = depth === stickySourceGroups.length - 1;
-      slotEl.classList.toggle('fe-sticky-scope-slot-bottom', isBottomSlot);
       // Slight overlap to hide 1px seams between the docked overlay and the
       // scrolling tree border outline.
       slotEl.style.height = `${rowStepPx + (isBottomSlot ? 1 : 0)}px`;
@@ -844,6 +837,7 @@ export function createExplorerStickyScopes({
       }
 
       const translateY = cumulativePush + push;
+      if (translateY === 0) shadowDepth = depth;
       slotEl.style.transform = `translateY(${translateY}px)`;
       if (depth === stickySourceGroups.length - 1) {
         bottomTranslateY = translateY;
@@ -862,6 +856,9 @@ export function createExplorerStickyScopes({
 
       cumulativePush += push;
     }
+    stickySlots.forEach((slot, depth) =>
+      slot.classList.toggle('fe-sticky-scope-slot-bottom', depth === shadowDepth),
+    );
 
     // Keep the focus probe aligned with the *visual* bottom of the sticky stack,
     // otherwise the chain can oscillate during push-up transitions (flicker).

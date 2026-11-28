@@ -502,12 +502,16 @@ test('compressed sticky scope renders canonical clickable path segments', async 
     drawerBodyEl: drawer,
     openCardMenuForEntry: (entry) => openedMenuEntries.push(entry),
   });
+  drawer.querySelector('#fe-sticky-scopes').getBoundingClientRect =
+    () => rect(0, 50, 1.25, 319.5);
   sticky.update();
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
 
   const slots = drawer.querySelectorAll('.fe-sticky-scope-slot');
   assert.equal(slots.length, 1);
+  assert.equal(slots[0].style.left, '6.75px');
+  assert.equal(slots[0].style.right, '12.75px');
   assert.deepEqual(
     [...slots[0].querySelectorAll('.fe-sticky-scope-segment')].map(
       (segment) => segment.textContent,
