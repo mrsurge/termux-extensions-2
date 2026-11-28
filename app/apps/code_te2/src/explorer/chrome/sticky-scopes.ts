@@ -812,13 +812,6 @@ export function createExplorerStickyScopes({
       const srcLi = stickySourceGroups[depth]?.[0];
       if (!slotEl || !srcLi || !underlayEl) continue;
 
-      const isBottomSlot = depth === stickySourceGroups.length - 1;
-      // Slight overlap to hide 1px seams between the docked overlay and the
-      // scrolling tree border outline.
-      slotEl.style.height = `${rowStepPx + (isBottomSlot ? 1 : 0)}px`;
-      const rowEl = stickyRows[depth];
-      if (rowEl) rowEl.style.height = isBottomSlot ? '100%' : '';
-
       let push = 0;
       const scopeRect = srcLi.getBoundingClientRect();
       if (isElementVisibleRect(scopeRect)) {

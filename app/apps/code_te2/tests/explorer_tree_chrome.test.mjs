@@ -512,6 +512,8 @@ test('compressed sticky scope renders canonical clickable path segments', async 
   assert.equal(slots.length, 1);
   assert.equal(slots[0].style.left, '6.75px');
   assert.equal(slots[0].style.right, '12.75px');
+  assert.equal(slots[0].style.height, '40px');
+  assert.equal(slots[0].firstElementChild.style.height, '');
   assert.deepEqual(
     [...slots[0].querySelectorAll('.fe-sticky-scope-segment')].map(
       (segment) => segment.textContent,
